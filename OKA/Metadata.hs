@@ -1,0 +1,338 @@
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DeriveAnyClass             #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE DerivingVia                #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImportQualifiedPost        #-}
+{-# LANGUAGE KindSignatures             #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiWayIf                 #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE PatternSynonyms            #-}
+{-# LANGUAGE PolyKinds                  #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE UndecidableInstances       #-}
+{-# LANGUAGE ViewPatterns               #-}
+-- |
+module OKA.Metadata
+  ( -- * Metadata
+    Metadata(..)
+  , FromMeta(..)
+  , readMetadata
+  , fromMeta
+  , metaAt
+    -- ** Writing instances
+  , AsAeson(..)
+  , metaSExp1
+  , metaSExp1With
+  , metaSExp2
+  , metaSExp2With
+  , metaSExp3
+  , metaSExp3With
+  , metaObjectAt
+  , metaObject
+    -- ** Exhaustive parser
+  , ObjParser
+  , runObjParser
+  , metaField
+  , metaFieldM
+  ) where
+
+import Control.Exception
+import Control.Lens
+import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Trans.State.Strict
+import Control.Monad.Trans.Class
+
+import Data.Aeson             (Value(..),(.:))
+import Data.Aeson             qualified as JSON
+import Data.Aeson.Types       qualified as JSON
+import Data.Histogram.Bin
+import Data.Yaml              qualified as Yaml
+import Data.Int
+import Data.Functor.Compose
+import Data.Typeable
+import Data.Word
+import Data.Coerce
+import Data.Text                          (Text)
+import Data.Text              qualified as T
+import Data.HashMap.Strict    qualified as HM
+import Data.Vector            qualified as V
+import Data.Vector.Unboxed    qualified as VU
+
+
+
+----------------------------------------------------------------
+--
+----------------------------------------------------------------
+
+-- | Metadata for analysis. It contains cut parameters, constants,
+--   etc. Here we represent it as values that could be stored as
+--   JSON(YAML)
+newtype Metadata = Metadata JSON.Value
+  deriving stock   (Show, Eq)
+  deriving newtype (JSON.FromJSON, JSON.ToJSON)
+
+instance Semigroup Metadata where
+  m1 <> m2 = case mergeMetadata m1 m2 of
+    Left  e -> throw e
+    Right m -> m
+
+
+----------------------------------------------------------------
+-- Merging of metadata
+----------------------------------------------------------------
+
+-- | Error during merge of metadata
+data MergeError = MergeError [MetaKey] JSON.Value JSON.Value
+  deriving stock    (Show)
+  deriving anyclass (Exception)
+
+-- | Path in the metadata tree
+data MetaKey = KeyTxt !Text
+             | KeyIdx !Int
+             deriving stock (Show)
+
+-- | Add layer of metadata to existing set.
+mergeMetadata
+  :: Metadata  -- ^ Old metadata
+  -> Metadata  -- ^ New layer
+  -> Either MergeError Metadata
+mergeMetadata (Metadata m1) (Metadata m2) = Metadata <$> go [] m1 m2
+  where
+    -- We merge dictionaries and merge matching keys simultaneously
+    go path (JSON.Object o1) (JSON.Object o2)
+      = fmap JSON.Object
+      $ sequence
+      $ HM.unionWithKey (\k ma mb -> do a <- ma
+                                        b <- mb
+                                        go (KeyTxt k:path) a b
+                        ) (Right <$> o1) (Right <$> o2)
+    -- FIXME: Is semantics for arrays reasonable???
+    go path (JSON.Array v1)  (JSON.Array v2)
+      = fmap JSON.Array
+      $ sequence
+      $ V.izipWith (\i -> go (KeyIdx i:path)) v1 v2
+    -- Numbers/strings/bools are replaced
+    go _    JSON.Number{} x@JSON.Number{} = Right x
+    go _    JSON.String{} x@JSON.String{} = Right x
+    go _    JSON.Bool{}   x@JSON.Bool{}   = Right x
+    -- NULL replaces everything
+    go _    _             JSON.Null       = Right JSON.Null
+    go _    JSON.Null     x               = Right x
+    -- Error case
+    go path a b = Left $ MergeError path a b
+
+
+----------------------------------------------------------------
+-- Reading from metadata
+----------------------------------------------------------------
+
+-- | Type class for decoding values from metadata, it's very similar
+--   to 'FromJSON' type class but here we define another one n order
+--   to be able to define conflicting instances
+class FromMeta a where
+  parseMeta :: JSON.Value -> JSON.Parser a
+
+-- | Read metadata from file
+readMetadata :: MonadIO m => FilePath -> m Metadata
+readMetadata path = liftIO $ do
+  Yaml.decodeFileEither path >>= \case
+    Left  e -> throwIO e
+    Right a -> pure (Metadata a)
+
+-- | Convert value from metadata. Throws error if conversion fails
+fromMeta :: FromMeta a => Metadata -> a
+fromMeta (Metadata m) = case JSON.parse parseMeta m of
+  JSON.Success a -> a
+  JSON.Error   e -> error $ "FromMeta: cannot convert:\n" ++ e
+
+-- | Lookup value from 
+metaAt :: FromMeta a => Metadata -> [Text] -> a -> a
+metaAt (Metadata meta) path a0 = go meta path
+  where
+    go m [] = fromMeta (Metadata m)
+    go (Object o) (p:ps) = case o ^. at p of
+      Just m  -> go m ps
+      Nothing -> a0
+    go _ _ = error "Encountered non-object"
+
+-- | Newtype for deriving FromMeta instances from FromJSON instances
+newtype AsAeson a = AsAeson a
+
+instance JSON.FromJSON a => FromMeta (AsAeson a) where
+  parseMeta = coerce (JSON.parseJSON @a)
+
+type JParser a = JSON.Value -> JSON.Parser a
+
+metaSExp1 :: (Typeable r, FromMeta a)
+          => Text -> (a -> r) -> JParser r
+metaSExp1 con f = metaSExp1With con f parseMeta
+
+metaSExp2 :: (Typeable r, FromMeta a, FromMeta b)
+          => Text -> (a -> b -> r) -> JParser r
+metaSExp2 con f = metaSExp2With con f parseMeta parseMeta
+
+metaSExp3 :: (Typeable r, FromMeta a, FromMeta b, FromMeta c)
+          => Text -> (a -> b -> c -> r) -> JParser r
+metaSExp3 con f = metaSExp3With con f parseMeta parseMeta parseMeta
+
+metaSExp1With
+  :: forall a r. Typeable r
+  => Text -> (a -> r)
+  -> JParser a -> JParser r
+metaSExp1With con mk pA val
+  = JSON.prependFailure (" - sexp " ++ T.unpack con ++ " for " ++ (show (typeOf (undefined :: r))) ++ "\n")
+  $ case val of
+      Array arr -> case V.toList arr of
+        [String c, vA]
+          | c == con -> mk <$> pA vA
+        _            -> fail "Cannot parse sexp"
+      o -> fail $ "Expected array but got " ++ conName o
+
+metaSExp2With
+  :: forall a b r. Typeable r
+  => Text -> (a -> b -> r)
+  -> JParser a -> JParser b -> JParser r
+metaSExp2With con mk pA pB val
+  = JSON.prependFailure (" - sexp " ++ T.unpack con ++ " for " ++ (show (typeOf (undefined :: r))) ++ "\n")
+  $ case val of
+      Array arr -> case V.toList arr of
+        [String c, vA, vB]
+          | c == con -> mk <$> pA vA <*> pB vB
+        _            -> fail "Cannot parse sexp"
+      o -> fail $ "Expected array but got " ++ conName o
+
+metaSExp3With
+  :: forall a b c r. (Typeable r)
+  => Text -> (a -> b -> c -> r)
+  -> JParser a -> JParser b -> JParser c -> JParser r
+metaSExp3With con mk pA pB pC val
+  = JSON.prependFailure (" - sexp " ++ T.unpack con ++ " for " ++ (show (typeOf (undefined :: r))) ++ "\n")
+  $ case val of
+      Array arr -> case V.toList arr of
+        [String c, vA, vB, vC]
+          | c == con -> mk <$> pA vA <*> pB vB <*> pC vC
+        _            -> fail "Cannot parse sexp"
+      o -> fail $ "Expected array but got " ++ conName o
+
+-- | Parse object at given position inside JSON tree.
+metaObjectAt
+  :: forall a. Typeable a
+  => [Text]      -- ^ Path to entry
+  -> ObjParser a -- ^ Parser for an object
+  -> JParser a
+metaObjectAt path parser v0
+  = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
+  $ go path v0
+  where
+    go []     (Object o) = runObjParser parser o
+    go (k:ks) (Object o) = JSON.prependFailure (" - key: " ++ T.unpack k ++ "\n")
+                         $ go ks =<< (o .: k)
+    go _      o          = fail $ "Expected object but got " ++ conName o
+
+metaObject
+  :: forall a. Typeable a
+  => ObjParser a -> JParser a
+metaObject parser
+  = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
+  . \case
+       Object o -> runObjParser parser o
+       o        -> fail $ "Expected object but got " ++ conName o
+
+
+conName :: JSON.Value -> String
+conName = \case
+  Object{} -> "object"
+  Array{}  -> "array"
+  Number{} -> "number"
+  String{} -> "string"
+  Bool{}   -> "boolean"
+  Null     -> "null"
+
+----------------------------------------------------------------
+-- Exhaustive parser
+----------------------------------------------------------------
+
+-- | Parser for exhaustive matching of an object. Each key could only
+--   be parsed once.
+newtype ObjParser a = ObjParser (StateT (HM.HashMap Text JSON.Value) JSON.Parser a)
+  deriving newtype (Functor, Applicative, Monad, MonadFail)
+
+-- | Run object parser on given object
+runObjParser :: ObjParser a -> JSON.Object -> JSON.Parser a
+runObjParser (ObjParser m) o = do
+  (a, o') <- runStateT m o
+  unless (null o') $ fail $ unlines
+    $ "Unknown keys:" : [ " - " ++ T.unpack k | k <- HM.keys o']
+  pure a
+
+-- | Lookup mandatory field in the object
+metaField :: FromMeta a => Text -> ObjParser a
+metaField k = ObjParser $ do
+  (v, o) <- popFromMap k =<< get
+  put o
+  lift $ JSON.prependFailure (" - key: " ++ T.unpack k ++ "\n")
+       $ parseMeta v
+
+-- | Lookup optional field in the object
+metaFieldM :: FromMeta a => Text -> ObjParser (Maybe a)
+metaFieldM k = ObjParser $ do
+  (v, o) <- popFromMapM k =<< get
+  put o  
+  lift $ traverse parseMeta v
+
+popFromMap :: MonadFail m => Text -> JSON.Object -> m (JSON.Value, JSON.Object)
+popFromMap k o = getCompose $ HM.alterF go k o
+  where
+    go Nothing  = Compose $ fail $ "No such key: " ++ T.unpack k
+    go (Just v) = Compose $ pure (v, Nothing)
+
+ 
+popFromMapM :: MonadFail m => Text -> JSON.Object -> m (Maybe JSON.Value, JSON.Object)
+popFromMapM k o = getCompose $ HM.alterF go k o
+  where
+    go Nothing  = Compose $ pure (Nothing, Nothing)
+    go (Just v) = Compose $ pure (Just v,  Nothing)
+
+
+
+----------------------------------------------------------------
+-- Instances
+----------------------------------------------------------------
+
+deriving via AsAeson Bool   instance FromMeta Bool
+deriving via AsAeson Float  instance FromMeta Float
+deriving via AsAeson Double instance FromMeta Double
+deriving via AsAeson Int8   instance FromMeta Int8
+deriving via AsAeson Int16  instance FromMeta Int16
+deriving via AsAeson Int32  instance FromMeta Int32
+deriving via AsAeson Int64  instance FromMeta Int64
+deriving via AsAeson Int    instance FromMeta Int
+deriving via AsAeson Word8  instance FromMeta Word8
+deriving via AsAeson Word16 instance FromMeta Word16
+deriving via AsAeson Word32 instance FromMeta Word32
+deriving via AsAeson Word64 instance FromMeta Word64
+deriving via AsAeson Word   instance FromMeta Word
+
+instance (FromMeta a, FromMeta b) => FromMeta (a,b) where
+  parseMeta = JSON.withArray "(a, b)" $ \arr -> case V.length arr of
+    2 ->  (,) <$> parseMeta (V.unsafeIndex arr 0)
+              <*> parseMeta (V.unsafeIndex arr 1)
+    n -> fail $ "Expecting 2-element array, got " ++ show n
+
+instance (FromMeta a) => FromMeta (V.Vector a) where
+  parseMeta = JSON.prependFailure " - traversing Array\n"
+            . JSON.withArray "Vector" (traverse parseMeta)
+instance (FromMeta a, VU.Unbox a) => FromMeta (VU.Vector a) where
+  parseMeta = JSON.prependFailure " - traversing Array\n"
+            . JSON.withArray "Vector" (fmap VU.convert . traverse parseMeta)
+
+
+instance FromMeta BinD where
+  parseMeta = metaSExp3 "BinD" binD
