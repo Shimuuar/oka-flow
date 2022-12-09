@@ -1,0 +1,21 @@
+Cabal-Version:  2.2
+Name:           oka-flow
+Version:        0.1
+Synopsis:       Simple dataflow programming framework
+Description:
+  This is attempt to create simple dataflow framework for use in data
+  analysis. It should be simple to use 
+
+License:        BSD-3-Clause
+License-File:   LICENSE
+Author:         Aleksey Khudyakov <alexey.skladnoy@gmail.com>
+Maintainer:     Aleksey Khudyakov <alexey.skladnoy@gmail.com>
+Build-Type:     Simple
+
+Library
+  Ghc-options:      -Wall -O2
+  Default-Language: Haskell2010
+  --
+  Build-Depends:    base          >=4.12 && <5
+  Exposed-modules:
+        OKA.Flow
