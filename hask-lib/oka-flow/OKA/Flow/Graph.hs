@@ -1,39 +1,71 @@
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE DerivingStrategies  #-}
 {-# LANGUAGE ImportQualifiedPost #-}
-module OKA.Flow.Graph where
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE RecordWildCards     #-}
+-- |
+-- Implementation of dataflow graph.
+module OKA.Flow.Graph
+  ( FunID(..)
+  , Action(..)
+  , Workflow(..)
+  , isPhony
+  , Fun(..)
+  , FlowGraph(..)
+  , flowTgtL
+  , flowGraphL
+    -- * Storage
+  , Hash(..)
+  , StorePath(..)
+  , FIDSet(..)
+  , hashFlowGraph
+  , shakeFlowGraph
+    -- * Execution of workflow
+  , executeWorkflow
+  ) where
 
 import Control.Applicative
+import Control.Concurrent.Async
+import Control.Exception
 import Control.Lens
 import Control.Monad
-import Control.Exception
-import Data.Foldable
-import System.FilePath ((</>))
-import Data.Map.Strict qualified as Map
-import Data.Map.Strict   (Map, (!))
-import Data.Set        qualified as Set
-import Data.Set          (Set)
 import Control.Monad.STM
-import Control.Concurrent.Async
-import OKA.Metadata
+import Crypto.Hash.SHA1             qualified as SHA1
+import Data.Aeson                   qualified as JSON
+import Data.Aeson.Encoding          qualified as JSONB
+import Data.Aeson.Encoding.Internal qualified as JSONB
+import Data.ByteString              (ByteString)
+import Data.ByteString.Lazy         qualified as BL
+import Data.ByteString.Base16       qualified as Base16
+import Data.ByteString.Builder      qualified as BB
+import Data.ByteString.Char8        qualified as BC8
+import Data.Foldable
+import Data.HashMap.Strict          qualified as HM
+import Data.List                    (sortOn)
+import Data.Map.Strict              (Map, (!))
+import Data.Map.Strict              qualified as Map
+import Data.Set                     (Set)
+import Data.Set                     qualified as Set
+import Data.Vector                  qualified as V
+import System.FilePath              ((</>))
 
-type Meta = Metadata
+import OKA.Metadata
 
 
 ----------------------------------------------------------------
 -- Data types
 ----------------------------------------------------------------
 
--- | Internal identifier of dataflow function in complete dataflow
---   graph.
+-- | Internal identifier of dataflow function in a graph.
 newtype FunID = FunID Int
   deriving (Show,Eq,Ord)
 
+-- | Single action to be performed.
 data Action res
-  = ActNormal (res -> STM (Meta -> [FilePath] -> FilePath -> IO ()))
-  | ActPhony  (res -> STM (Meta -> [FilePath] -> IO ()))
+  = ActNormal (res -> STM (Metadata -> [FilePath] -> FilePath -> IO ()))
+    -- ^ Action which produces output
+  | ActPhony  (res -> STM (Metadata -> [FilePath] -> IO ()))
+    -- ^ Action which doesn't produce any outputs
   
 
 -- | Descritpion of workflow function. It knows how to build 
@@ -56,11 +88,12 @@ data Fun res a = Fun
   { funWorkflow :: Workflow res
     -- ^ Execute workflow. It takes resource handle as parameter and
     --   tries to acquire resources and return actual function to run.
-  , funMetadata :: Meta
+  , funMetadata :: Metadata
     -- ^ Metadata that should be supplied to the workflow
   , funParam    :: [a]
-    -- ^ Parameters to workflow. They're resolved to
+    -- ^ Parameters to workflow.
   , funOutput   :: a
+    -- ^ Output of workflow
   }
   deriving stock (Functor)
 
@@ -82,48 +115,79 @@ flowGraphL = lens flowGraph (\x s -> x {flowGraph = s})
 -- Execution of the workflow
 ----------------------------------------------------------------
 
-newtype Hash = Hash String
+newtype Hash = Hash ByteString
 
 data StorePath = StorePath String Hash
 
 storePath :: StorePath -> FilePath
-storePath (StorePath nm (Hash hash)) = nm ++ "-" ++ hash
+storePath (StorePath nm (Hash hash)) = nm ++ "-" ++ BC8.unpack (Base16.encode hash)
 
-hashMeta :: Meta -> Hash
-hashMeta = undefined
+-- | Compute hash of metadata
+hashMeta :: Metadata -> Hash
+hashMeta (Metadata json)
+  = Hash
+  $ SHA1.hashlazy
+  $ JSONB.encodingToLazyByteString
+  $ encodeToBuilder json
+
+encodeToBuilder :: JSON.Value -> JSONB.Encoding
+encodeToBuilder JSON.Null       = JSONB.null_
+encodeToBuilder (JSON.Bool b)   = JSONB.bool b
+encodeToBuilder (JSON.Number n) = JSONB.scientific n
+encodeToBuilder (JSON.String s) = JSONB.text s
+encodeToBuilder (JSON.Array v)  = jsArray v
+encodeToBuilder (JSON.Object m) = JSONB.dict JSONB.text encodeToBuilder
+  (\step z m0 -> foldr (\(k,v) a -> step k v a) z $ sortOn fst $ HM.toList m0)
+  m
+
+jsArray :: V.Vector JSON.Value -> JSONB.Encoding
+jsArray v
+  | V.null v  = JSONB.emptyArray_
+  | otherwise = JSONB.wrapArray
+              $  encodeToBuilder (V.unsafeHead v)
+             <.> V.foldr withComma (JSONB.Encoding mempty) (V.unsafeTail v)
+  where
+    withComma a z = JSONB.comma <.> encodeToBuilder a <.> z
+    JSONB.Encoding e1 <.> JSONB.Encoding e2 = JSONB.Encoding (e1 <> e2)
+
 
 hashFun :: Fun res (FunID, StorePath) -> StorePath
-hashFun f = undefined
+hashFun Fun{..} = StorePath (workflowName funWorkflow) (Hash hash)
+  where
+    hash   = SHA1.hashlazy $ BL.fromChunks [h | Hash h <- hashes]
+    hashes = hashMeta funMetadata
+           : [ h | (_, StorePath _ h) <- funParam]
 
 
-
+-- | Resolve all dependencies in graph. Graph must be acyclic or
+--   function will hang.
 hashFlowGraph
   :: Map FunID (Fun res FunID)
   -> Map FunID (Fun res (FunID, StorePath))
 hashFlowGraph m = r where
-  r = fmap convertFun m
+  r = convertFun <$> m
   convertFun f = f' where
     f' = f { funOutput = ( funOutput f, hashFun f')
            , funParam  = [ (i, snd $ funOutput $ r ! i) | i <- funParam f ]
            }
 
--- | Remove all 
-shakeGraph
+-- | Remove all workflows that already completed execution.
+shakeFlowGraph
   :: (Monad m)
   => (StorePath -> m Bool)                  -- ^ Predicate to check whether
   -> Set FunID                              -- ^ Set of targets
   -> Map FunID (Fun res (FunID, StorePath)) -- ^ Workflow graph
   -> m FIDSet
-shakeGraph tgtExists targets workflows
+shakeFlowGraph tgtExists targets workflows
   = foldM addFID (FIDSet mempty mempty) targets
   where
     addFID fids@FIDSet{..} fid
       -- We already wisited these workflows
       | fid `Set.member` fidExists = pure fids
       | fid `Set.member` fidWanted = pure fids
-      -- Workflow does not have target. We will have to execute it.
+      -- Phony targets are always executed
       | isPhony (funWorkflow f)    = pure fids'
-      -- Check if resul has been cached already
+      -- Check if result has been computed already
       | otherwise = tgtExists (snd (funOutput f)) >>= \case
           True  -> pure $ fids & fidExistsL %~ Set.insert fid
           False -> foldM addFID fids' (fst <$> funParam f)
@@ -155,21 +219,26 @@ executeWorkflow
 executeWorkflow root res workflows FIDSet{..} = go [] (toList fidWanted) where
   go []     []    = pure ()
   go asyncs tasks = do
-    res <- atomically $ asum
-      [ CmdRunTask <$> pickSTM useFun tasks
+    r <- atomically $ asum
+      [ CmdRunTask <$> pickSTM useFun       tasks
+      , finiAsyncs <$> pickSTM waitCatchSTM asyncs
       ]
-    case res of
+    case r of
       CmdRunTask  (tasks',  io)      -> withAsync io $ \a -> go (a:asyncs) tasks'
       CmdTaskDone (asyncs', Nothing) -> go asyncs' tasks
       CmdTaskDone (_      , Just e)  -> throwIO e
       CmdNothingToDo                 -> error "Deadlock"
   --
+  finiAsyncs (asyncs', err) = CmdTaskDone (asyncs', do Left e <- Just err
+                                                       Just e
+                                          )
+  --
   useFun fid = case workflowRun $ funWorkflow fun of
-    ActNormal run -> (\fun -> fun meta param out) <$> run res
-    ActPhony  run -> (\fun -> fun meta param)     <$> run res
+    ActNormal run -> (\f -> f meta param out) <$> run res
+    ActPhony  run -> (\f -> f meta param)     <$> run res
     where
-      fun = workflows ! fid
-      meta = funMetadata fun
+      fun   = workflows ! fid
+      meta  = funMetadata fun
       param = [root </> storePath path | (_,path) <- funParam fun]
       out   = root </> storePath (snd (funOutput fun))
 
@@ -180,7 +249,7 @@ data Cmd
 
 pickSTM :: (a -> STM b) -> [a] -> STM ([a], b)
 pickSTM fun = go id where
-  go asF []     = retry
+  go _   []     = retry
   go asF (a:as) =  do b <- fun a
                       pure (asF as, b)
                <|> go (asF . (a:)) as

@@ -1,8 +1,22 @@
-{-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DerivingVia                #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE ImportQualifiedPost        #-}
+{-# LANGUAGE RankNTypes                 #-}
+-- |
+-- Simple framework for dataflow programming for data
+-- analysis. Primary target is OKA experiment.
+--
+-- It uses two-stage evaluation. There's computation with metadata and
+-- building of dependency graph that's assumed to be fast and
+-- execution of dataflow stages which are long lasting and produce
+-- their results as data in file system. This is needed for caching.
+--
+-- Spawning workers as separate processes is needed in order to solve
+-- following problems: 1) we need to mix code written in different
+-- languages 2) do something about long compile times of haskell
+-- programs. Latter is solved by having many small programs instead
+-- one large one. This way we can recompile only few modules at time.
 module OKA.Flow
   ( -- * Primitives
     Workflow(..)
@@ -23,6 +37,7 @@ import Data.Map.Strict    qualified as Map
 import Data.Set    (Set)
 import Data.Set    qualified as Set
 
+import OKA.Metadata
 import OKA.Flow.Graph
 
 
@@ -31,7 +46,7 @@ import OKA.Flow.Graph
 ----------------------------------------------------------------
 
 -- | Flow monad which we use to build workflow
-newtype Flow res eff a = Flow (ReaderT Meta (StateT (FlowGraph res) (Program eff)) a)
+newtype Flow res eff a = Flow (ReaderT Metadata (StateT (FlowGraph res) (Program eff)) a)
   deriving newtype (Functor, Applicative, Monad)
 
 -- | We want given workflow evaluated
