@@ -35,3 +35,20 @@ Library
                   , unordered-containers >=0.2
   Exposed-modules:
         OKA.Flow
+        OKA.Flow.Graph
+        OKA.Flow.Run
+
+
+Test-suite oka-flow-tests
+  type:             exitcode-stdio-1.0
+  Default-Language: Haskell2010
+  ghc-options:      -Wall
+  Build-Depends:    base
+                  , oka-flow
+                    --
+                  , tasty
+                  , tasty-quickcheck
+                  , tasty-hunit
+  hs-source-dirs: tests
+  main-is:        Main.hs
+  other-modules:  TM.Flow
