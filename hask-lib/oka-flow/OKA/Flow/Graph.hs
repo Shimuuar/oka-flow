@@ -17,11 +17,10 @@ module OKA.Flow.Graph
     -- * Storage
   , Hash(..)
   , StorePath(..)
+  , storePath
   , FIDSet(..)
   , hashFlowGraph
   , shakeFlowGraph
-    -- * Execution of workflow
-  , executeWorkflow
   ) where
 
 import Control.Applicative
@@ -204,52 +203,3 @@ data FIDSet = FIDSet
 fidExistsL, fidWantedL :: Lens' FIDSet (Set FunID)
 fidExistsL = lens fidExists (\f x -> f {fidExists = x})
 fidWantedL = lens fidWanted (\f x -> f {fidWanted = x})
-
-
-----------------------------------------------------------------
--- Execution
-----------------------------------------------------------------
-
-executeWorkflow
-  :: FilePath
-  -> res
-  -> Map FunID (Fun res (FunID, StorePath))
-  -> FIDSet
-  -> IO ()
-executeWorkflow root res workflows FIDSet{..} = go [] (toList fidWanted) where
-  go []     []    = pure ()
-  go asyncs tasks = do
-    r <- atomically $ asum
-      [ CmdRunTask <$> pickSTM useFun       tasks
-      , finiAsyncs <$> pickSTM waitCatchSTM asyncs
-      ]
-    case r of
-      CmdRunTask  (tasks',  io)      -> withAsync io $ \a -> go (a:asyncs) tasks'
-      CmdTaskDone (asyncs', Nothing) -> go asyncs' tasks
-      CmdTaskDone (_      , Just e)  -> throwIO e
-      CmdNothingToDo                 -> error "Deadlock"
-  --
-  finiAsyncs (asyncs', err) = CmdTaskDone (asyncs', do Left e <- Just err
-                                                       Just e
-                                          )
-  --
-  useFun fid = case workflowRun $ funWorkflow fun of
-    ActNormal run -> (\f -> f meta param out) <$> run res
-    ActPhony  run -> (\f -> f meta param)     <$> run res
-    where
-      fun   = workflows ! fid
-      meta  = funMetadata fun
-      param = [root </> storePath path | (_,path) <- funParam fun]
-      out   = root </> storePath (snd (funOutput fun))
-
-data Cmd
-  = CmdRunTask  ([FunID],    IO ())
-  | CmdTaskDone ([Async ()], Maybe SomeException)
-  | CmdNothingToDo
-
-pickSTM :: (a -> STM b) -> [a] -> STM ([a], b)
-pickSTM fun = go id where
-  go _   []     = retry
-  go asF (a:as) =  do b <- fun a
-                      pure (asF as, b)
-               <|> go (asF . (a:)) as
