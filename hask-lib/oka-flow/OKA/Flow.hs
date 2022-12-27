@@ -21,7 +21,7 @@ module OKA.Flow
   ( -- * Primitives
     Workflow(..)
     -- * Flow monad
-  , Flow
+  , Flow(..)
   , Result
   , ResultSet(..)
   , want

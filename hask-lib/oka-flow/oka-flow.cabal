@@ -45,6 +45,15 @@ Test-suite oka-flow-tests
   ghc-options:      -Wall
   Build-Depends:    base
                   , oka-flow
+                  , oka-metadata
+                    --
+                  , aeson
+                  , containers
+                  , directory
+                  , temporary  >=1
+                  , transformers
+                  , filepath
+                  , operational
                     --
                   , tasty
                   , tasty-quickcheck
