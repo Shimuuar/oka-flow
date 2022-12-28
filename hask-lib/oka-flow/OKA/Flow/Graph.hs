@@ -1,47 +1,42 @@
-{-# LANGUAGE DeriveFunctor       #-}
-{-# LANGUAGE DerivingStrategies  #-}
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE RecordWildCards     #-}
-{-# LANGUAGE TupleSections       #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImportQualifiedPost        #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE TupleSections              #-}
 -- |
 -- Implementation of dataflow graph.
 module OKA.Flow.Graph
-  ( FunID(..)
-  , Action(..)
-  , Workflow(..)
-  , isPhony
-  , Fun(..)
+  ( -- * Dataflow graph
+    Fun(..)
   , FlowGraph(..)
-  , flowTgtL
-  , flowGraphL
-    -- * Storage
-  , Hash(..)
-  , StorePath(..)
-  , storePath
   , FIDSet(..)
+  , Flow(..)
+    -- * Graph operations
   , hashFlowGraph
   , shakeFlowGraph
+    -- * Lens
+  , flowTgtL
+  , flowGraphL
+  , fidExistsL
+  , fidWantedL
   ) where
 
--- import Control.Applicative
--- import Control.Exception
 import Control.Lens
 import Control.Monad
+import Control.Monad.Operational
+import Control.Monad.Trans.State.Strict
+import Control.Monad.Trans.Reader
 import Crypto.Hash.SHA1             qualified as SHA1
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Encoding          qualified as JSONB
 import Data.Aeson.Encoding.Internal qualified as JSONB
-import Data.ByteString              (ByteString)
 import Data.ByteString.Lazy         qualified as BL
-import Data.ByteString.Base16       qualified as Base16
-import Data.ByteString.Char8        qualified as BC8
--- import Data.Foldable
 import Data.HashMap.Strict          qualified as HM
 import Data.List                    (sortOn)
 import Data.Map.Strict              (Map, (!))
--- import Data.Map.Strict              qualified as Map
 import Data.Set                     (Set)
 import Data.Set                     qualified as Set
 import Data.Vector                  qualified as V
@@ -52,40 +47,8 @@ import OKA.Flow.Types
 
 
 ----------------------------------------------------------------
--- Workflow description
-----------------------------------------------------------------
-
--- | Single action to be performed.
-data Action res
-  = ActNormal (BracketSTM res (Metadata -> [FilePath] -> FilePath -> IO ()))
-    -- ^ Action which produces output
-  | ActPhony  (BracketSTM res (Metadata -> [FilePath] -> IO ()))
-    -- ^ Action which doesn't produce any outputs
-
-
--- | Descritpion of workflow function. It knows how to build
-data Workflow res = Workflow
-  { workflowRun    :: Action res
-    -- ^ Start workflow. This function takes resources as input and
-    --   return STM action which either returns actual IO function to
-    --   run or retries if it's unable to secure necessary resources.
-  , workflowName   :: String
-    -- ^ Name of workflow. Used for caching
-  }
-
-isPhony :: Workflow res -> Bool
-isPhony f = case workflowRun f of
-  ActNormal{} -> False
-  ActPhony{}  -> True
-
-
-----------------------------------------------------------------
 -- Dataflow graph
 ----------------------------------------------------------------
-
--- | Internal identifier of dataflow function in a graph.
-newtype FunID = FunID Int
-  deriving (Show,Eq,Ord)
 
 -- | Single workflow bound in dataflow graph.
 data Fun res a = Fun
@@ -123,16 +86,6 @@ instance Traversable (FlowGraph res) where
           { funOutput = funOutput f & _2 .~ b
           , funParam  = [ (i, snd $ funOutput $ r ! i) | (i,_) <- funParam f ]
           }
-                          
-      
-
--- | Path in nix-like storage. 
-data StorePath = StorePath String Hash
-
--- | Compute file name of directory in nix-like store.
-storePath :: StorePath -> FilePath
-storePath (StorePath nm (Hash hash)) = nm ++ "-" ++ BC8.unpack (Base16.encode hash)
-
 
 fmapFlowGraph
   :: (Fun res b -> b)
@@ -146,12 +99,14 @@ fmapFlowGraph fun gr = gr { flowGraph = r } where
            }
 
 
+-- | Flow monad which we use to build workflow
+newtype Flow res eff a = Flow
+  (ReaderT Metadata (StateT (FlowGraph res ()) (Program eff)) a)
+  deriving newtype (Functor, Applicative, Monad)
+
 ----------------------------------------------------------------
 -- Execution of the workflow
 ----------------------------------------------------------------
-
--- | SHA1 hash
-newtype Hash = Hash ByteString
 
 -- | Compute all hashes and resolve all nodes to corresponding paths
 hashFlowGraph :: FlowGraph res () -> FlowGraph res StorePath
