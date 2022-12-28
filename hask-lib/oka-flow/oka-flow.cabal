@@ -54,6 +54,9 @@ Test-suite oka-flow-tests
                   , transformers
                   , filepath
                   , operational
+                  , unordered-containers
+                  , lens
+                  , text
                     --
                   , tasty
                   , tasty-quickcheck
