@@ -21,10 +21,13 @@ import Control.Monad.Operational
 import Control.Monad.Trans.Reader
 import Control.Monad.Trans.State.Strict
 import Control.Monad.STM
+import Data.Aeson                   qualified as JSON
+import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
 import Data.Map.Strict              ((!))
 import Data.Set                     qualified as Set
 import System.FilePath              ((</>))
+import System.Directory             (createDirectory)
 
 import OKA.Metadata
 import OKA.Flow.Graph
@@ -52,12 +55,12 @@ data FlowCtx eff res = FlowCtx
 -- Execution
 ----------------------------------------------------------------
 
-
+-- | Execute dataflow program
 runFlow
   :: (ResultSet r)
-  => FlowCtx eff res
-  -> Metadata
-  -> Flow res eff r
+  => FlowCtx eff res -- ^ Evaluation context
+  -> Metadata        -- ^ Metadata for program
+  -> Flow res eff r  -- ^ Dataflow program
   -> IO ()
 runFlow ctx@FlowCtx{..} meta (Flow m) = do
   -- Evaluate dataflow graph
@@ -79,19 +82,22 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
     targetExists path = flowTgtExists (flowCtxRoot </> storePath path)
 
 
+-- Add TMVars to each node of graph. This is needed in order to 
 addTMVars :: FlowGraph res a -> IO (FlowGraph res (TMVar (), a))
 addTMVars = traverse $ \f -> do v <- newEmptyTMVarIO
                                 pure (v,f)
 
+-- Prepare function for evaluation
 prepareFun
-  :: FlowCtx eff res
-  -> FIDSet
-  -> Fun res (FunID, (TMVar (), StorePath))
+  :: FlowCtx eff res                        -- Evaluation context
+  -> FIDSet                                 -- Our target set
+  -> Fun res (FunID, (TMVar (), StorePath)) -- Function to evaluate
   -> BracketSTM res (IO ())  
 prepareFun FlowCtx{..} FIDSet{..} Fun{..}
   =  checkAtFinish (putTMVar tmvar ())
   *> checkAtStart depsEvaluated
-  *> case workflowRun funWorkflow of
+  *> pure prepareOutput
+ <*> case workflowRun funWorkflow of
        ActNormal act -> (\f -> f meta params out) <$> act
        ActPhony  act -> (\f -> f meta params)     <$> act
   where
@@ -107,11 +113,18 @@ prepareFun FlowCtx{..} FIDSet{..} Fun{..}
       [ when (fid `Set.notMember` fidExists) $ readTMVar v
       | (fid, (v,_)) <- funParam
       ]
+    -- Prepare output directory
+    prepareOutput act = do
+      createDirectory out
+      _ <- act
+      BL.writeFile (out </> "meta.json") $ JSON.encode $ let Metadata m = meta in m
 
+    
+-- Main loop which concurrently runs tasks
 runTasks
   :: res
-  -> [(STM (), Async ())]     -- ^ Already running actions
-  -> [BracketSTM res (IO ())] -- ^ Tasks to be run
+  -> [(STM (), Async ())]     -- Already running actions
+  -> [BracketSTM res (IO ())] -- Tasks to be run
   -> IO ()
 runTasks res = go where
   go []     []    = pure ()
@@ -132,7 +145,6 @@ runTasks res = go where
 data Cmd res
   = CmdRunTask  ([BracketSTM res (IO ())], (STM (), IO ()))
   | CmdTaskDone ([(STM (), Async ())],     (STM (), Either SomeException ()))
-
 
 pickSTM :: (a -> STM b) -> [a] -> STM ([a], b)
 pickSTM fun = go id where

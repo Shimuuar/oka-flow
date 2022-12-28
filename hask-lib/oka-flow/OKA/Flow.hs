@@ -21,6 +21,7 @@
 module OKA.Flow
   ( -- * Primitives
     Workflow(..)
+  , Action(..)
     -- * Flow monad
   , Flow
   , Result

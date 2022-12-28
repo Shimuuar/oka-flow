@@ -16,22 +16,23 @@ Library
   Ghc-options:      -Wall -O2
   Default-Language: Haskell2010
   --
-  Build-Depends:    base          >=4.12 && <5
+  Build-Depends:    base                 >=4.12 && <5
                   , oka-metadata
                     --
-                  , lens          >=5
+                  , lens                 >=5
                   , filepath
                   , containers
-                  , stm           >=2.4
-                  , async         >=2
+                  , stm                  >=2.4
+                  , async                >=2
                   , mtl
                   , transformers
                   , aeson
+                  , directory
                   , bytestring
-                  , operational   >=0.2.4
-                  , cryptohash-sha1 >=0.11
-                  , base16-bytestring >=1
-                  , vector  >=0.13
+                  , operational          >=0.2.4
+                  , cryptohash-sha1      >=0.11
+                  , base16-bytestring    >=1
+                  , vector               >=0.13
                   , unordered-containers >=0.2
   Exposed-modules:
         OKA.Flow

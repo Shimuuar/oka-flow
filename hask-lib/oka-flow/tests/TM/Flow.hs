@@ -117,7 +117,7 @@ flowProduceInt k = do
                      Nothing -> (Just n', True)
                      Just _  -> (Just n', False))
              writeIORef (obsPath obs) out
-             writeFile out (show n')
+             writeFile (out </> "out.txt") (show n')
          }
        )
 
@@ -128,7 +128,7 @@ flowSquare = do
        , liftWorkflow Workflow
          { workflowName = "square"
          , workflowRun  = ActNormal $ pure $ \_ [p] out -> do
-             n <- read @Int <$> readFile p
+             n <- read @Int <$> readFile (p </> "out.txt")
              let n' = n * n
              assertBool "Flow must called only once" =<<
                atomicModifyIORef' (obsVal  obs)
@@ -136,6 +136,6 @@ flowSquare = do
                      Nothing -> (Just n', True)
                      Just _  -> (Just n', False))
              writeIORef (obsPath obs) out
-             writeFile out (show n')
+             writeFile (out </> "out.txt") (show n')
          }
        )
