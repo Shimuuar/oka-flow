@@ -3,6 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ImportQualifiedPost        #-}
 {-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE TupleSections              #-}
 -- |
 -- Simple framework for dataflow programming for data
 -- analysis. Primary target is OKA experiment.
@@ -46,7 +47,8 @@ import OKA.Flow.Graph
 ----------------------------------------------------------------
 
 -- | Flow monad which we use to build workflow
-newtype Flow res eff a = Flow (ReaderT Metadata (StateT (FlowGraph res) (Program eff)) a)
+newtype Flow res eff a = Flow
+  (ReaderT Metadata (StateT (FlowGraph res ()) (Program eff)) a)
   deriving newtype (Functor, Applicative, Monad)
 
 -- | We want given workflow evaluated
@@ -77,8 +79,8 @@ liftWorkflow exe p = Flow $ do
   put $! gr & flowGraphL . at fid .~ Just Fun
     { funWorkflow = exe
     , funMetadata = meta
-    , funOutput   = fid
-    , funParam    = res
+    , funOutput   = (fid,())
+    , funParam    = (,()) <$> res
     }
   return $ Result fid
 

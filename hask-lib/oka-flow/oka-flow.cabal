@@ -37,7 +37,7 @@ Library
         OKA.Flow
         OKA.Flow.Graph
         OKA.Flow.Run
-
+        OKA.Flow.Types
 
 Test-suite oka-flow-tests
   type:             exitcode-stdio-1.0
