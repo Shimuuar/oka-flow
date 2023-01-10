@@ -43,7 +43,6 @@ module OKA.Metadata
   ) where
 
 import Control.Exception
-import Control.Lens
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.State.Strict
@@ -51,6 +50,8 @@ import Control.Monad.Trans.Class
 
 import Data.Aeson             (Value(..),(.:))
 import Data.Aeson             qualified as JSON
+import Data.Aeson.KeyMap      qualified as KM
+import Data.Aeson.Key         (fromText,toText)
 import Data.Aeson.Types       qualified as JSON
 import Data.Histogram.Bin
 import Data.Yaml              qualified as Yaml
@@ -61,7 +62,6 @@ import Data.Word
 import Data.Coerce
 import Data.Text                          (Text)
 import Data.Text              qualified as T
-import Data.HashMap.Strict    qualified as HM
 import Data.Vector            qualified as V
 import Data.Vector.Unboxed    qualified as VU
 
@@ -109,9 +109,9 @@ mergeMetadata (Metadata m1) (Metadata m2) = Metadata <$> go [] m1 m2
     go path (JSON.Object o1) (JSON.Object o2)
       = fmap JSON.Object
       $ sequence
-      $ HM.unionWithKey (\k ma mb -> do a <- ma
+      $ KM.unionWithKey (\k ma mb -> do a <- ma
                                         b <- mb
-                                        go (KeyTxt k:path) a b
+                                        go (KeyTxt (toText k) : path) a b
                         ) (Right <$> o1) (Right <$> o2)
     -- FIXME: Is semantics for arrays reasonable???
     go path (JSON.Array v1)  (JSON.Array v2)
@@ -157,7 +157,7 @@ metaAt :: FromMeta a => Metadata -> [Text] -> a -> a
 metaAt (Metadata meta) path a0 = go meta path
   where
     go m [] = fromMeta (Metadata m)
-    go (Object o) (p:ps) = case o ^. at p of
+    go (Object o) (p:ps) = case KM.lookup (fromText p) o of
       Just m  -> go m ps
       Nothing -> a0
     go _ _ = error "Encountered non-object"
@@ -233,7 +233,7 @@ metaObjectAt path parser v0
   where
     go []     (Object o) = runObjParser parser o
     go (k:ks) (Object o) = JSON.prependFailure (" - key: " ++ T.unpack k ++ "\n")
-                         $ go ks =<< (o .: k)
+                         $ go ks =<< (o .: fromText k)
     go _      o          = fail $ "Expected object but got " ++ conName o
 
 metaObject
@@ -261,7 +261,7 @@ conName = \case
 
 -- | Parser for exhaustive matching of an object. Each key could only
 --   be parsed once.
-newtype ObjParser a = ObjParser (StateT (HM.HashMap Text JSON.Value) JSON.Parser a)
+newtype ObjParser a = ObjParser (StateT (KM.KeyMap JSON.Value) JSON.Parser a)
   deriving newtype (Functor, Applicative, Monad, MonadFail)
 
 -- | Run object parser on given object
@@ -269,7 +269,7 @@ runObjParser :: ObjParser a -> JSON.Object -> JSON.Parser a
 runObjParser (ObjParser m) o = do
   (a, o') <- runStateT m o
   unless (null o') $ fail $ unlines
-    $ "Unknown keys:" : [ " - " ++ T.unpack k | k <- HM.keys o']
+    $ "Unknown keys:" : [ " - " ++ T.unpack (toText k) | k <- KM.keys o']
   pure a
 
 -- | Lookup mandatory field in the object
@@ -288,14 +288,14 @@ metaFieldM k = ObjParser $ do
   lift $ traverse parseMeta v
 
 popFromMap :: MonadFail m => Text -> JSON.Object -> m (JSON.Value, JSON.Object)
-popFromMap k o = getCompose $ HM.alterF go k o
+popFromMap k o = getCompose $ KM.alterF go (fromText k) o
   where
     go Nothing  = Compose $ fail $ "No such key: " ++ T.unpack k
     go (Just v) = Compose $ pure (v, Nothing)
 
  
 popFromMapM :: MonadFail m => Text -> JSON.Object -> m (Maybe JSON.Value, JSON.Object)
-popFromMapM k o = getCompose $ HM.alterF go k o
+popFromMapM k o = getCompose $ KM.alterF go (fromText k) o
   where
     go Nothing  = Compose $ pure (Nothing, Nothing)
     go (Just v) = Compose $ pure (Just v,  Nothing)

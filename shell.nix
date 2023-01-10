@@ -4,9 +4,12 @@ let
   config = {
     allowUnfree = true;
   };
-  overlays    = [ oka-nix.overlay ];
+  overlays = [
+    oka-nix.hackage
+    oka-nix.overlay
+  ];
 in
-pkgs.haskellPackages.shellFor {
+pkgs.oka.haskell.shellFor {
   packages = hs: [
     (hs.callCabal2nix "oka-metadata" ./. {})
   ];
