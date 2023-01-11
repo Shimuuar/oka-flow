@@ -108,16 +108,15 @@ flowProduceInt k = do
   pure ( obs
        , liftWorkflow Workflow
          { workflowName = "produce-" ++ unpack k
-         , workflowRun  = ActNormal $ pure $ \(Metadata (Object m)) [] out -> do
-             let Just (Number n) = m ^. at k
-                 n' = round n :: Int
+         , workflowRun  = ActNormal $ pure $ \meta [] out -> do
+             let n = metaAt meta [k] (error "NO VALUE")
              assertBool "Flow must called only once" =<<
                atomicModifyIORef' (obsVal  obs)
                  (\case
-                     Nothing -> (Just n', True)
-                     Just _  -> (Just n', False))
+                     Nothing -> (Just n, True)
+                     Just _  -> (Just n, False))
              writeIORef (obsPath obs) out
-             writeFile (out </> "out.txt") (show n')
+             writeFile (out </> "out.txt") (show n)
          }
        )
 

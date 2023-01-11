@@ -33,8 +33,9 @@ import Crypto.Hash.SHA1             qualified as SHA1
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Encoding          qualified as JSONB
 import Data.Aeson.Encoding.Internal qualified as JSONB
+import Data.Aeson.KeyMap            qualified as KM
+import Data.Aeson.Key               (toText)
 import Data.ByteString.Lazy         qualified as BL
-import Data.HashMap.Strict          qualified as HM
 import Data.List                    (sortOn)
 import Data.Map.Strict              (Map, (!))
 import Data.Set                     (Set)
@@ -127,7 +128,7 @@ encodeToBuilder (JSON.Number n) = JSONB.scientific n
 encodeToBuilder (JSON.String s) = JSONB.text s
 encodeToBuilder (JSON.Array v)  = jsArray v
 encodeToBuilder (JSON.Object m) = JSONB.dict JSONB.text encodeToBuilder
-  (\step z m0 -> foldr (\(k,v) a -> step k v a) z $ sortOn fst $ HM.toList m0)
+  (\step z m0 -> foldr (\(k,v) a -> step (toText k) v a) z $ sortOn fst $ KM.toList m0)
   m
 
 jsArray :: V.Vector JSON.Value -> JSONB.Encoding

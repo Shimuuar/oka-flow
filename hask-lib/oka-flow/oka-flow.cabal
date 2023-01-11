@@ -26,7 +26,7 @@ Library
                   , async                >=2
                   , mtl
                   , transformers
-                  , aeson
+                  , aeson                >=2
                   , directory
                   , bytestring
                   , operational          >=0.2.4
