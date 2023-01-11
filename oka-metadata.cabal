@@ -22,29 +22,25 @@ Library
                   , transformers
                   , text
                   , containers          >=0.5
-                  , vector
+                  , vector              >=0.13
+                  , lens                >=5
                   , yaml
   Exposed-modules:
         OKA.Metadata
 
--- Test-suite oka-metadata-tests
---   type:             exitcode-stdio-1.0
---   Default-Language: Haskell2010
---   ghc-options:      -Wall
---   Build-Depends:    base
---                   , oka-extra
---                   , oka-db-classes
---                   , bytestring
---                   , vector
---                   , fixed-vector
---                   , serialise
---                   , math-functions
---                     --
---                   , tasty
---                   , tasty-quickcheck
---                   , tasty-hunit
---   hs-source-dirs: tests
---   main-is:        Main.hs
---   other-modules:  TM.DB
---                   TM.Parser
---                   TM.Serialization
+Test-suite oka-metadata-tests
+   type:             exitcode-stdio-1.0
+   Default-Language: Haskell2010
+   ghc-options:      -Wall
+   Build-Depends:    base
+                   , oka-metadata
+                     --
+                   , tasty
+                   , tasty-quickcheck
+                   , vector
+                   , histogram-fill
+                   , histogram-fill-quickcheck
+   hs-source-dirs: tests
+   main-is:        Main.hs
+   other-modules:  TM.Meta
+

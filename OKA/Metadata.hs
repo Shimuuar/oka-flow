@@ -21,7 +21,7 @@
 module OKA.Metadata
   ( -- * Metadata
     Metadata(..)
-  , FromMeta(..)
+  , IsMeta(..)
   , readMetadata
   , fromMeta
   , metaAt
@@ -43,6 +43,7 @@ module OKA.Metadata
   , metaFieldM
   ) where
 
+import Control.Applicative
 import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
@@ -137,8 +138,12 @@ mergeMetadata (Metadata m1) (Metadata m2) = Metadata <$> go [] m1 m2
 -- | Type class for decoding values from metadata, it's very similar
 --   to 'FromJSON' type class but here we define another one n order
 --   to be able to define conflicting instances
-class FromMeta a where
+class IsMeta a where
   parseMeta :: JSON.Value -> JSON.Parser a
+  toMeta    :: a -> Metadata
+
+toMetaValue :: forall a. IsMeta a => a -> Value
+toMetaValue = coerce (toMeta @a)
 
 -- | Read metadata from file
 readMetadata :: MonadIO m => FilePath -> m Metadata
@@ -148,13 +153,13 @@ readMetadata path = liftIO $ do
     Right a -> pure (Metadata a)
 
 -- | Convert value from metadata. Throws error if conversion fails
-fromMeta :: FromMeta a => Metadata -> a
+fromMeta :: IsMeta a => Metadata -> a
 fromMeta (Metadata m) = case JSON.parse parseMeta m of
   JSON.Success a -> a
-  JSON.Error   e -> error $ "FromMeta: cannot convert:\n" ++ e
+  JSON.Error   e -> error $ "IsMeta: cannot convert:\n" ++ e
 
 -- | Lookup value from metadata with default
-metaAt :: FromMeta a => Metadata -> [Text] -> a -> a
+metaAt :: IsMeta a => Metadata -> [Text] -> a -> a
 metaAt (Metadata meta) path a0 = go meta path []
   where
     go m          []     _  = fromMeta (Metadata m)
@@ -166,7 +171,7 @@ metaAt (Metadata meta) path a0 = go meta path []
       : [ " - " <> T.unpack k | k <- reverse up ]
 
 -- | Lookup value from metadata with default
-metaAt' :: FromMeta a => Metadata -> [Text] -> a
+metaAt' :: IsMeta a => Metadata -> [Text] -> a
 metaAt' (Metadata meta) path = go meta path []
   where
     go m          []     _  = fromMeta (Metadata m)
@@ -179,23 +184,24 @@ metaAt' (Metadata meta) path = go meta path []
       $ "Failed to lookup following keys. Encountered non-object:"
       : [ " - " <> T.unpack k | k <- reverse up ]
 
--- | Newtype for deriving FromMeta instances from FromJSON instances
+-- | Newtype for deriving IsMeta instances from FromJSON instances
 newtype AsAeson a = AsAeson a
 
-instance JSON.FromJSON a => FromMeta (AsAeson a) where
+instance (JSON.ToJSON a, JSON.FromJSON a) => IsMeta (AsAeson a) where
   parseMeta = coerce (JSON.parseJSON @a)
+  toMeta    = coerce (JSON.toJSON    @a)
 
 type JParser a = JSON.Value -> JSON.Parser a
 
-metaSExp1 :: (Typeable r, FromMeta a)
+metaSExp1 :: (Typeable r, IsMeta a)
           => Text -> (a -> r) -> JParser r
 metaSExp1 con f = metaSExp1With con f parseMeta
 
-metaSExp2 :: (Typeable r, FromMeta a, FromMeta b)
+metaSExp2 :: (Typeable r, IsMeta a, IsMeta b)
           => Text -> (a -> b -> r) -> JParser r
 metaSExp2 con f = metaSExp2With con f parseMeta parseMeta
 
-metaSExp3 :: (Typeable r, FromMeta a, FromMeta b, FromMeta c)
+metaSExp3 :: (Typeable r, IsMeta a, IsMeta b, IsMeta c)
           => Text -> (a -> b -> c -> r) -> JParser r
 metaSExp3 con f = metaSExp3With con f parseMeta parseMeta parseMeta
 
@@ -290,7 +296,7 @@ runObjParser (ObjParser m) o = do
   pure a
 
 -- | Lookup mandatory field in the object
-metaField :: FromMeta a => Text -> ObjParser a
+metaField :: IsMeta a => Text -> ObjParser a
 metaField k = ObjParser $ do
   (v, o) <- popFromMap k =<< get
   put o
@@ -298,7 +304,7 @@ metaField k = ObjParser $ do
        $ parseMeta v
 
 -- | Lookup optional field in the object
-metaFieldM :: FromMeta a => Text -> ObjParser (Maybe a)
+metaFieldM :: IsMeta a => Text -> ObjParser (Maybe a)
 metaFieldM k = ObjParser $ do
   (v, o) <- popFromMapM k =<< get
   put o  
@@ -323,34 +329,48 @@ popFromMapM k o = getCompose $ KM.alterF go (fromText k) o
 -- Instances
 ----------------------------------------------------------------
 
-deriving via AsAeson Bool   instance FromMeta Bool
-deriving via AsAeson Float  instance FromMeta Float
-deriving via AsAeson Double instance FromMeta Double
-deriving via AsAeson Int8   instance FromMeta Int8
-deriving via AsAeson Int16  instance FromMeta Int16
-deriving via AsAeson Int32  instance FromMeta Int32
-deriving via AsAeson Int64  instance FromMeta Int64
-deriving via AsAeson Int    instance FromMeta Int
-deriving via AsAeson Word8  instance FromMeta Word8
-deriving via AsAeson Word16 instance FromMeta Word16
-deriving via AsAeson Word32 instance FromMeta Word32
-deriving via AsAeson Word64 instance FromMeta Word64
-deriving via AsAeson Word   instance FromMeta Word
+instance IsMeta Metadata where
+  parseMeta = pure . Metadata
+  toMeta    = id
 
-instance (FromMeta a, FromMeta b) => FromMeta (a,b) where
+deriving via AsAeson Bool   instance IsMeta Bool
+deriving via AsAeson Float  instance IsMeta Float
+deriving via AsAeson Double instance IsMeta Double
+deriving via AsAeson Int8   instance IsMeta Int8
+deriving via AsAeson Int16  instance IsMeta Int16
+deriving via AsAeson Int32  instance IsMeta Int32
+deriving via AsAeson Int64  instance IsMeta Int64
+deriving via AsAeson Int    instance IsMeta Int
+deriving via AsAeson Word8  instance IsMeta Word8
+deriving via AsAeson Word16 instance IsMeta Word16
+deriving via AsAeson Word32 instance IsMeta Word32
+deriving via AsAeson Word64 instance IsMeta Word64
+deriving via AsAeson Word   instance IsMeta Word
+
+instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
   parseMeta = JSON.withArray "(a, b)" $ \arr -> case V.length arr of
     2 ->  (,) <$> parseMeta (V.unsafeIndex arr 0)
               <*> parseMeta (V.unsafeIndex arr 1)
     n -> fail $ "Expecting 2-element array, got " ++ show n
+  toMeta (a,b) = Metadata $ Array $ V.fromList [toMetaValue a, toMetaValue b]
 
-instance (FromMeta a) => FromMeta [a] where
+instance (IsMeta a) => IsMeta [a] where
   parseMeta = fmap V.toList . parseMeta
-instance (FromMeta a) => FromMeta (V.Vector a) where
+  toMeta    = Metadata . Array . V.fromList . map toMetaValue
+instance (IsMeta a, VU.Unbox a) => IsMeta (VU.Vector a) where
+  parseMeta = fmap VU.convert . parseMeta @(V.Vector a)
+  toMeta = Metadata . Array . V.map toMetaValue . V.convert
+instance (IsMeta a) => IsMeta (V.Vector a) where
   parseMeta = JSON.prependFailure " - traversing Array\n"
             . JSON.withArray "Vector" (traverse parseMeta)
-instance (FromMeta a, VU.Unbox a) => FromMeta (VU.Vector a) where
-  parseMeta = fmap VU.convert . parseMeta @(V.Vector a)
+  toMeta = Metadata . Array . V.map toMetaValue
 
-
-instance FromMeta BinD where
-  parseMeta = metaSExp3 "BinD" binD
+instance IsMeta BinD where
+  parseMeta o =  metaSExp3 "BinD"     binD     o
+             <|> metaSExp3 "BinDstep" binDstep o
+  toMeta b = toMeta
+    [ Metadata "BinDstep"
+    , toMeta $ lowerLimit b
+    , toMeta $ binSize    b
+    , toMeta $ nBins      b
+    ]
