@@ -343,12 +343,13 @@ instance (FromMeta a, FromMeta b) => FromMeta (a,b) where
               <*> parseMeta (V.unsafeIndex arr 1)
     n -> fail $ "Expecting 2-element array, got " ++ show n
 
+instance (FromMeta a) => FromMeta [a] where
+  parseMeta = fmap V.toList . parseMeta
 instance (FromMeta a) => FromMeta (V.Vector a) where
   parseMeta = JSON.prependFailure " - traversing Array\n"
             . JSON.withArray "Vector" (traverse parseMeta)
 instance (FromMeta a, VU.Unbox a) => FromMeta (VU.Vector a) where
-  parseMeta = JSON.prependFailure " - traversing Array\n"
-            . JSON.withArray "Vector" (fmap VU.convert . traverse parseMeta)
+  parseMeta = fmap VU.convert . parseMeta @(V.Vector a)
 
 
 instance FromMeta BinD where
