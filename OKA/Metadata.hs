@@ -43,7 +43,7 @@ module OKA.Metadata
   , metaFieldM
     -- ** Constructors
   , mkObject
-  , (JSON..=)
+  , (.==)
   ) where
 
 import Control.Applicative
@@ -327,9 +327,11 @@ popFromMapM k o = getCompose $ KM.alterF go (fromText k) o
     go (Just v) = Compose $ pure (Just v,  Nothing)
 
 
-mkObject :: [JSON.Pair] -> Metadata
-mkObject = Metadata . JSON.object
+mkObject :: [(JSON.Key,Metadata)] -> Metadata
+mkObject = coerce JSON.object
 
+(.==) :: IsMeta a => Text -> a -> (JSON.Key,Metadata)
+k .== v = (fromText k, toMeta v)
 
 ----------------------------------------------------------------
 -- Instances
