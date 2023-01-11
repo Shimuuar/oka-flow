@@ -349,10 +349,18 @@ deriving via AsAeson Word   instance IsMeta Word
 
 instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
   parseMeta = JSON.withArray "(a, b)" $ \arr -> case V.length arr of
-    2 ->  (,) <$> parseMeta (V.unsafeIndex arr 0)
-              <*> parseMeta (V.unsafeIndex arr 1)
+    2 -> (,) <$> parseMeta (V.unsafeIndex arr 0)
+             <*> parseMeta (V.unsafeIndex arr 1)
     n -> fail $ "Expecting 2-element array, got " ++ show n
   toMeta (a,b) = Metadata $ Array $ V.fromList [toMetaValue a, toMetaValue b]
+
+instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
+  parseMeta = JSON.withArray "(a, b, c)" $ \arr -> case V.length arr of
+    3 -> (,,) <$> parseMeta (V.unsafeIndex arr 0)
+              <*> parseMeta (V.unsafeIndex arr 1)
+              <*> parseMeta (V.unsafeIndex arr 2)
+    n -> fail $ "Expecting 3-element array, got " ++ show n
+  toMeta (a,b,c) = Metadata $ Array $ V.fromList [toMetaValue a, toMetaValue b, toMetaValue c]
 
 instance (IsMeta a) => IsMeta [a] where
   parseMeta = fmap V.toList . parseMeta
