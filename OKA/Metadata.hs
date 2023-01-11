@@ -25,6 +25,7 @@ module OKA.Metadata
   , readMetadata
   , fromMeta
   , metaAt
+  , metaAt'
     -- ** Writing instances
   , AsAeson(..)
   , metaSExp1
@@ -152,15 +153,31 @@ fromMeta (Metadata m) = case JSON.parse parseMeta m of
   JSON.Success a -> a
   JSON.Error   e -> error $ "FromMeta: cannot convert:\n" ++ e
 
--- | Lookup value from 
+-- | Lookup value from metadata with default
 metaAt :: FromMeta a => Metadata -> [Text] -> a -> a
-metaAt (Metadata meta) path a0 = go meta path
+metaAt (Metadata meta) path a0 = go meta path []
   where
-    go m [] = fromMeta (Metadata m)
-    go (Object o) (p:ps) = case KM.lookup (fromText p) o of
-      Just m  -> go m ps
+    go m          []     _  = fromMeta (Metadata m)
+    go (Object o) (p:ps) up = case KM.lookup (fromText p) o of
+      Just m  -> go m ps (p:up)
       Nothing -> a0
-    go _ _ = error "Encountered non-object"
+    go _ _ up = error $ unlines
+      $ "Failed to lookup following keys. Encountered non-object:"
+      : [ " - " <> T.unpack k | k <- reverse up ]
+
+-- | Lookup value from metadata with default
+metaAt' :: FromMeta a => Metadata -> [Text] -> a
+metaAt' (Metadata meta) path = go meta path []
+  where
+    go m          []     _  = fromMeta (Metadata m)
+    go (Object o) (p:ps) up = case KM.lookup (fromText p) o of
+      Just m  -> go m ps (p:up)
+      Nothing -> error $ unlines
+        $ "Failed to lookup following keys:"
+        : [ " - " <> T.unpack k | k <- p : reverse up ]
+    go _ _ up = error $ unlines
+      $ "Failed to lookup following keys. Encountered non-object:"
+      : [ " - " <> T.unpack k | k <- reverse up ]
 
 -- | Newtype for deriving FromMeta instances from FromJSON instances
 newtype AsAeson a = AsAeson a
