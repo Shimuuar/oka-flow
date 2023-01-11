@@ -41,6 +41,9 @@ module OKA.Metadata
   , runObjParser
   , metaField
   , metaFieldM
+    -- ** Constructors
+  , mkObject
+  , (JSON..=)
   ) where
 
 import Control.Applicative
@@ -323,6 +326,9 @@ popFromMapM k o = getCompose $ KM.alterF go (fromText k) o
     go Nothing  = Compose $ pure (Nothing, Nothing)
     go (Just v) = Compose $ pure (Just v,  Nothing)
 
+
+mkObject :: [JSON.Pair] -> Metadata
+mkObject = Metadata . JSON.object
 
 
 ----------------------------------------------------------------
