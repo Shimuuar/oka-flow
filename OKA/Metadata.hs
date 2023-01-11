@@ -145,9 +145,6 @@ class IsMeta a where
   parseMeta :: JSON.Value -> JSON.Parser a
   toMeta    :: a -> Metadata
 
-toMetaValue :: forall a. IsMeta a => a -> Value
-toMetaValue = coerce (toMeta @a)
-
 -- | Read metadata from file
 readMetadata :: MonadIO m => FilePath -> m Metadata
 readMetadata path = liftIO $ do
@@ -370,6 +367,13 @@ instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
     n -> fail $ "Expecting 3-element array, got " ++ show n
   toMeta (a,b,c) = Metadata $ Array $ V.fromList [toMetaValue a, toMetaValue b, toMetaValue c]
 
+instance (IsMeta a) => IsMeta (Maybe a) where
+  parseMeta Null  = pure Nothing
+  parseMeta o     = Just <$> parseMeta o
+  toMeta Nothing  = Metadata Null
+  toMeta (Just x) = toMeta x
+
+
 instance (IsMeta a) => IsMeta [a] where
   parseMeta = fmap V.toList . parseMeta
   toMeta    = Metadata . Array . V.fromList . map toMetaValue
@@ -390,3 +394,7 @@ instance IsMeta BinD where
     , toMeta $ binSize    b
     , toMeta $ nBins      b
     ]
+
+
+toMetaValue :: forall a. IsMeta a => a -> Value
+toMetaValue = coerce (toMeta @a)

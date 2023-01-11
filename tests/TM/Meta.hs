@@ -23,6 +23,7 @@ tests = testGroup "Roundtrip"
   , testSerialise @[Int]
   , testSerialise @(Int,Double)
   , testSerialise @(Int,Double,(Int,Int))
+  , testSerialise @(Maybe [Int])
   ]
 
 testSerialise :: forall a. (Typeable a, Arbitrary a, Show a, Eq a, IsMeta a) => TestTree
