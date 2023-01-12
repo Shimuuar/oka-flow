@@ -69,7 +69,32 @@ tests = testGroup "Run flow"
                     flowS a
       runFlow ctx meta flow
       observe "flow A" obsA (Just 100)
-      observe "flow S" obsS (Just 10000) 
+      observe "flow S" obsS (Just 10000)
+    -- Caching works
+  , testCase "Caching" $ withSimpleFlow $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt "nA"
+      (obsS, flowS) <- flowSquare
+      let meta  = Metadata $ object [ "nA" .= (100::Int) ]
+          flow1 = flowA ()
+          flow2 = do a <- flowA ()
+                     flowS a
+      runFlow ctx meta flow1
+      runFlow ctx meta flow2
+      observe "flow A" obsA (Just 100)
+      observe "flow S" obsS (Just 10000)
+    -- Caching works for phony targets
+  , testCase "Phony" $ withSimpleFlow $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt "nA"
+      (obsS, flowS) <- flowPhony
+      let meta  = Metadata $ object [ "nA" .= (100::Int) ]
+          flow1 = flowA ()
+          flow2 = do a <- flowA ()
+                     s <- flowS a
+                     pure s
+      -- runFlow ctx meta flow1
+      runFlow ctx meta flow2
+      observe "flow A" obsA (Just 100)
+      observe "flow S" obsS (Just 10000)
   ]
 
 withSimpleFlow :: (FlowCtx IO () -> IO a) -> IO a
@@ -136,5 +161,22 @@ flowSquare = do
                      Just _  -> (Just n', False))
              writeIORef (obsPath obs) out
              writeFile (out </> "out.txt") (show n')
+         }
+       )
+
+flowPhony :: IO (Observe Int, Result Int -> Flow res eff (Result ()))
+flowPhony = do
+  obs <- Observe <$> newIORef Nothing <*> newIORef ""
+  pure ( obs
+       , liftWorkflow Workflow
+         { workflowName = "phony"
+         , workflowRun  = ActPhony $ pure $ \_ [p] -> do
+             n <- read @Int <$> readFile (p </> "out.txt")
+             let n' = n * n
+             assertBool "Flow must called only once" =<<
+               atomicModifyIORef' (obsVal  obs)
+                 (\case
+                     Nothing -> (Just n', True)
+                     Just _  -> (Just n', False))
          }
        )
