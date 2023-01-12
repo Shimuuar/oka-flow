@@ -96,10 +96,9 @@ prepareFun
 prepareFun FlowCtx{..} FIDSet{..} Fun{..}
   =  checkAtFinish (putTMVar tmvar ())
   *> checkAtStart depsEvaluated
-  *> pure prepareOutput
- <*> case workflowRun funWorkflow of
-       ActNormal act -> (\f -> f meta params build) <$> act
-       ActPhony  act -> (\f -> f meta params)       <$> act
+  *> case workflowRun funWorkflow of
+       ActNormal act -> prepareNormal <$> act
+       ActPhony  act -> preparePhony  <$> act
   where
     meta   = funMetadata
     params = toPath <$> funParam
@@ -115,11 +114,12 @@ prepareFun FlowCtx{..} FIDSet{..} Fun{..}
       | (fid, (v,_)) <- funParam
       ]
     -- Prepare output directory
-    prepareOutput act = do
+    prepareNormal action = do
       createDirectory build
       BL.writeFile (build </> "meta.json") $ JSON.encode $ let Metadata m = meta in m
-      _ <- act `onException` removeDirectoryRecursive build
+      _ <- action meta params build `onException` removeDirectoryRecursive build
       renameDirectory build out
+    preparePhony action = action meta params
 
     
 -- Main loop which concurrently runs tasks
