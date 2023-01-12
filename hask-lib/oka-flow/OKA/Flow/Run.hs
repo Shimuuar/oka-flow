@@ -27,7 +27,7 @@ import Data.Foldable
 import Data.Map.Strict              ((!))
 import Data.Set                     qualified as Set
 import System.FilePath              ((</>))
-import System.Directory             (createDirectory)
+import System.Directory             (createDirectory,renameDirectory,removeDirectoryRecursive)
 
 import OKA.Metadata
 import OKA.Flow.Graph
@@ -98,12 +98,13 @@ prepareFun FlowCtx{..} FIDSet{..} Fun{..}
   *> checkAtStart depsEvaluated
   *> pure prepareOutput
  <*> case workflowRun funWorkflow of
-       ActNormal act -> (\f -> f meta params out) <$> act
-       ActPhony  act -> (\f -> f meta params)     <$> act
+       ActNormal act -> (\f -> f meta params build) <$> act
+       ActPhony  act -> (\f -> f meta params)       <$> act
   where
     meta   = funMetadata
     params = toPath <$> funParam
-    out    = toPath     funOutput
+    out    = toPath     funOutput -- Output directory
+    build  = out ++ "-build"      -- Temporary build directory
     --
     (_,(tmvar,_))       = funOutput  
     toPath (_,(_,path)) = flowCtxRoot </> storePath path
@@ -115,9 +116,10 @@ prepareFun FlowCtx{..} FIDSet{..} Fun{..}
       ]
     -- Prepare output directory
     prepareOutput act = do
-      createDirectory out
-      _ <- act
-      BL.writeFile (out </> "meta.json") $ JSON.encode $ let Metadata m = meta in m
+      createDirectory build
+      BL.writeFile (build </> "meta.json") $ JSON.encode $ let Metadata m = meta in m
+      _ <- act `onException` removeDirectoryRecursive build
+      renameDirectory build out
 
     
 -- Main loop which concurrently runs tasks
