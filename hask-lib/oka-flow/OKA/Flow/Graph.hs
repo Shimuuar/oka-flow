@@ -169,12 +169,15 @@ shakeFlowGraph tgtExists (FlowGraph workflows targets)
       -- We already wisited these workflows
       | fid `Set.member` fidExists = pure fids
       | fid `Set.member` fidWanted = pure fids
-      -- Phony targets are always executed
-      | isPhony (funWorkflow f)    = pure fids'
       -- Check if result has been computed already
-      | otherwise = tgtExists (snd (funOutput f)) >>= \case
-          True  -> pure $ fids & fidExistsL %~ Set.insert fid
-          False -> foldM addFID fids' (fst <$> funParam f)
+      | otherwise = do
+          exists <- case isPhony (funWorkflow f) of
+            -- Phony targets are always executed
+            True  -> pure False
+            False -> tgtExists (snd (funOutput f))
+          case exists of
+            True  -> pure $ fids & fidExistsL %~ Set.insert fid
+            False -> foldM addFID fids' (fst <$> funParam f)
       where
         f     = workflows ! fid
         fids' = fids & fidWantedL %~ Set.insert fid
