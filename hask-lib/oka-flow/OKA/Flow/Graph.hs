@@ -14,6 +14,7 @@ module OKA.Flow.Graph
   , FlowGraph(..)
   , FIDSet(..)
   , Flow(..)
+  , appendMeta
     -- * Graph operations
   , hashFlowGraph
   , shakeFlowGraph
@@ -104,6 +105,11 @@ fmapFlowGraph fun gr = gr { flowGraph = r } where
 newtype Flow res eff a = Flow
   (ReaderT Metadata (StateT (FlowGraph res ()) (Program eff)) a)
   deriving newtype (Functor, Applicative, Monad)
+
+appendMeta :: Metadata -> Flow res eff a -> Flow res eff a
+appendMeta meta (Flow act) = Flow $ ReaderT $ \m ->
+  runReaderT act (m <> meta)
+
 
 ----------------------------------------------------------------
 -- Execution of the workflow
