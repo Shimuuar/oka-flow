@@ -185,7 +185,7 @@ data FIDSet = FIDSet
   , fidWanted :: !(Set FunID)
     -- ^ We need to compute these workflows
   }
-
+  deriving (Show)
 
 ----------------------------------------------------------------
 -- Lens
