@@ -101,12 +101,13 @@ prepareFun FlowCtx{..} FIDSet{..} Fun{..}
        ActPhony  act -> preparePhony  <$> act
   where
     meta   = funMetadata
-    params = toPath <$> funParam
-    out    = toPath     funOutput -- Output directory
-    build  = out ++ "-build"      -- Temporary build directory
+    paramP = toPath <$> funParam
+    params = [ flowCtxRoot </> p | p <- paramP ]
+    out    = flowCtxRoot </> toPath funOutput    -- Output directory
+    build  = out ++ "-build"                     -- Temporary build directory
     --
     (_,(tmvar,_))       = funOutput  
-    toPath (_,(_,path)) = flowCtxRoot </> storePath path
+    toPath (_,(_,path)) = storePath path
     -- We need to check that all dependencies which are not completed
     -- already are evaluated
     depsEvaluated = sequence_
@@ -117,6 +118,7 @@ prepareFun FlowCtx{..} FIDSet{..} Fun{..}
     prepareNormal action = do
       createDirectory build
       BL.writeFile (build </> "meta.json") $ JSON.encode $ let Metadata m = meta in m
+      writeFile    (build </> "deps.txt")  $ unlines paramP
       _ <- action meta params build `onException` removeDirectoryRecursive build
       renameDirectory build out
     preparePhony action = action meta params
