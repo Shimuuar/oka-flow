@@ -6,18 +6,12 @@
 -- |
 module TM.Flow (tests) where
 
-import Control.Lens hiding((.=))
-import Control.Monad.Operational
-import Control.Monad.Trans.Reader
-import Control.Monad.Trans.State.Strict
-import Data.Aeson       (Value(..),(.=),object)
-import Data.Set         qualified as Set
+import Data.Aeson       ((.=),object)
 import Data.IORef
-import Data.Text (Text,unpack)
-import Data.HashMap.Strict qualified as HM
+import Data.Text        (Text,unpack)
 import System.IO.Temp   (withSystemTempDirectory)
 import System.FilePath  ((</>))
-import System.Directory (doesDirectoryExist,listDirectory)
+import System.Directory (doesDirectoryExist)
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -91,7 +85,7 @@ tests = testGroup "Run flow"
           flow2 = do a <- flowA ()
                      s <- flowS a
                      pure s
-      -- runFlow ctx meta flow1
+      runFlow ctx meta flow1
       runFlow ctx meta flow2
       observe "flow A" obsA (Just 100)
       observe "flow S" obsS (Just 10000)
@@ -105,8 +99,6 @@ withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
                  , flowCtxRes    = ()
                  }
 
-emptyMetadata :: Metadata
-emptyMetadata = Metadata $ Object mempty
 
 ----------------------------------------------------------------
 -- Flows

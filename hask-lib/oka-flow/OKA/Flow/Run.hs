@@ -11,7 +11,6 @@ module OKA.Flow.Run
   , runFlow
   ) where
 
-import Control.Applicative
 import Control.Concurrent.Async
 import Control.Concurrent.STM.TMVar
 import Control.Exception
@@ -74,9 +73,10 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
   targets <- shakeFlowGraph targetExists gr_hashed
   gr_exe  <- addTMVars gr_hashed
   -- Evaluator
-  runTasks flowCtxRes []
-    [ prepareFun ctx targets (flowGraph gr_exe ! i)
-    | i <- Set.toList $ fidWanted targets ]
+  mapConcurrently_ id
+    [ prepareFun ctx targets (flowGraph gr_exe ! i) flowCtxRes
+    | i <- Set.toList $ fidWanted targets
+    ]
   where
     addTargets (r,gr) = gr & flowTgtL %~ mappend (Set.fromList (toResultSet r))
     targetExists path = flowTgtExists (flowCtxRoot </> storePath path)
@@ -92,67 +92,34 @@ prepareFun
   :: FlowCtx eff res                        -- Evaluation context
   -> FIDSet                                 -- Our target set
   -> Fun res (FunID, (TMVar (), StorePath)) -- Function to evaluate
-  -> BracketSTM res (IO ())  
-prepareFun FlowCtx{..} FIDSet{..} Fun{..}
-  =  checkAtFinish (putTMVar tmvar ())
-  *> checkAtStart depsEvaluated
-  *> case workflowRun funWorkflow of
-       ActNormal act -> prepareNormal <$> act
-       ActPhony  act -> preparePhony  <$> act
+  -> res
+  -> IO ()
+prepareFun FlowCtx{..} FIDSet{..} Fun{..} res = do
+  -- Check that all function parameters are already evaluated:
+  for_ funParam $ \(fid, (v,_)) -> do
+    when (fid `Set.notMember` fidExists) $ atomically $ readTMVar v
+  -- Run action
+  case workflowRun funWorkflow of
+    ActNormal act -> prepareNormal act
+    ActPhony  act -> preparePhony  act
+  -- Signal that we successfully complete execution
+  atomically $ putTMVar tmvar ()
   where
-    meta   = funMetadata
-    paramP = toPath <$> funParam
-    params = [ flowCtxRoot </> p | p <- paramP ]
+    meta   = funMetadata                         -- Metadata
+    paramP = toPath <$> funParam                 -- Parameters relative to store
+    params = [ flowCtxRoot </> p | p <- paramP ] -- Parameters as real path
     out    = flowCtxRoot </> toPath funOutput    -- Output directory
     build  = out ++ "-build"                     -- Temporary build directory
     --
     (_,(tmvar,_))       = funOutput  
     toPath (_,(_,path)) = storePath path
-    -- We need to check that all dependencies which are not completed
-    -- already are evaluated
-    depsEvaluated = sequence_
-      [ when (fid `Set.notMember` fidExists) $ readTMVar v
-      | (fid, (v,_)) <- funParam
-      ]
-    -- Prepare output directory
+    -- Prepare normal action. We first create output directory and
+    -- write everything there. After we're done we rename it.
     prepareNormal action = do
       createDirectory build
       BL.writeFile (build </> "meta.json") $ JSON.encode $ let Metadata m = meta in m
       writeFile    (build </> "deps.txt")  $ unlines paramP
-      _ <- action meta params build `onException` removeDirectoryRecursive build
+      _ <- action res meta params build `onException` removeDirectoryRecursive build
       renameDirectory build out
-    preparePhony action = action meta params
-
-    
--- Main loop which concurrently runs tasks
-runTasks
-  :: res
-  -> [(STM (), Async ())]     -- Already running actions
-  -> [BracketSTM res (IO ())] -- Tasks to be run
-  -> IO ()
-runTasks res = go where
-  go []     []    = pure ()
-  go asyncs tasks = do
-    r <- atomically $ asum
-      [ CmdRunTask  <$> pickSTM (runBracketSTM res) tasks
-      , CmdTaskDone <$> pickSTM (\(fini,a) -> do r <- waitCatchSTM a
-                                                 pure (fini,r)
-                                ) asyncs
-      -- FIXME: deadlock detection
-      ]
-    case r of
-      CmdRunTask (tasks',   (fini, io      )) -> withAsync io $ \a -> go ((fini,a):asyncs) tasks'
-      CmdTaskDone (_,       (_   , Left  e )) -> throwIO e
-      CmdTaskDone (asyncs', (fini, Right ())) -> do atomically fini
-                                                    go asyncs' tasks
-
-data Cmd res
-  = CmdRunTask  ([BracketSTM res (IO ())], (STM (), IO ()))
-  | CmdTaskDone ([(STM (), Async ())],     (STM (), Either SomeException ()))
-
-pickSTM :: (a -> STM b) -> [a] -> STM ([a], b)
-pickSTM fun = go id where
-  go _   []     = retry
-  go asF (a:as) =  do b <- fun a
-                      pure (asF as, b)
-               <|> go (asF . (a:)) as
+    -- Execute phony action. We don't need to bother with setting up output
+    preparePhony action = action res meta params
