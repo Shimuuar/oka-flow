@@ -216,7 +216,7 @@ metaSExp1With con mk pA val
         [String c, vA]
           | c == con -> mk <$> pA vA
         _            -> fail "Cannot parse sexp"
-      o -> fail $ "Expected array but got " ++ conName o
+      o -> fail $ "Expected array but got " ++ constrName o
 
 metaSExp2With
   :: forall a b r. Typeable r
@@ -229,7 +229,7 @@ metaSExp2With con mk pA pB val
         [String c, vA, vB]
           | c == con -> mk <$> pA vA <*> pB vB
         _            -> fail "Cannot parse sexp"
-      o -> fail $ "Expected array but got " ++ conName o
+      o -> fail $ "Expected array but got " ++ constrName o
 
 metaSExp3With
   :: forall a b c r. (Typeable r)
@@ -242,7 +242,7 @@ metaSExp3With con mk pA pB pC val
         [String c, vA, vB, vC]
           | c == con -> mk <$> pA vA <*> pB vB <*> pC vC
         _            -> fail "Cannot parse sexp"
-      o -> fail $ "Expected array but got " ++ conName o
+      o -> fail $ "Expected array but got " ++ constrName o
 
 -- | Parse object at given position inside JSON tree.
 metaObjectAt
@@ -257,7 +257,7 @@ metaObjectAt path parser v0
     go []     (Object o) = runObjParser parser o
     go (k:ks) (Object o) = JSON.prependFailure (" - key: " ++ T.unpack k ++ "\n")
                          $ go ks =<< (o .: fromText k)
-    go _      o          = fail $ "Expected object but got " ++ conName o
+    go _      o          = fail $ "Expected object but got " ++ constrName o
 
 metaObject
   :: forall a. Typeable a
@@ -266,11 +266,11 @@ metaObject parser
   = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
   . \case
        Object o -> runObjParser parser o
-       o        -> fail $ "Expected object but got " ++ conName o
+       o        -> fail $ "Expected object but got " ++ constrName o
 
 
-conName :: JSON.Value -> String
-conName = \case
+constrName :: JSON.Value -> String
+constrName = \case
   Object{} -> "object"
   Array{}  -> "array"
   Number{} -> "number"
