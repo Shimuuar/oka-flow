@@ -29,6 +29,7 @@ module OKA.Flow
   , ResultSet(..)
   , want
   , liftWorkflow
+  , liftPhony
   , liftEff
     -- * Execution
   , FlowCtx(..)
@@ -83,6 +84,14 @@ liftWorkflow exe p = Flow $ do
     , funParam    = (,()) <$> res
     }
   return $ Result fid
+
+-- | Lift phony workflow (not checked)
+liftPhony
+  :: (ResultSet params)
+  => Workflow res
+  -> params
+  -> Flow res eff ()
+liftPhony exe p = want =<< liftWorkflow exe p
 
 -- | Lift effect
 liftEff :: eff a -> Flow res eff a
