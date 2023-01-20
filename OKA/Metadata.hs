@@ -88,6 +88,8 @@ instance Semigroup Metadata where
     Left  e -> throw e
     Right m -> m
 
+instance Monoid Metadata where
+  mempty = Metadata $ Object mempty
 
 ----------------------------------------------------------------
 -- Merging of metadata
