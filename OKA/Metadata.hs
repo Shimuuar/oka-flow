@@ -15,6 +15,7 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 {-# LANGUAGE ViewPatterns               #-}
 -- |
@@ -28,6 +29,7 @@ module OKA.Metadata
   , metaAt'
     -- ** Writing instances
   , AsAeson(..)
+  , MProd(..)
   , metaSExp1
   , metaSExp1With
   , metaSExp2
@@ -69,7 +71,7 @@ import Data.Text                          (Text)
 import Data.Text              qualified as T
 import Data.Vector            qualified as V
 import Data.Vector.Unboxed    qualified as VU
-
+import GHC.Generics
 
 
 ----------------------------------------------------------------
@@ -186,6 +188,10 @@ metaAt' (Metadata meta) path = go meta path []
       $ "Failed to lookup following keys. Encountered non-object:"
       : [ " - " <> T.unpack k | k <- reverse up ]
 
+----------------------------------------------------------------
+-- Parsers
+----------------------------------------------------------------
+
 -- | Newtype for deriving IsMeta instances from FromJSON instances
 newtype AsAeson a = AsAeson a
 
@@ -194,6 +200,32 @@ instance (JSON.ToJSON a, JSON.FromJSON a) => IsMeta (AsAeson a) where
   toMeta    = coerce (JSON.toJSON    @a)
 
 type JParser a = JSON.Value -> JSON.Parser a
+
+
+-- | Product of several metadata entries.
+newtype MProd a = MProd a
+  deriving newtype (Show,Eq,Ord,Generic)
+
+instance (Generic a, GMetaProd (Rep a)) => IsMeta (MProd a) where
+  parseMeta = fmap to . gparseProd @(Rep a)
+  toMeta    = gtoMeta . from
+
+class GMetaProd f where
+  gparseProd :: JSON.Value -> JSON.Parser (f p)
+  gtoMeta    :: f p -> Metadata
+
+deriving newtype instance GMetaProd f => GMetaProd (M1 i c f)
+instance GMetaProd U1 where
+  gparseProd _ = pure U1
+  gtoMeta    _ = mempty
+instance (GMetaProd f, GMetaProd g) => GMetaProd (f :*: g) where
+  gparseProd o = (:*:) <$> gparseProd o <*> gparseProd o
+  gtoMeta (f :*: g) = gtoMeta f <> gtoMeta g
+instance (IsMeta a) => GMetaProd (K1 i a) where
+  gparseProd = coerce (parseMeta @a)
+  gtoMeta    = coerce (toMeta    @a)
+
+
 
 metaSExp1 :: (Typeable r, IsMeta a)
           => Text -> (a -> r) -> JParser r
@@ -309,7 +341,7 @@ metaField k = ObjParser $ do
 metaFieldM :: IsMeta a => Text -> ObjParser (Maybe a)
 metaFieldM k = ObjParser $ do
   (v, o) <- popFromMapM k =<< get
-  put o  
+  put o
   lift $ traverse parseMeta v
 
 popFromMap :: MonadFail m => Text -> JSON.Object -> m (JSON.Value, JSON.Object)
@@ -318,7 +350,7 @@ popFromMap k o = getCompose $ KM.alterF go (fromText k) o
     go Nothing  = Compose $ fail $ "No such key: " ++ T.unpack k
     go (Just v) = Compose $ pure (v, Nothing)
 
- 
+
 popFromMapM :: MonadFail m => Text -> JSON.Object -> m (Maybe JSON.Value, JSON.Object)
 popFromMapM k o = getCompose $ KM.alterF go (fromText k) o
   where
