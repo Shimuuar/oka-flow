@@ -126,7 +126,7 @@ flowProduceInt k = do
        , liftWorkflow Workflow
          { workflowName = "produce-" ++ unpack k
          , workflowRun  = ActNormal $ pure $ \meta [] out -> do
-             let n = metaAt meta [k] (error "NO VALUE")
+             let n = lookupMeta meta [k]
              assertBool "Flow must called only once" =<<
                atomicModifyIORef' (obsVal  obs)
                  (\case
