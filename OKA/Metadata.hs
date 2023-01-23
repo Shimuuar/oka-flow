@@ -25,8 +25,8 @@ module OKA.Metadata
   , IsMeta(..)
   , readMetadata
   , fromMeta
-  , metaAt
-  , metaAt'
+  , lookupMeta
+  , lookupMetaDef
     -- ** Writing instances
   , AsAeson(..)
   , MProd(..)
@@ -163,8 +163,8 @@ fromMeta (Metadata m) = case JSON.parse parseMeta m of
   JSON.Error   e -> error $ "IsMeta: cannot convert:\n" ++ e
 
 -- | Lookup value from metadata with default
-metaAt :: IsMeta a => Metadata -> [Text] -> a -> a
-metaAt (Metadata meta) path a0 = go meta path []
+lookupMetaDef :: IsMeta a => Metadata -> [Text] -> a -> a
+lookupMetaDef (Metadata meta) path a0 = go meta path []
   where
     go m          []     _  = fromMeta (Metadata m)
     go (Object o) (p:ps) up = case KM.lookup (fromText p) o of
@@ -175,8 +175,8 @@ metaAt (Metadata meta) path a0 = go meta path []
       : [ " - " <> T.unpack k | k <- reverse up ]
 
 -- | Lookup value from metadata with default
-metaAt' :: IsMeta a => Metadata -> [Text] -> a
-metaAt' (Metadata meta) path = go meta path []
+lookupMeta :: IsMeta a => Metadata -> [Text] -> a
+lookupMeta (Metadata meta) path = go meta path []
   where
     go m          []     _  = fromMeta (Metadata m)
     go (Object o) (p:ps) up = case KM.lookup (fromText p) o of
