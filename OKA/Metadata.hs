@@ -382,6 +382,7 @@ instance IsMeta Metadata where
   parseMeta = pure . Metadata
   toMeta    = id
 
+deriving via AsAeson Value  instance IsMeta Value
 deriving via AsAeson Bool   instance IsMeta Bool
 deriving via AsAeson Float  instance IsMeta Float
 deriving via AsAeson Double instance IsMeta Double
