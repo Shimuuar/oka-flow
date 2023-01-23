@@ -27,9 +27,12 @@ module OKA.Metadata
   , fromMeta
   , lookupMeta
   , lookupMetaDef
-    -- ** Writing instances
+    -- * Writing instances
+  , (.::)
+    -- ** Deriving via
   , AsAeson(..)
   , MProd(..)
+    -- ** Special purpose parsers
   , metaSExp1
   , metaSExp1With
   , metaSExp2
@@ -43,7 +46,7 @@ module OKA.Metadata
   , runObjParser
   , metaField
   , metaFieldM
-    -- ** Constructors
+    -- ** Construction of metadata
   , mkObject
   , (.==)
   ) where
@@ -57,6 +60,7 @@ import Control.Monad.Trans.Class
 
 import Data.Aeson             (Value(..),(.:))
 import Data.Aeson             qualified as JSON
+import Data.Aeson.Key         qualified as JSON
 import Data.Aeson.KeyMap      qualified as KM
 import Data.Aeson.Key         (fromText,toText)
 import Data.Aeson.Types       qualified as JSON
@@ -192,6 +196,11 @@ lookupMeta (Metadata meta) path = go meta path []
 -- Parsers
 ----------------------------------------------------------------
 
+-- | Parse sinlge field of metadata
+(.::) :: IsMeta a => JSON.Object -> JSON.Key -> JSON.Parser a
+o .:: k = JSON.prependFailure (" - key: " ++ T.unpack (JSON.toText k) ++ "\n")
+        $ parseMeta =<< (o .: k)
+
 -- | Newtype for deriving IsMeta instances from FromJSON instances
 newtype AsAeson a = AsAeson a
 
@@ -293,6 +302,7 @@ metaObjectAt path parser v0
                          $ go ks =<< (o .: fromText k)
     go _      o          = fail $ "Expected object but got " ++ constrName o
 
+-- | Convert exhaustive object parser to standard JSON parser
 metaObject
   :: forall a. Typeable a
   => ObjParser a -> JParser a
