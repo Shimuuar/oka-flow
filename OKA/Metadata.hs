@@ -32,6 +32,7 @@ module OKA.Metadata
   , metaWithObject
     -- ** Deriving via
   , AsAeson(..)
+  , AsSubdict(..)
   , MProd(..)
     -- ** Special purpose parsers
   , metaSExp1
@@ -76,6 +77,7 @@ import Data.Text                          (Text)
 import Data.Text              qualified as T
 import Data.Vector            qualified as V
 import Data.Vector.Unboxed    qualified as VU
+import GHC.TypeLits
 import GHC.Generics
 
 
@@ -234,6 +236,17 @@ instance (GMetaProd f, GMetaProd g) => GMetaProd (f :*: g) where
 instance (IsMeta a) => GMetaProd (K1 i a) where
   gparseProd = coerce (parseMeta @a)
   gtoMeta    = coerce (toMeta    @a)
+
+-- | Derive metadata instance as value which uses given key
+newtype AsSubdict (key :: Symbol) a = AsSubdict a
+
+instance (KnownSymbol key, IsMeta a, Typeable a) => IsMeta (AsSubdict key a) where
+  parseMeta
+    = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
+    . metaWithObject (\o -> AsSubdict <$> (parseMeta =<< (o .:: k)))
+    where k = JSON.fromText $ T.pack $ symbolVal (Proxy @key)
+  toMeta (AsSubdict a) = mkObject [ k .== a ]
+    where k = T.pack $ symbolVal (Proxy @key)
 
 
 
