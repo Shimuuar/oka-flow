@@ -29,6 +29,7 @@ module OKA.Metadata
   , lookupMetaDef
     -- * Writing instances
   , (.::)
+  , metaWithObject
     -- ** Deriving via
   , AsAeson(..)
   , MProd(..)
@@ -308,10 +309,15 @@ metaObject
   => ObjParser a -> JParser a
 metaObject parser
   = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
-  . \case
-       Object o -> runObjParser parser o
-       o        -> fail $ "Expected object but got " ++ constrName o
+  . metaWithObject (runObjParser parser)
 
+metaWithObject
+  :: forall a. Typeable a
+  => (JSON.Object -> JSON.Parser a)
+  -> (JSON.Value  -> JSON.Parser a)
+metaWithObject parser = \case
+  Object o -> parser o
+  o        -> fail $ "Expected object but got " ++ constrName o
 
 constrName :: JSON.Value -> String
 constrName = \case
