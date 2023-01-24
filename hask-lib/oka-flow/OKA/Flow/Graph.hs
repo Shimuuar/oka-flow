@@ -14,6 +14,7 @@ module OKA.Flow.Graph
   , FlowGraph(..)
   , FIDSet(..)
   , Flow(..)
+  , filterMeta
   , appendMeta
     -- * Graph operations
   , hashFlowGraph
@@ -106,9 +107,12 @@ newtype Flow res eff a = Flow
   (ReaderT Metadata (StateT (FlowGraph res ()) (Program eff)) a)
   deriving newtype (Functor, Applicative, Monad)
 
-appendMeta :: Metadata -> Flow res eff a -> Flow res eff a
-appendMeta meta (Flow act) = Flow $ ReaderT $ \m ->
-  runReaderT act (m <> meta)
+filterMeta :: (Metadata -> Metadata) -> Flow res eff a -> Flow res eff a
+filterMeta f (Flow act) = Flow $ ReaderT $ \m ->
+  runReaderT act (f m)
+
+appendMeta :: IsMeta a => a -> Flow res eff b -> Flow res eff b
+appendMeta a = filterMeta (<> toMeta a)
 
 
 ----------------------------------------------------------------

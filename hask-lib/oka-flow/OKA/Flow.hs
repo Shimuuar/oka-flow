@@ -24,6 +24,7 @@ module OKA.Flow
   , Action(..)
     -- * Flow monad
   , Flow
+  , filterMeta
   , appendMeta
   , Result
   , ResultSet(..)
