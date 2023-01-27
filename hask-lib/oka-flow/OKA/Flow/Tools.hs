@@ -1,0 +1,137 @@
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE ImportQualifiedPost #-}
+-- |
+-- Tools for defining concrete workflows.
+module OKA.Flow.Tools
+  ( -- * GHC compilation
+    compileProgramGHC
+  , LockGHC
+  , newLockGHC
+  , defGhcOpts
+    -- * Rate limit
+  , LockLMDB
+  , newLockLMDB
+  , rateLimitLMDB
+    -- * External process
+  , runExternalProcess
+  , runJupyter
+  ) where
+
+import Control.Concurrent.MVar
+import Control.Concurrent.STM
+import Control.Exception
+import Control.Monad
+import Data.Aeson                   qualified as JSON
+import Data.ByteString.Lazy         qualified as BL
+import Data.Generics.Product.Typed
+import System.Process.Typed
+import System.Directory
+import System.FilePath  ((</>))
+import System.IO.Temp
+import System.Environment (getEnvironment)
+import OKA.Metadata
+
+
+----------------------------------------------------------------
+-- GHC compilation
+----------------------------------------------------------------
+
+-- | We want to have one concurrent build. Thus mutex
+newtype LockGHC = LockGHC (MVar ())
+
+-- | Create new lock
+newLockGHC :: IO LockGHC
+newLockGHC = LockGHC <$> newMVar ()
+
+compileProgramGHC
+  :: (HasType LockGHC res)
+  => FilePath -- ^ Path to Main module
+  -> [String] -- ^ Options to pass to GHC
+  -> (res -> IO ())
+compileProgramGHC exe opts res
+  = withMVar lock $ \() -> withProcessWait_ ghc $ \_ -> pure ()
+  where
+    LockGHC lock = getTyped res
+    ghc = proc "ghc" (exe:opts)
+
+defGhcOpts :: [String]
+defGhcOpts = [ "-O2"
+             , "-threaded"
+             , "-with-rtsopts=-T -A8m"
+             ]
+
+----------------------------------------------------------------
+-- Limit number of programs using LMDB
+----------------------------------------------------------------
+
+-- | We want to restrict number of simultaneous programs which connect to DB
+newtype LockLMDB = LockLMDB { getLockLMDB :: TVar Int }
+
+newLockLMDB :: Int -> IO LockLMDB
+newLockLMDB n = LockLMDB <$> newTVarIO n
+
+rateLimitLMDB
+  :: (HasType LockLMDB res)
+  => res
+  -> IO a
+  -> IO a
+rateLimitLMDB res io =
+  (acquire >> io) `finally` release
+  where
+    lock = getLockLMDB $ getTyped res
+    acquire = atomically $ do n <- readTVar lock
+                              when (n <= 0) retry
+                              modifyTVar' lock (subtract 1)
+    release = atomically $ do modifyTVar lock (+1)
+
+
+----------------------------------------------------------------
+-- Run external processes
+----------------------------------------------------------------
+
+-- | Run external process that adheres to standard calling conventions
+runExternalProcess
+  :: FilePath   -- ^ Path to executable
+  -> Metadata   -- ^ Metadata to pass to process
+  -> [FilePath] -- ^ Input parameters
+  -> FilePath   -- ^ Output parameters
+  -> IO ()
+runExternalProcess exe meta args out = do
+  withProcessWait_ run $ \_ -> pure ()
+  where
+    run = setStdin (byteStringInput $ JSON.encode meta)
+        $ proc exe (out:args)
+
+-- | Run jupyter notebook as an external process
+runJupyter
+  :: FilePath   -- ^ Notebook name
+  -> Metadata   -- ^ Metadata
+  -> [FilePath] -- ^ Parameters
+  -> IO ()
+-- FIXME: We need mutex although not badly. No reason to run two
+--        notebooks concurrently
+runJupyter notebook meta param = do
+  withSystemTempDirectory "oka-juju" $ \tmp -> do
+    let dir_config  = tmp </> "config"
+        dir_data    = tmp </> "data"
+        file_meta   = tmp </> "meta.json"
+    createDirectory dir_config
+    createDirectory dir_data
+    cwd <- getCurrentDirectory
+    BL.writeFile file_meta $ JSON.encode meta
+    --
+    env <- getEnvironment
+    let run = setEnv ( ("JUPYTER_DATA_DIR",   dir_data)
+                     : ("JUPYTER_CONFIG_DIR", dir_config)
+                     : ("OKA_META", file_meta)
+                     : [ ("OKA_ARG_" ++ show i, cwd </> arg)
+                       | (i,arg) <- [1::Int ..] `zip` param
+                       ]
+                     ++ env
+                     )
+            $ proc "jupyter" [ "notebook" , notebook
+                             , "--browser", "chromium"
+                             ]
+    withProcessWait_ run $ \_ -> pure ()
+
+    
