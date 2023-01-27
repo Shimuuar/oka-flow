@@ -123,9 +123,9 @@ flowProduceInt :: Text -> IO (Observe Int, () -> Flow res eff (Result Int))
 flowProduceInt k = do
   obs <- Observe <$> newIORef Nothing <*> newIORef ""
   pure ( obs
-       , liftWorkflow Workflow
+       , liftWorkflow $ Workflow Action 
          { workflowName = "produce-" ++ unpack k
-         , workflowRun  = ActNormal $ pure $ \meta [] out -> do
+         , workflowRun  = \_ meta [] out -> do
              let n = lookupMeta meta [k]
              assertBool "Flow must called only once" =<<
                atomicModifyIORef' (obsVal  obs)
@@ -141,9 +141,9 @@ flowSquare :: IO (Observe Int, Result Int -> Flow res eff (Result Int))
 flowSquare = do
   obs <- Observe <$> newIORef Nothing <*> newIORef ""
   pure ( obs
-       , liftWorkflow Workflow
+       , liftWorkflow $ Workflow Action
          { workflowName = "square"
-         , workflowRun  = ActNormal $ pure $ \_ [p] out -> do
+         , workflowRun  = \_ _ [p] out -> do
              n <- read @Int <$> readFile (p </> "out.txt")
              let n' = n * n
              assertBool "Flow must called only once" =<<
@@ -160,15 +160,12 @@ flowPhony :: IO (Observe Int, Result Int -> Flow res eff (Result ()))
 flowPhony = do
   obs <- Observe <$> newIORef Nothing <*> newIORef ""
   pure ( obs
-       , liftWorkflow Workflow
-         { workflowName = "phony"
-         , workflowRun  = ActPhony $ pure $ \_ [p] -> do
-             n <- read @Int <$> readFile (p </> "out.txt")
-             let n' = n * n
-             assertBool "Flow must called only once" =<<
-               atomicModifyIORef' (obsVal  obs)
-                 (\case
-                     Nothing -> (Just n', True)
-                     Just _  -> (Just n', False))
-         }
+       , liftWorkflow $ Phony $ \_ _ [p] -> do
+           n <- read @Int <$> readFile (p </> "out.txt")
+           let n' = n * n
+           assertBool "Flow must called only once" =<<
+             atomicModifyIORef' (obsVal  obs)
+               (\case
+                   Nothing -> (Just n', True)
+                   Just _  -> (Just n', False))
        )

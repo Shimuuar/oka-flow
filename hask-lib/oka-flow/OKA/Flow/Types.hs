@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveFunctor       #-}
 {-# LANGUAGE DerivingStrategies  #-}
 {-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE LambdaCase          #-}
 -- |
 -- Basic data types used in definition of dataflow program
 module OKA.Flow.Types
@@ -27,28 +28,22 @@ import OKA.Metadata           (Metadata)
 -- Workflow primitives
 ----------------------------------------------------------------
 
--- | Single action to be performed.
-data Action res
-  = ActNormal (res -> Metadata -> [FilePath] -> FilePath -> IO ())
-    -- ^ Action which produces output
-  | ActPhony  (res -> Metadata -> [FilePath] -> IO ())
-    -- ^ Action which doesn't produce any outputs
-
--- | Descritpion of workflow function. It knows how to build
-data Workflow res = Workflow
-  { workflowRun    :: Action res
-    -- ^ Start workflow. This function takes resources as input and
-    --   return STM action which either returns actual IO function to
-    --   run or retries if it's unable to secure necessary resources.
-  , workflowName   :: String
-    -- ^ Name of workflow. Used for caching
+-- | Single action to be performed. It contains both workflow name and
+--   action to pefgorm workflow
+data Action res = Action
+  { workflowName :: String
+  , workflowRun  :: res -> Metadata -> [FilePath] -> FilePath -> IO ()
   }
 
-isPhony :: Workflow res -> Bool
-isPhony f = case workflowRun f of
-  ActNormal{} -> False
-  ActPhony{}  -> True
+-- | Descritpion of workflow function. It knows how to build
+data Workflow res
+  = Workflow (Action res)
+  | Phony    (res -> Metadata -> [FilePath] -> IO ())
 
+isPhony :: Workflow res -> Bool
+isPhony = \case
+  Workflow{} -> False
+  Phony{}    -> True
 
 -- | Internal identifier of dataflow function in a graph.
 newtype FunID = FunID Int

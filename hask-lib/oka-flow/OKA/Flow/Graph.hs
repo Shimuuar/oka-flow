@@ -120,8 +120,20 @@ appendMeta a = filterMeta (<> toMeta a)
 ----------------------------------------------------------------
 
 -- | Compute all hashes and resolve all nodes to corresponding paths
-hashFlowGraph :: FlowGraph res () -> FlowGraph res StorePath
+hashFlowGraph :: FlowGraph res () -> FlowGraph res (Maybe StorePath)
 hashFlowGraph = fmapFlowGraph hashFun
+
+hashFun :: Fun res (Maybe StorePath) -> Maybe StorePath
+hashFun Fun{..} = case funWorkflow of
+  Workflow (Action nm _) -> Just $ StorePath nm (Hash hash)
+  Phony{}                -> Nothing
+  where
+    hash   = SHA1.hashlazy $ BL.fromChunks [h | Hash h <- hashes]
+    hashes = hashMeta funMetadata
+           : [ case p of
+                 Nothing              -> error "INTERNAL ERROR: dependence on PHONY node"
+                 Just (StorePath _ h) -> h
+             | p <- funParam]
 
 -- Compute hash of metadata
 hashMeta :: Metadata -> Hash
@@ -152,19 +164,12 @@ jsArray v
     JSONB.Encoding e1 <@> JSONB.Encoding e2 = JSONB.Encoding (e1 <> e2)
 
 
-hashFun :: Fun res StorePath -> StorePath
-hashFun Fun{..} = StorePath (workflowName funWorkflow) (Hash hash)
-  where
-    hash   = SHA1.hashlazy $ BL.fromChunks [h | Hash h <- hashes]
-    hashes = hashMeta funMetadata
-           : [ h | StorePath _ h <- funParam]
-
 
 -- | Remove all workflows that already completed execution.
 shakeFlowGraph
   :: (Monad m)
-  => (StorePath -> m Bool)   -- ^ Predicate to check whether path exists
-  -> FlowGraph res StorePath -- ^ Dataflow graph
+  => (StorePath -> m Bool)           -- ^ Predicate to check whether path exists
+  -> FlowGraph res (Maybe StorePath) -- ^ Dataflow graph
   -> m FIDSet
 shakeFlowGraph tgtExists (FlowGraph workflows targets)
   = foldM addFID (FIDSet mempty mempty) targets
@@ -175,10 +180,12 @@ shakeFlowGraph tgtExists (FlowGraph workflows targets)
       | fid `Set.member` fidWanted = pure fids
       -- Check if result has been computed already
       | otherwise = do
-          exists <- case isPhony (funWorkflow f) of
+          exists <- case funWorkflow f of
             -- Phony targets are always executed
-            True  -> pure False
-            False -> tgtExists (snd (funOutput f))
+            Phony{}    -> pure False
+            Workflow{} -> case funOutput f of
+              (_, Just path) -> tgtExists path
+              (_, Nothing)   -> error "INTERNAL ERROR: dependence on phony target"
           case exists of
             True  -> pure $ fids & fidExistsL %~ Set.insert fid
             False -> foldM addFID fids' (fst <$> funParam f)

@@ -89,9 +89,9 @@ addTMVars = traverse $ \f -> do v <- newEmptyTMVarIO
 
 -- Prepare function for evaluation
 prepareFun
-  :: FlowCtx eff res                        -- Evaluation context
-  -> FIDSet                                 -- Our target set
-  -> Fun res (FunID, (TMVar (), StorePath)) -- Function to evaluate
+  :: FlowCtx eff res                              -- Evaluation context
+  -> FIDSet                                       -- Our target set
+  -> Fun res (FunID, (TMVar (), Maybe StorePath)) -- Function to evaluate
   -> res
   -> IO ()
 prepareFun FlowCtx{..} FIDSet{..} Fun{..} res = do
@@ -99,27 +99,28 @@ prepareFun FlowCtx{..} FIDSet{..} Fun{..} res = do
   for_ funParam $ \(fid, (v,_)) -> do
     when (fid `Set.notMember` fidExists) $ atomically $ readTMVar v
   -- Run action
-  case workflowRun funWorkflow of
-    ActNormal act -> prepareNormal act
-    ActPhony  act -> preparePhony  act
+  case funWorkflow of
+    -- Prepare normal action. We first create output directory and
+    -- write everything there. After we're done we rename it.
+    Workflow (Action _ act) -> prepareNormal act
+    -- Execute phony action. We don't need to bother with setting up output
+    Phony    act            -> act res meta params
   -- Signal that we successfully complete execution
   atomically $ putTMVar tmvar ()
   where
     meta   = funMetadata                         -- Metadata
     paramP = toPath <$> funParam                 -- Parameters relative to store
     params = [ flowCtxRoot </> p | p <- paramP ] -- Parameters as real path
-    out    = flowCtxRoot </> toPath funOutput    -- Output directory
-    build  = out ++ "-build"                     -- Temporary build directory
     --
     (_,(tmvar,_))       = funOutput  
-    toPath (_,(_,path)) = storePath path
-    -- Prepare normal action. We first create output directory and
-    -- write everything there. After we're done we rename it.
+    toPath (_,(_,Just path)) = storePath path
+    toPath (_,(_,Nothing  )) = error "INTERNAL ERROR: dependence on PHONY node"
+    --
     prepareNormal action = do
+      let out    = flowCtxRoot </> toPath funOutput    -- Output directory
+          build  = out ++ "-build"                     -- Temporary build directory
       createDirectory build
       BL.writeFile (build </> "meta.json") $ JSON.encode $ let Metadata m = meta in m
       writeFile    (build </> "deps.txt")  $ unlines paramP
       _ <- action res meta params build `onException` removeDirectoryRecursive build
       renameDirectory build out
-    -- Execute phony action. We don't need to bother with setting up output
-    preparePhony action = action res meta params

@@ -45,6 +45,7 @@ import Data.Map.Strict            ((!))
 import Data.Map.Strict            qualified as Map
 import Data.Set                   qualified as Set
 
+import OKA.Metadata
 import OKA.Flow.Graph
 import OKA.Flow.Types
 import OKA.Flow.Run
@@ -89,10 +90,10 @@ liftWorkflow exe p = Flow $ do
 -- | Lift phony workflow (not checked)
 liftPhony
   :: (ResultSet params)
-  => Workflow res
+  => (res -> Metadata -> [FilePath] -> IO ())
   -> params
   -> Flow res eff ()
-liftPhony exe p = want =<< liftWorkflow exe p
+liftPhony exe p = want =<< liftWorkflow (Phony exe) p
 
 -- | Lift effect
 liftEff :: eff a -> Flow res eff a
