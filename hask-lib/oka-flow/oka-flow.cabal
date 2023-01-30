@@ -36,6 +36,8 @@ Library
                   , unordered-containers >=0.2
                     --
                   , typed-process        >=0.2
+                  , process
+                  , unix
                   , generic-lens         >=2.2
                   , temporary            >=1.3
   Exposed-modules:

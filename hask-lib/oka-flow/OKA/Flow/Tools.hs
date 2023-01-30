@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE NumericUnderscores  #-}
 -- |
 -- Tools for defining concrete workflows.
 module OKA.Flow.Tools
@@ -17,6 +19,7 @@ module OKA.Flow.Tools
   , runJupyter
   ) where
 
+import Control.Applicative
 import Control.Concurrent.MVar
 import Control.Concurrent.STM
 import Control.Exception
@@ -26,9 +29,11 @@ import Data.ByteString.Lazy         qualified as BL
 import Data.Generics.Product.Typed
 import System.Process.Typed
 import System.Directory
-import System.FilePath  ((</>))
+import System.FilePath              ((</>))
 import System.IO.Temp
-import System.Environment (getEnvironment)
+import System.Environment           (getEnvironment)
+import System.Posix.Signals         (signalProcess, sigINT)
+import System.Process               (getPid)
 import OKA.Metadata
 
 
@@ -97,10 +102,22 @@ runExternalProcess
   -> FilePath   -- ^ Output parameters
   -> IO ()
 runExternalProcess exe meta args out = do
-  withProcessWait_ run $ \_ -> pure ()
+  withProcessWait_ run $ \pid -> do
+    _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
+    pure ()
   where
     run = setStdin (byteStringInput $ JSON.encode meta)
         $ proc exe (out:args)
+    -- Kill process but allow it to die gracefully by sending SIGINT
+    -- first. GHC install handler for it but not for SIGTERM
+    softKill p = getPid (unsafeProcessHandle p) >>= \case
+      Nothing  -> pure ()
+      Just pid -> do
+        delay <- registerDelay 1_000_000
+        signalProcess sigINT pid
+        atomically $  (check =<< readTVar delay)
+                  <|> (void $ waitExitCodeSTM p)
+
 
 -- | Run jupyter notebook as an external process
 runJupyter
@@ -133,5 +150,3 @@ runJupyter notebook meta param = do
                              , "--browser", "chromium"
                              ]
     withProcessWait_ run $ \_ -> pure ()
-
-    
