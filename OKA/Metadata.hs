@@ -371,7 +371,10 @@ metaFieldM :: IsMeta a => Text -> ObjParser (Maybe a)
 metaFieldM k = ObjParser $ do
   (v, o) <- popFromMapM k =<< get
   put o
-  lift $ traverse parseMeta v
+  lift $ JSON.prependFailure (" - key: " ++ T.unpack k ++ "\n")
+       $ case v of
+           Nothing -> pure Nothing
+           Just x  -> parseMeta x
 
 popFromMap :: MonadFail m => Text -> JSON.Object -> m (JSON.Value, JSON.Object)
 popFromMap k o = getCompose $ KM.alterF go (fromText k) o
