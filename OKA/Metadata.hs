@@ -214,7 +214,9 @@ instance (JSON.ToJSON a, JSON.FromJSON a) => IsMeta (AsAeson a) where
 type JParser a = JSON.Value -> JSON.Parser a
 
 
--- | Product of several metadata entries.
+-- | Direct product of several metadata entries. It's intended for use
+--   with single product type where fields are represented as
+--   dictionaries with nonintersecting keys.
 newtype MProd a = MProd a
   deriving newtype (Show,Eq,Ord,Generic)
 
@@ -237,7 +239,9 @@ instance (IsMeta a) => GMetaProd (K1 i a) where
   gparseProd = coerce (parseMeta @a)
   gtoMeta    = coerce (toMeta    @a)
 
--- | Derive metadata instance as value which uses given key
+
+-- | Encode value using 'IsMeta' instance for @a@ placed inside
+--   dictionary under key @k@.
 newtype AsSubdict (key :: Symbol) a = AsSubdict a
 
 instance (KnownSymbol key, IsMeta a, Typeable a) => IsMeta (AsSubdict key a) where
