@@ -33,6 +33,7 @@ module OKA.Metadata
     -- ** Deriving via
   , AsAeson(..)
   , AsSubdict(..)
+  , AsReadShow(..)
   , MProd(..)
     -- ** Special purpose parsers
   , metaSExp1
@@ -252,6 +253,19 @@ instance (KnownSymbol key, IsMeta a, Typeable a) => IsMeta (AsSubdict key a) whe
   toMeta (AsSubdict a) = mkObject [ k .== a ]
     where k = T.pack $ symbolVal (Proxy @key)
 
+
+-- | Encode value using 'Show' and 'Read' instances.
+newtype AsReadShow a = AsReadShow a
+
+instance (Show a, Read a, Typeable a) => IsMeta (AsReadShow a) where
+  parseMeta o
+    = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
+    $ case o of
+        String (T.unpack -> s) -> case reads s of
+          [(a,"")] -> pure (AsReadShow a)
+          _        -> fail $ "Unable to read string: " ++ show s
+        _ -> fail $ "Expected object but got " ++ constrName o
+  toMeta (AsReadShow a) = (Metadata . String . T.pack . show) a
 
 
 metaSExp1 :: (Typeable r, IsMeta a)
