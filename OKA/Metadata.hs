@@ -1,8 +1,10 @@
+{-# LANGUAGE AllowAmbiguousTypes        #-}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE DeriveAnyClass             #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE DerivingVia                #-}
 {-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ImportQualifiedPost        #-}
 {-# LANGUAGE KindSignatures             #-}
@@ -34,6 +36,7 @@ module OKA.Metadata
   , AsAeson(..)
   , AsSubdict(..)
   , AsReadShow(..)
+  , AsRecord(..)
   , MProd(..)
     -- ** Special purpose parsers
   , metaSExp1
@@ -55,7 +58,7 @@ module OKA.Metadata
   ) where
 
 import Control.Applicative
-import Control.Exception
+import Control.Exception                 (Exception,throw,throwIO)
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.State.Strict
@@ -70,6 +73,7 @@ import Data.Aeson.Types       qualified as JSON
 import Data.Histogram.Bin
 import Data.Yaml              qualified as Yaml
 import Data.Int
+import Data.Char
 import Data.Functor.Compose
 import Data.Typeable
 import Data.Word
@@ -200,10 +204,14 @@ lookupMeta (Metadata meta) path = go meta path []
 -- Parsers
 ----------------------------------------------------------------
 
+type JParser a = JSON.Value -> JSON.Parser a
+
 -- | Parse sinlge field of metadata
 (.::) :: IsMeta a => JSON.Object -> JSON.Key -> JSON.Parser a
 o .:: k = JSON.prependFailure (" - key: " ++ T.unpack (JSON.toText k) ++ "\n")
         $ parseMeta =<< (o .: k)
+
+
 
 -- | Newtype for deriving IsMeta instances from FromJSON instances
 newtype AsAeson a = AsAeson a
@@ -212,7 +220,6 @@ instance (JSON.ToJSON a, JSON.FromJSON a) => IsMeta (AsAeson a) where
   parseMeta = coerce (JSON.parseJSON @a)
   toMeta    = coerce (JSON.toJSON    @a)
 
-type JParser a = JSON.Value -> JSON.Parser a
 
 
 -- | Direct product of several metadata entries. It's intended for use
@@ -241,6 +248,7 @@ instance (IsMeta a) => GMetaProd (K1 i a) where
   gtoMeta    = coerce (toMeta    @a)
 
 
+
 -- | Encode value using 'IsMeta' instance for @a@ placed inside
 --   dictionary under key @k@.
 newtype AsSubdict (key :: Symbol) a = AsSubdict a
@@ -252,6 +260,78 @@ instance (KnownSymbol key, IsMeta a, Typeable a) => IsMeta (AsSubdict key a) whe
     where k = JSON.fromText $ T.pack $ symbolVal (Proxy @key)
   toMeta (AsSubdict a) = mkObject [ k .== a ]
     where k = T.pack $ symbolVal (Proxy @key)
+
+
+
+-- | Derive 'IsMeta' using generics. It will derive instance which
+--   uses exhaustive parser and will work only for record types
+newtype AsRecord a = AsRecord a
+
+instance (Generic a, GRecParse (Rep a), GRecToMeta (Rep a), Typeable a
+         ) => IsMeta (AsRecord a) where
+  parseMeta = metaObject $ (AsRecord . to) <$> grecParse
+  toMeta (AsRecord a) = mkObject $ grecToMeta $ from a
+
+class GRecParse f where
+  grecParse :: ObjParser (f p)
+
+class GRecToMeta f where
+  grecToMeta :: f p -> [(JSON.Key, Metadata)]
+
+deriving newtype instance GRecParse f => GRecParse (M1 D i f)
+deriving newtype instance GRecParse f => GRecParse (M1 C i f)
+instance (GRecParse f, GRecParse g) => GRecParse (f :*: g) where
+  grecParse = (:*:) <$> grecParse <*> grecParse
+instance {-# OVERLAPPABLE #-} (IsMeta a, KnownSymbol fld
+         ) => GRecParse (M1 S ('MetaSel ('Just fld) u s d) (K1 i a)) where
+  grecParse = M1 . K1 <$> metaField (fieldName @fld)
+instance {-# OVERLAPPING #-} (IsMeta a, KnownSymbol fld
+         ) => GRecParse (M1 S ('MetaSel ('Just fld) u s d) (K1 i (Maybe a))) where
+  grecParse = M1 . K1 <$> metaFieldM (fieldName @fld)
+
+deriving newtype instance GRecToMeta f => GRecToMeta (M1 D i f)
+deriving newtype instance GRecToMeta f => GRecToMeta (M1 C i f)
+instance (GRecToMeta f, GRecToMeta g) => GRecToMeta (f :*: g) where
+  grecToMeta (f :*: g) = grecToMeta f <> grecToMeta g
+instance (IsMeta a, KnownSymbol fld
+         ) => GRecToMeta (M1 S ('MetaSel ('Just fld) u s d) (K1 i a)) where
+  grecToMeta (M1 (K1 a)) = [fieldName @fld .== a]
+
+fieldName :: forall fld. KnownSymbol fld => Text
+fieldName = T.pack name
+  where
+    name = lower $ stripQ field
+    -- Strip field name to ' if present
+    stripQ s | '\'' `elem` s = drop 1 $ dropWhile (/='\'') s
+             | otherwise     = s
+    field = symbolVal (Proxy @fld)
+
+-- Convert fields to lower case
+lower :: String -> String
+lower = chop . go False where
+  chop ('_':s) = s
+  chop s       = s
+  --
+  go _ []    = []
+  go _ s@[_] = s
+  go True  (a:ss)   | isUpper a = a : go True  ss
+                    | otherwise = a : go False ss
+  go False (a:b:ss) | isUpper a && isUpper b = a  : b : go True  ss
+                    | isUpper a              = '_': toLower a : go False (b:ss)
+                    | otherwise              =      a : go False (b:ss)
+
+instance TypeError ('Text "AsRecord could be used only with product types"
+                   ) => GRecParse (M1 S ('MetaSel 'Nothing u s d) f) where
+  grecParse = error "UNREACHABLE"
+instance TypeError ('Text "AsRecord could be used only with product types"
+                   ) => GRecToMeta (M1 S ('MetaSel 'Nothing u s d) f) where
+  grecToMeta = error "UNREACHABLE"
+
+instance TypeError ('Text "AsRecord couldn't be used for sum types") => GRecParse (f :+: g) where
+  grecParse = error "UNREACHABLE"
+instance TypeError ('Text "AsRecord couldn't be used for sum types") => GRecToMeta (f :+: g) where
+  grecToMeta = error "UNREACHABLE"
+
 
 
 -- | Encode value using 'Show' and 'Read' instances.
@@ -266,6 +346,7 @@ instance (Show a, Read a, Typeable a) => IsMeta (AsReadShow a) where
           _        -> fail $ "Unable to read string: " ++ show s
         _ -> fail $ "Expected object but got " ++ constrName o
   toMeta (AsReadShow a) = (Metadata . String . T.pack . show) a
+
 
 
 metaSExp1 :: (Typeable r, IsMeta a)
