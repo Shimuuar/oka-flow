@@ -211,8 +211,7 @@ type JParser a = JSON.Value -> JSON.Parser a
 
 -- | Parse sinlge field of metadata
 (.::) :: IsMeta a => JSON.Object -> JSON.Key -> JSON.Parser a
-o .:: k = JSON.prependFailure (" - key: " ++ T.unpack (JSON.toText k) ++ "\n")
-        $ parseMeta =<< (o .: k)
+o .:: k = parseMeta =<< (o .: k)
 
 
 
@@ -258,7 +257,7 @@ newtype AsSubdict (key :: Symbol) a = AsSubdict a
 
 instance (KnownSymbol key, IsMeta a, Typeable a) => IsMeta (AsSubdict key a) where
   parseMeta
-    = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
+    = JSON.prependFailure (" - key: " ++ T.unpack (JSON.toText k) ++ "\n")
     . metaWithObject (\o -> AsSubdict <$> (parseMeta =<< (o .:: k)))
     where k = JSON.fromText $ T.pack $ symbolVal (Proxy @key)
   toMeta (AsSubdict a) = mkObject [ k .== a ]
@@ -269,6 +268,13 @@ instance (KnownSymbol key, IsMeta a, Typeable a) => IsMeta (AsSubdict key a) whe
 -- | Derive 'IsMeta' using generics. It will derive instance which
 --   uses exhaustive parser and will work only for record types
 newtype AsRecord ty a = AsRecord a
+
+instance (Generic a, GRecParse (Rep a), GRecToMeta (Rep a), Typeable a, Typeable ty, FieldMangler ty
+         ) => IsMeta (AsRecord ty a) where
+  parseMeta = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
+            . metaWithObject
+                (runObjParser $ AsRecord . to <$> grecParse (proxy# @ty))
+  toMeta (AsRecord a) = mkObject $ grecToMeta (proxy# @ty) $ from a
 
 -- | Way to define transformation of field name
 class FieldMangler t where
@@ -305,11 +311,6 @@ lower = chop . goL False . go_ where
   goL _     []                                = []
 
     
-instance (Generic a, GRecParse (Rep a), GRecToMeta (Rep a), Typeable a, Typeable ty, FieldMangler ty
-         ) => IsMeta (AsRecord ty a) where
-  parseMeta = metaObject $ (AsRecord . to) <$> grecParse (proxy# @ty)
-  toMeta (AsRecord a) = mkObject $ grecToMeta (proxy# @ty) $ from a
-
 class GRecParse f where
   grecParse :: FieldMangler ty => Proxy# ty -> ObjParser (f p)
 
