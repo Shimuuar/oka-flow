@@ -37,6 +37,7 @@ Test-suite oka-metadata-tests
                      --
                    , tasty
                    , tasty-quickcheck
+                   , tasty-hunit
                    , generic-arbitrary >=1.0.1
                    , vector
                    , histogram-fill

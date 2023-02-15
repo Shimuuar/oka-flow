@@ -9,10 +9,10 @@
 {-# LANGUAGE ImportQualifiedPost        #-}
 {-# LANGUAGE KindSignatures             #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MagicHash                  #-}
 {-# LANGUAGE MultiWayIf                 #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE PatternSynonyms            #-}
-{-# LANGUAGE PolyKinds                  #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE StandaloneDeriving         #-}
@@ -37,6 +37,9 @@ module OKA.Metadata
   , AsSubdict(..)
   , AsReadShow(..)
   , AsRecord(..)
+  , FieldMangler(..)
+  , ManglerIdentity
+  , ManglerTick
   , MProd(..)
     -- ** Special purpose parsers
   , metaSExp1
@@ -84,7 +87,7 @@ import Data.Vector            qualified as V
 import Data.Vector.Unboxed    qualified as VU
 import GHC.TypeLits
 import GHC.Generics
-
+import GHC.Exts
 
 ----------------------------------------------------------------
 --
@@ -265,72 +268,79 @@ instance (KnownSymbol key, IsMeta a, Typeable a) => IsMeta (AsSubdict key a) whe
 
 -- | Derive 'IsMeta' using generics. It will derive instance which
 --   uses exhaustive parser and will work only for record types
-newtype AsRecord a = AsRecord a
+newtype AsRecord ty a = AsRecord a
 
-instance (Generic a, GRecParse (Rep a), GRecToMeta (Rep a), Typeable a
-         ) => IsMeta (AsRecord a) where
-  parseMeta = metaObject $ (AsRecord . to) <$> grecParse
-  toMeta (AsRecord a) = mkObject $ grecToMeta $ from a
+-- | Way to define transformation of field name
+class FieldMangler t where
+  mangleFieldName :: String -> String
+
+-- | Preserver field name
+data ManglerIdentity
+
+instance FieldMangler ManglerIdentity where
+  mangleFieldName = id
+
+-- | Drop tick and convert name from CamelCase to snake_case
+data ManglerTick
+
+instance FieldMangler ManglerTick where
+  mangleFieldName = lower . stripQ where
+    stripQ s | '\'' `elem` s = drop 1 $ dropWhile (/='\'') s
+             | otherwise     = s
+
+-- Convert fields to lower case
+lower :: String -> String
+lower = chop . goL False . go_ where
+  chop ('_':s) = s
+  chop s       = s
+  -- Insert _ on lower-upper case border
+  go_ (a:b:ss) | isLower a && isUpper b = a : '_' : go_ (b : ss)
+  go_ (a:ss)                            = a :       go_ ss
+  go_ []                                = []
+  -- Lowercase single capital letters
+  goL True  (a:ss)                            = a : goL (isUpper a) ss
+  goL False (a:b:ss) | isUpper a && isLower b = toLower a : b : goL False ss
+                     | isUpper a && isUpper b = a : b : goL True ss
+  goL False (a:ss)                            = a : goL False ss
+  goL _     []                                = []
+
+    
+instance (Generic a, GRecParse (Rep a), GRecToMeta (Rep a), Typeable a, Typeable ty, FieldMangler ty
+         ) => IsMeta (AsRecord ty a) where
+  parseMeta = metaObject $ (AsRecord . to) <$> grecParse (proxy# @ty)
+  toMeta (AsRecord a) = mkObject $ grecToMeta (proxy# @ty) $ from a
 
 class GRecParse f where
-  grecParse :: ObjParser (f p)
+  grecParse :: FieldMangler ty => Proxy# ty -> ObjParser (f p)
 
 class GRecToMeta f where
-  grecToMeta :: f p -> [(JSON.Key, Metadata)]
+  grecToMeta :: FieldMangler ty => Proxy# ty -> f p -> [(JSON.Key, Metadata)]
 
 deriving newtype instance GRecParse f => GRecParse (M1 D i f)
 deriving newtype instance GRecParse f => GRecParse (M1 C i f)
 instance (GRecParse f, GRecParse g) => GRecParse (f :*: g) where
-  grecParse = (:*:) <$> grecParse <*> grecParse
+  grecParse ty = (:*:) <$> grecParse ty <*> grecParse ty
 instance {-# OVERLAPPABLE #-} (IsMeta a, KnownSymbol fld
          ) => GRecParse (M1 S ('MetaSel ('Just fld) u s d) (K1 i a)) where
-  grecParse = M1 . K1 <$> metaField (fieldName @fld)
+  grecParse ty = M1 . K1 <$> metaField (fieldName @fld ty)
 instance {-# OVERLAPPING #-} (IsMeta a, KnownSymbol fld
          ) => GRecParse (M1 S ('MetaSel ('Just fld) u s d) (K1 i (Maybe a))) where
-  grecParse = M1 . K1 <$> metaFieldM (fieldName @fld)
+  grecParse ty = M1 . K1 <$> metaFieldM (fieldName @fld ty)
 
 deriving newtype instance GRecToMeta f => GRecToMeta (M1 D i f)
 deriving newtype instance GRecToMeta f => GRecToMeta (M1 C i f)
 instance (GRecToMeta f, GRecToMeta g) => GRecToMeta (f :*: g) where
-  grecToMeta (f :*: g) = grecToMeta f <> grecToMeta g
-instance (IsMeta a, KnownSymbol fld
+  grecToMeta ty (f :*: g) = grecToMeta ty f <> grecToMeta ty g
+instance {-# OVERLAPPABLE #-} (IsMeta a, KnownSymbol fld
          ) => GRecToMeta (M1 S ('MetaSel ('Just fld) u s d) (K1 i a)) where
-  grecToMeta (M1 (K1 a)) = [fieldName @fld .== a]
+  grecToMeta ty (M1 (K1 a)) = [fieldName @fld ty .== a]
+instance {-# OVERLAPPING #-} (IsMeta a, KnownSymbol fld
+         ) => GRecToMeta (M1 S ('MetaSel ('Just fld) u s d) (K1 i (Maybe a))) where
+  grecToMeta ty (M1 (K1 (Just a))) = [fieldName @fld ty .== a]
+  grecToMeta _  (M1 (K1 Nothing )) = []
 
-fieldName :: forall fld. KnownSymbol fld => Text
-fieldName = T.pack name
-  where
-    name = lower $ stripQ field
-    -- Strip field name to ' if present
-    stripQ s | '\'' `elem` s = drop 1 $ dropWhile (/='\'') s
-             | otherwise     = s
-    field = symbolVal (Proxy @fld)
-
--- Convert fields to lower case
-lower :: String -> String
-lower = chop . go False where
-  chop ('_':s) = s
-  chop s       = s
-  --
-  go _ []    = []
-  go _ s@[_] = s
-  go True  (a:ss)   | isUpper a = a : go True  ss
-                    | otherwise = a : go False ss
-  go False (a:b:ss) | isUpper a && isUpper b = a  : b : go True  ss
-                    | isUpper a              = '_': toLower a : go False (b:ss)
-                    | otherwise              =      a : go False (b:ss)
-
-instance TypeError ('Text "AsRecord could be used only with product types"
-                   ) => GRecParse (M1 S ('MetaSel 'Nothing u s d) f) where
-  grecParse = error "UNREACHABLE"
-instance TypeError ('Text "AsRecord could be used only with product types"
-                   ) => GRecToMeta (M1 S ('MetaSel 'Nothing u s d) f) where
-  grecToMeta = error "UNREACHABLE"
-
-instance TypeError ('Text "AsRecord couldn't be used for sum types") => GRecParse (f :+: g) where
-  grecParse = error "UNREACHABLE"
-instance TypeError ('Text "AsRecord couldn't be used for sum types") => GRecToMeta (f :+: g) where
-  grecToMeta = error "UNREACHABLE"
+fieldName :: forall fld ty. (KnownSymbol fld, FieldMangler ty) => Proxy# ty -> Text
+fieldName _ = T.pack $ mangleFieldName @ty $ symbolVal (Proxy @fld)
 
 
 

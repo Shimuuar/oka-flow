@@ -16,6 +16,7 @@ import Data.Typeable
 import OKA.Metadata
 import Test.Tasty
 import Test.Tasty.QuickCheck
+import Test.Tasty.HUnit
 import Test.QuickCheck.Arbitrary.Generic
 import Data.Histogram.Bin
 import Data.Histogram.QuickCheck ()
@@ -23,17 +24,30 @@ import GHC.Generics (Generic)
 
 
 tests :: TestTree
-tests = testGroup "Roundtrip"
-  [ testSerialise @BinD
-  , testSerialise @Int
-  , testSerialise @[Int]
-  , testSerialise @(Int,Double)
-  , testSerialise @(Int,Double,(Int,Int))
-  , testSerialise @(Maybe [Int])
-    --
-  , testSerialise @ENUM
-  , testSerialise @Record
-  , testSerialise @Record2
+tests = testGroup "Metadata"
+  [ testGroup "Roundtrip"
+    [ testSerialise @BinD
+    , testSerialise @Int
+    , testSerialise @[Int]
+    , testSerialise @(Int,Double)
+    , testSerialise @(Int,Double,(Int,Int))
+    , testSerialise @(Maybe [Int])
+      --
+    , testSerialise @ENUM
+    , testSerialise @Record
+    , testSerialise @Record2
+    ]
+  , testGroup "Mangler-Tick"
+    [ testMangle "asd"        "asd"
+    , testMangle "Adf"        "adf"
+    , testMangle "AAb"        "AAb"
+    , testMangle "AAAb"       "AAAb"
+    , testMangle "AAAAbc"     "AAAAbc"
+    , testMangle "asdX"       "asd_X"
+    , testMangle "asdXX"      "asd_XX"
+    , testMangle "FooBar"     "foo_bar"
+    , testMangle "met'FooBar" "foo_bar"
+    ]
   ]
 
 testSerialise :: forall a. (Typeable a, Arbitrary a, Show a, Eq a, IsMeta a) => TestTree
@@ -41,6 +55,9 @@ testSerialise
   = testProperty (show (typeOf (undefined :: a)))
   $ \(a::a) -> fromMeta (toMeta a) == a
 
+testMangle :: String -> String -> TestTree
+testMangle field key = testCase (field ++ " -> " ++ key) $ do
+  key @=? mangleFieldName @ManglerTick field
 
 ----------------------------------------------------------------
 -- Derivations
@@ -56,7 +73,7 @@ data Record = Record
   , bar :: Maybe Int
   }
   deriving stock (Show,Read,Eq,Generic)
-  deriving IsMeta    via AsRecord Record
+  deriving IsMeta    via AsRecord ManglerTick Record
   deriving Arbitrary via GenericArbitrary Record
 
 data Record2 = Record2
@@ -64,6 +81,6 @@ data Record2 = Record2
   , rec'BarBaz :: Maybe Int
   }
   deriving stock (Show,Read,Eq,Generic)
-  deriving IsMeta    via AsRecord Record2
+  deriving IsMeta    via AsRecord ManglerTick Record2
   deriving Arbitrary via GenericArbitrary Record2
 
