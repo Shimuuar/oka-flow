@@ -17,6 +17,7 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE UndecidableInstances       #-}
 {-# LANGUAGE ViewPatterns               #-}
@@ -67,24 +68,32 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
 
-import Data.Aeson             (Value(..),(.:))
-import Data.Aeson             qualified as JSON
-import Data.Aeson.Key         qualified as JSON
-import Data.Aeson.KeyMap      qualified as KM
-import Data.Aeson.Key         (fromText,toText)
-import Data.Aeson.Types       qualified as JSON
+import Data.Aeson                 (Value(..),(.:))
+import Data.Aeson                 qualified as JSON
+import Data.Aeson.Key             qualified as JSON
+import Data.Aeson.KeyMap          qualified as KM
+import Data.Aeson.Key             (fromText,toText)
+import Data.Aeson.Types           qualified as JSON
 import Data.Histogram.Bin
-import Data.Yaml              qualified as Yaml
+import Data.Yaml                  qualified as Yaml
 import Data.Int
 import Data.Char
 import Data.Functor.Compose
 import Data.Typeable
 import Data.Word
 import Data.Coerce
-import Data.Text                          (Text)
-import Data.Text              qualified as T
-import Data.Vector            qualified as V
-import Data.Vector.Unboxed    qualified as VU
+import Data.Text                  (Text)
+import Data.Text                  qualified as T
+import Data.Vector                qualified as V
+import Data.Vector.Generic        ((!))
+import Data.Vector.Unboxed        qualified as VU
+import Data.Vector.Storable       qualified as VS
+import Data.Vector.Fixed          qualified as F
+import Data.Vector.Fixed.Cont     qualified as F(arity)
+import Data.Vector.Fixed.Unboxed  qualified as FU
+import Data.Vector.Fixed.Boxed    qualified as FB
+import Data.Vector.Fixed.Storable qualified as FS
+import Text.Printf
 import GHC.TypeLits
 import GHC.Generics
 import GHC.Exts
@@ -554,13 +563,45 @@ instance (IsMeta a) => IsMeta (Maybe a) where
 instance (IsMeta a) => IsMeta [a] where
   parseMeta = fmap V.toList . parseMeta
   toMeta    = Metadata . Array . V.fromList . map toMetaValue
+
 instance (IsMeta a, VU.Unbox a) => IsMeta (VU.Vector a) where
   parseMeta = fmap VU.convert . parseMeta @(V.Vector a)
   toMeta = Metadata . Array . V.map toMetaValue . V.convert
+
+instance (IsMeta a, VS.Storable a) => IsMeta (VS.Vector a) where
+  parseMeta = fmap VS.convert . parseMeta @(V.Vector a)
+  toMeta = Metadata . Array . V.map toMetaValue . V.convert
+
 instance (IsMeta a) => IsMeta (V.Vector a) where
   parseMeta = JSON.prependFailure " - traversing Array\n"
             . JSON.withArray "Vector" (traverse parseMeta)
   toMeta = Metadata . Array . V.map toMetaValue
+
+instance (IsMeta a, F.Arity n) => IsMeta (FB.Vec n a) where
+  parseMeta = parseFixedVec
+  toMeta    = fixedVecToMeta
+instance (IsMeta a, FU.Unbox n a) => IsMeta (FU.Vec n a) where
+  parseMeta = parseFixedVec
+  toMeta    = fixedVecToMeta
+instance (IsMeta a, VS.Storable a, F.Arity n) => IsMeta (FS.Vec n a) where
+  parseMeta = parseFixedVec
+  toMeta    = fixedVecToMeta
+
+parseFixedVec :: forall a v. (IsMeta a, F.Vector v a) => JParser (v a)
+parseFixedVec
+  = JSON.prependFailure " - traversing Array\n"
+  . JSON.withArray "Vec"
+    (\v -> do
+        let n   = V.length v
+            dim = F.arity (Proxy @(F.Dim v))
+        when (n /= dim) $ fail $ printf "Array length mismatch: expected %i but got %i" dim n
+        F.generateM $ \i -> JSON.prependFailure (" - index " <> show i)
+                          $ parseMeta (v ! i)
+    )
+
+fixedVecToMeta :: (IsMeta a, F.Vector v a) => v a -> Metadata
+fixedVecToMeta = Metadata . Array . V.fromList . map toMetaValue . F.toList
+
 
 instance IsMeta BinD where
   parseMeta o =  metaSExp3 "BinD"     binD     o

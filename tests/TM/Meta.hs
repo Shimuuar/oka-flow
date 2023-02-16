@@ -1,19 +1,25 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DeriveGeneric       #-}
-{-# LANGUAGE DerivingStrategies  #-}
-{-# LANGUAGE DerivingVia         #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RecordWildCards     #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications    #-}
+{-# LANGUAGE AllowAmbiguousTypes  #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE DeriveGeneric        #-}
+{-# LANGUAGE DerivingStrategies   #-}
+{-# LANGUAGE DerivingVia          #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE ImportQualifiedPost  #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE RecordWildCards      #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE TypeApplications     #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE UndecidableInstances #-}
 
--- {-# OPTIONS_GHC -Wno-orphans #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 -- |
 module TM.Meta (tests) where
 
 import Data.Typeable
 import OKA.Metadata
+import Data.Vector.Fixed       qualified as F
+import Data.Vector.Fixed.Boxed qualified as FB
 import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.Tasty.HUnit
@@ -32,6 +38,7 @@ tests = testGroup "Metadata"
     , testSerialise @(Int,Double)
     , testSerialise @(Int,Double,(Int,Int))
     , testSerialise @(Maybe [Int])
+    , testSerialise @(FB.Vec 4 Int)
       --
     , testSerialise @ENUM
     , testSerialise @Record
@@ -84,3 +91,8 @@ data Record2 = Record2
   deriving IsMeta    via AsRecord ManglerTick Record2
   deriving Arbitrary via GenericArbitrary Record2
 
+
+----------------------------------------------------------------
+
+instance (Arbitrary a, F.Arity n) => Arbitrary (FB.Vec n a) where
+  arbitrary = F.replicateM arbitrary

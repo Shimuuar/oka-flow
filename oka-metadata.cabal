@@ -23,6 +23,7 @@ Library
                   , text
                   , containers          >=0.5
                   , vector              >=0.13
+                  , fixed-vector        >=1.2
                   , lens                >=5
                   , yaml
   Exposed-modules:
@@ -40,6 +41,7 @@ Test-suite oka-metadata-tests
                    , tasty-hunit
                    , generic-arbitrary >=1.0.1
                    , vector
+                   , fixed-vector
                    , histogram-fill
                    , histogram-fill-quickcheck
    hs-source-dirs: tests
