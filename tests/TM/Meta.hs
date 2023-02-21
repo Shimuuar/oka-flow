@@ -18,12 +18,15 @@ module TM.Meta (tests) where
 
 import Data.Typeable
 import OKA.Metadata
+import Data.Map.Strict         qualified as Map
 import Data.Vector.Fixed       qualified as F
 import Data.Vector.Fixed.Boxed qualified as FB
+import Data.Text               (Text)
 import Test.Tasty
 import Test.Tasty.QuickCheck
 import Test.Tasty.HUnit
 import Test.QuickCheck.Arbitrary.Generic
+import Test.QuickCheck.Instances ()
 import Data.Histogram.Bin
 import Data.Histogram.QuickCheck ()
 import GHC.Generics (Generic)
@@ -39,6 +42,10 @@ tests = testGroup "Metadata"
     , testSerialise @(Int,Double,(Int,Int))
     , testSerialise @(Maybe [Int])
     , testSerialise @(FB.Vec 4 Int)
+    , testSerialise @(Map.Map Int       Int)
+    , testSerialise @(Map.Map Text      Int)
+    , testSerialise @(Map.Map String    Int)
+    , testSerialise @(Map.Map (Int,Int) Int)
       --
     , testSerialise @ENUM
     , testSerialise @Record

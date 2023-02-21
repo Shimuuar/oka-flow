@@ -79,6 +79,7 @@ import Data.Yaml                  qualified as Yaml
 import Data.Int
 import Data.Char
 import Data.Functor.Compose
+import Data.Map.Strict            qualified as Map
 import Data.Typeable
 import Data.Word
 import Data.Coerce
@@ -278,7 +279,10 @@ instance (KnownSymbol key, IsMeta a, Typeable a) => IsMeta (AsSubdict key a) whe
 --   uses exhaustive parser and will work only for record types
 newtype AsRecord ty a = AsRecord a
 
-instance (Generic a, GRecParse (Rep a), GRecToMeta (Rep a), Typeable a, Typeable ty, FieldMangler ty
+instance ( Generic a
+         , GRecParse (Rep a)
+         , GRecToMeta (Rep a)
+         , Typeable a, Typeable ty, FieldMangler ty
          ) => IsMeta (AsRecord ty a) where
   parseMeta = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
             . metaWithObject
@@ -524,6 +528,7 @@ instance IsMeta Metadata where
   toMeta    = id
 
 deriving via AsAeson Value  instance IsMeta Value
+deriving via AsAeson Text   instance IsMeta Text
 deriving via AsAeson Bool   instance IsMeta Bool
 deriving via AsAeson Float  instance IsMeta Float
 deriving via AsAeson Double instance IsMeta Double
@@ -537,6 +542,37 @@ deriving via AsAeson Word16 instance IsMeta Word16
 deriving via AsAeson Word32 instance IsMeta Word32
 deriving via AsAeson Word64 instance IsMeta Word64
 deriving via AsAeson Word   instance IsMeta Word
+
+instance (JSON.FromJSONKey k, JSON.ToJSONKey k, Ord k, IsMeta a
+         ) => IsMeta (Map.Map k a) where
+  parseMeta
+    = JSON.prependFailure "Parsing map\n"
+    . case JSON.fromJSONKey @k of
+        JSON.FromJSONKeyCoerce -> JSON.withObject "Map"
+          $ fmap (Map.mapKeys (coerce . JSON.toText))
+          . Map.traverseWithKey (\k -> errK k . parseMeta)
+          . KM.toMap
+        JSON.FromJSONKeyText f -> JSON.withObject "Map"
+          $ fmap (Map.mapKeys (f . JSON.toText))
+          . Map.traverseWithKey (\k -> errK k . parseMeta)
+          . KM.toMap
+        JSON.FromJSONKeyTextParser parser -> JSON.withObject "Map"
+          $ fmap Map.fromList
+          . traverse (\(k,v) -> errK k $ (,) <$> parser (JSON.toText k) <*> parseMeta v)
+          . Map.toList
+          . KM.toMap
+        JSON.FromJSONKeyValue parser -> JSON.withArray "Map"
+          $ fmap Map.fromList
+          . traverse (\o -> do (k,v) <- parseMeta o
+                               (,) <$> parser k <*> parseMeta v)
+          . V.toList
+        where
+          errK k = JSON.prependFailure (" - key: "<>JSON.toString k<>"\n")
+  toMeta m = case JSON.toJSONKey of
+    JSON.ToJSONKeyText  f _ -> mkObject [ JSON.toText (f k) .== v | (k,v) <- Map.toList m ]
+    JSON.ToJSONKeyValue f _ -> Metadata $ Array $ V.fromList
+      [ Array $ V.fromList [f k, coerce $ toMeta v] | (k,v) <- Map.toList m ]
+
 
 instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
   parseMeta = JSON.withArray "(a, b)" $ \arr -> case V.length arr of
