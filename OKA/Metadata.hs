@@ -170,7 +170,7 @@ mergeMetadata (Metadata m1) (Metadata m2) = Metadata <$> go [] m1 m2
 -- | Type class for decoding values from metadata, it's very similar
 --   to 'FromJSON' type class but here we define another one n order
 --   to be able to define conflicting instances
-class IsMeta a where
+class Typeable a => IsMeta a where
   parseMeta :: JSON.Value -> JSON.Parser a
   toMeta    :: a -> Metadata
 
@@ -182,10 +182,12 @@ readMetadata path = liftIO $ do
     Right a -> pure (Metadata a)
 
 -- | Convert value from metadata. Throws error if conversion fails
-fromMeta :: IsMeta a => Metadata -> a
-fromMeta (Metadata m) = case JSON.parse parseMeta m of
+fromMeta :: forall a. IsMeta a => Metadata -> a
+fromMeta (Metadata m) = case JSON.parse (err . parseMeta) m of
   JSON.Success a -> a
   JSON.Error   e -> error $ "IsMeta: cannot convert:\n" ++ e
+  where
+    err = JSON.prependFailure $ "While parsing " ++ show (typeOf (undefined :: a)) ++ "\n"
 
 -- | Lookup value from metadata with default
 lookupMetaDef :: IsMeta a => Metadata -> [Text] -> a -> a
@@ -228,7 +230,7 @@ o .:: k = parseMeta =<< (o .: k)
 -- | Newtype for deriving IsMeta instances from FromJSON instances
 newtype AsAeson a = AsAeson a
 
-instance (JSON.ToJSON a, JSON.FromJSON a) => IsMeta (AsAeson a) where
+instance (Typeable a, JSON.ToJSON a, JSON.FromJSON a) => IsMeta (AsAeson a) where
   parseMeta = coerce (JSON.parseJSON @a)
   toMeta    = coerce (JSON.toJSON    @a)
 
@@ -240,7 +242,7 @@ instance (JSON.ToJSON a, JSON.FromJSON a) => IsMeta (AsAeson a) where
 newtype MProd a = MProd a
   deriving newtype (Show,Eq,Ord,Generic)
 
-instance (Generic a, GMetaProd (Rep a)) => IsMeta (MProd a) where
+instance (Typeable a, Generic a, GMetaProd (Rep a)) => IsMeta (MProd a) where
   parseMeta = fmap to . gparseProd @(Rep a)
   toMeta    = gtoMeta . from
 
@@ -448,7 +450,7 @@ metaObject parser
   . metaWithObject (runObjParser parser)
 
 metaWithObject
-  :: forall a. Typeable a
+  :: forall a. ()
   => (JSON.Object -> JSON.Parser a)
   -> (JSON.Value  -> JSON.Parser a)
 metaWithObject parser = \case
@@ -543,8 +545,8 @@ deriving via AsAeson Word32 instance IsMeta Word32
 deriving via AsAeson Word64 instance IsMeta Word64
 deriving via AsAeson Word   instance IsMeta Word
 
-instance (JSON.FromJSONKey k, JSON.ToJSONKey k, Ord k, IsMeta a
-         ) => IsMeta (Map.Map k a) where
+instance (Typeable k, JSON.FromJSONKey k, JSON.ToJSONKey k, Ord k, IsMeta a
+         ) => IsMeta (Map.Map k a) where 
   parseMeta
     = JSON.prependFailure "Parsing map\n"
     . case JSON.fromJSONKey @k of
