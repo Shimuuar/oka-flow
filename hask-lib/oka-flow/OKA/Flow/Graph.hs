@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes        #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleContexts           #-}
@@ -5,7 +6,9 @@
 {-# LANGUAGE ImportQualifiedPost        #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE TypeApplications           #-}
 -- |
 -- Implementation of dataflow graph.
 module OKA.Flow.Graph
@@ -14,8 +17,10 @@ module OKA.Flow.Graph
   , FlowGraph(..)
   , FIDSet(..)
   , Flow(..)
-  , filterMeta
   , appendMeta
+  , modifyMeta
+  , scopeMeta
+  , restrictMeta
     -- * Graph operations
   , hashFlowGraph
   , shakeFlowGraph
@@ -30,7 +35,6 @@ import Control.Lens
 import Control.Monad
 import Control.Monad.Operational
 import Control.Monad.Trans.State.Strict
-import Control.Monad.Trans.Reader
 import Crypto.Hash.SHA1             qualified as SHA1
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Encoding          qualified as JSONB
@@ -104,15 +108,34 @@ fmapFlowGraph fun gr = gr { flowGraph = r } where
 
 -- | Flow monad which we use to build workflow
 newtype Flow res eff a = Flow
-  (ReaderT Metadata (StateT (FlowGraph res ()) (Program eff)) a)
+  (StateT (Metadata, FlowGraph res ()) (Program eff) a)
   deriving newtype (Functor, Applicative, Monad)
 
-filterMeta :: (Metadata -> Metadata) -> Flow res eff a -> Flow res eff a
-filterMeta f (Flow act) = Flow $ ReaderT $ \m ->
-  runReaderT act (f m)
+-- | Add value which could be serialized to metadata to full medataset
+appendMeta :: IsMeta a => a -> Flow res eff ()
+appendMeta a = Flow $ _1 %= (<> toMeta a)
 
-appendMeta :: IsMeta a => a -> Flow res eff b -> Flow res eff b
-appendMeta a = filterMeta (<> toMeta a)
+-- | Modify metadata using given function
+modifyMeta :: (Metadata -> Metadata) -> Flow res eff ()
+modifyMeta f = Flow $ _1 %= f
+
+-- | Scope metadata modifications. All changes to metadata done in
+--   provided callback will be discarded.
+scopeMeta :: Flow res eff a -> Flow res eff a
+scopeMeta (Flow action) = Flow $ do
+  m <- use _1
+  a <- action
+  _1 .= m
+  pure a
+
+-- | Restrict metadata to set necessary for encoding value of given type
+restrictMeta
+  :: forall meta res eff a. IsMeta meta
+  => Flow res eff a
+  -> Flow res eff a
+restrictMeta action = scopeMeta $ do
+  modifyMeta (toMeta @meta . fromMeta @meta)
+  action
 
 
 ----------------------------------------------------------------

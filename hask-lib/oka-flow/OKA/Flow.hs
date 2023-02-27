@@ -24,8 +24,10 @@ module OKA.Flow
   , Action(..)
     -- * Flow monad
   , Flow
-  , filterMeta
   , appendMeta
+  , modifyMeta
+  , scopeMeta
+  , restrictMeta
   , Result
   , ResultSet(..)
   , want
@@ -38,7 +40,6 @@ module OKA.Flow
   ) where
 
 import Control.Lens
-import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Monad.Operational
 import Data.Map.Strict            ((!))
@@ -56,7 +57,7 @@ import OKA.Flow.Run
 
 -- | We want given workflow evaluated
 want :: Result a -> Flow res eff ()
-want (Result i) = Flow $ flowTgtL %= Set.insert i
+want (Result i) = Flow $ _2 . flowTgtL %= Set.insert i
 
 -- | Create new primitive flow.
 --
@@ -67,8 +68,7 @@ liftWorkflow
   -> params       -- ^ Parameters
   -> Flow res eff (Result a)
 liftWorkflow exe p = Flow $ do
-  meta <- ask
-  gr   <- get
+  (meta,gr) <- get
   -- Allocate new
   let fid = case Map.lookupMax (flowGraph gr) of
               Just (FunID i, _) -> FunID (i + 1)
@@ -79,7 +79,7 @@ liftWorkflow exe p = Flow $ do
   when (any phonyDep res) $ do
     error "Depending on phony target"
   -- Add workflow to graph
-  put $! gr & flowGraphL . at fid .~ Just Fun
+  _2 . flowGraphL . at fid .= Just Fun
     { funWorkflow = exe
     , funMetadata = meta
     , funOutput   = (fid,())
@@ -97,4 +97,4 @@ liftPhony exe p = want =<< liftWorkflow (Phony exe) p
 
 -- | Lift effect
 liftEff :: eff a -> Flow res eff a
-liftEff = Flow . lift . lift . singleton
+liftEff = Flow . lift . singleton
