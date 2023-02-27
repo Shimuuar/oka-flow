@@ -258,7 +258,8 @@ instance (GMetaProd f, GMetaProd g) => GMetaProd (f :*: g) where
   gparseProd o = (:*:) <$> gparseProd o <*> gparseProd o
   gtoMeta (f :*: g) = gtoMeta f <> gtoMeta g
 instance (IsMeta a) => GMetaProd (K1 i a) where
-  gparseProd = coerce (parseMeta @a)
+  gparseProd = coerce ( JSON.prependFailure (" field of MProd " ++ show (typeOf (undefined :: a)) ++ "\n")
+                      . parseMeta @a)
   gtoMeta    = coerce (toMeta    @a)
 
 
