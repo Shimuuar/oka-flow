@@ -474,7 +474,7 @@ constrName = \case
 -- | Parser for exhaustive matching of an object. Each key could only
 --   be parsed once.
 newtype ObjParser a = ObjParser (StateT (KM.KeyMap JSON.Value) JSON.Parser a)
-  deriving newtype (Functor, Applicative, Monad, MonadFail)
+  deriving newtype (Functor, Applicative, Alternative, Monad, MonadFail)
 
 -- | Run object parser on given object
 runObjParser :: ObjParser a -> JSON.Object -> JSON.Parser a
