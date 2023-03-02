@@ -28,6 +28,7 @@ module OKA.Flow
   , modifyMeta
   , scopeMeta
   , restrictMeta
+  , projectMeta
   , Result
   , ResultSet(..)
   , want

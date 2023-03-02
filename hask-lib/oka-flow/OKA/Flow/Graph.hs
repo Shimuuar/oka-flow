@@ -21,6 +21,7 @@ module OKA.Flow.Graph
   , modifyMeta
   , scopeMeta
   , restrictMeta
+  , projectMeta
     -- * Graph operations
   , hashFlowGraph
   , shakeFlowGraph
@@ -111,6 +112,9 @@ newtype Flow res eff a = Flow
   (StateT (Metadata, FlowGraph res ()) (Program eff) a)
   deriving newtype (Functor, Applicative, Monad)
 
+instance MonadFail (Flow res eff) where
+  fail = error
+
 -- | Add value which could be serialized to metadata to full medataset
 appendMeta :: IsMeta a => a -> Flow res eff ()
 appendMeta a = Flow $ _1 %= (<> toMeta a)
@@ -137,6 +141,8 @@ restrictMeta action = scopeMeta $ do
   modifyMeta (toMeta @meta . fromMeta @meta)
   action
 
+projectMeta :: IsMeta a => Flow res eff a
+projectMeta = Flow $ fromMeta <$> use _1
 
 ----------------------------------------------------------------
 -- Execution of the workflow
