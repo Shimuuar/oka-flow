@@ -98,16 +98,15 @@ rateLimitLMDB res io =
 runExternalProcess
   :: FilePath   -- ^ Path to executable
   -> Metadata   -- ^ Metadata to pass to process
-  -> [FilePath] -- ^ Input parameters
-  -> FilePath   -- ^ Output parameters
+  -> [FilePath] -- ^ Parameter list
   -> IO ()
-runExternalProcess exe meta args out = do
+runExternalProcess exe meta args = do
   withProcessWait_ run $ \pid -> do
     _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
     pure ()
   where
     run = setStdin (byteStringInput $ JSON.encode meta)
-        $ proc exe (out:args)
+        $ proc exe args
     -- Kill process but allow it to die gracefully by sending SIGINT
     -- first. GHC install handler for it but not for SIGTERM
     softKill p = getPid (unsafeProcessHandle p) >>= \case
