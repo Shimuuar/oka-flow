@@ -93,10 +93,11 @@ tests = testGroup "Run flow"
 
 withSimpleFlow :: (FlowCtx IO () -> IO a) -> IO a
 withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
-  action FlowCtx { flowCtxRoot   = dir
-                 , flowTgtExists = doesDirectoryExist
-                 , flowCtxEff    = id
-                 , flowCtxRes    = ()
+  action FlowCtx { flowCtxRoot    = dir
+                 , flowTgtExists  = doesDirectoryExist
+                 , flowCtxEff     = id
+                 , flowCtxRes     = ()
+                 , flowEvalReport = \_ _ -> pure ()
                  }
 
 

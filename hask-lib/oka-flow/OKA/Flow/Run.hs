@@ -46,6 +46,8 @@ data FlowCtx eff res = FlowCtx
     -- ^ Evaluator for effect allowed in dataflow program
   , flowCtxRes    :: res
     -- ^ Resources
+  , flowEvalReport :: [StorePath] -> [StorePath] -> IO ()
+    -- ^ Function to report 
   }
 
 
@@ -62,14 +64,19 @@ runFlow
   -> IO ()
 runFlow ctx@FlowCtx{..} meta (Flow m) = do
   -- Evaluate dataflow graph
-  gr <- interpretWithMonad flowCtxEff
+  gr <- fmap hashFlowGraph
+      $ interpretWithMonad flowCtxEff
       $ fmap addTargets
       $ (fmap . fmap) snd
       $ runStateT m (meta, FlowGraph mempty mempty)
   -- Prepare graph for evaluation
-  let gr_hashed = hashFlowGraph gr
-  targets <- shakeFlowGraph targetExists gr_hashed
-  gr_exe  <- addTMVars gr_hashed
+  targets <- shakeFlowGraph targetExists gr
+  gr_exe  <- addTMVars gr
+  let getStorePath fids = concat [ gr ^.. flowGraphL . at fid . _Just . to funOutput . _2 . _Just
+                                 | fid <- toList fids ]
+      paths_wanted = getStorePath $ fidWanted targets
+      paths_exist  = getStorePath $ fidExists targets
+  flowEvalReport paths_exist paths_wanted
   -- Evaluator
   mapConcurrently_ id
     [ prepareFun ctx targets (flowGraph gr_exe ! i) flowCtxRes
