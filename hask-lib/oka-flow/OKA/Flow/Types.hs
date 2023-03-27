@@ -1,7 +1,12 @@
-{-# LANGUAGE DeriveFunctor       #-}
-{-# LANGUAGE DerivingStrategies  #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE DeriveFunctor        #-}
+{-# LANGUAGE DerivingStrategies   #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE ImportQualifiedPost  #-}
+{-# LANGUAGE LambdaCase           #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE TypeApplications     #-}
+{-# LANGUAGE TypeOperators        #-}
+{-# LANGUAGE UndecidableInstances #-}
 -- |
 -- Basic data types used in definition of dataflow program
 module OKA.Flow.Types
@@ -21,8 +26,10 @@ module OKA.Flow.Types
 import Data.ByteString        (ByteString)
 import Data.ByteString.Char8  qualified as BC8
 import Data.ByteString.Base16 qualified as Base16
+import Data.Coerce
+import GHC.Generics
 import OKA.Metadata           (Metadata)
-
+import OKA.Extra.Compat       (Generically(..))
 
 ----------------------------------------------------------------
 -- Workflow primitives
@@ -70,6 +77,24 @@ instance (ResultSet a, ResultSet b) => ResultSet (a,b) where
 
 instance (ResultSet a, ResultSet b, ResultSet c) => ResultSet (a,b,c) where
   toResultSet (a,b,c) = toResultSet a <> toResultSet b <> toResultSet c
+
+
+instance (Generic a, GResultSet (Rep a)) => ResultSet (Generically a) where
+  toResultSet (Generically a) = gtoResultSet (from a)
+
+class GResultSet f where
+  gtoResultSet :: f () -> [FunID]
+
+instance (GResultSet f) => GResultSet (M1 i c f) where
+  gtoResultSet = coerce (gtoResultSet @f)
+
+instance (GResultSet f, GResultSet g) => GResultSet (f :*: g) where
+  gtoResultSet (f :*: g) = gtoResultSet f <> gtoResultSet g
+
+instance (ResultSet a) => GResultSet (K1 i a) where
+  gtoResultSet = coerce (toResultSet @a)
+
+
 
 ----------------------------------------------------------------
 -- Paths in store
