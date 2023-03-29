@@ -57,8 +57,8 @@ import OKA.Flow.Run
 ----------------------------------------------------------------
 
 -- | We want given workflow evaluated
-want :: Result a -> Flow res eff ()
-want (Result i) = Flow $ _2 . flowTgtL %= Set.insert i
+want :: ResultSet a => a -> Flow res eff ()
+want a = Flow $ _2 . flowTgtL %= (<> Set.fromList (toResultSet a))
 
 -- | Create new primitive flow.
 --
