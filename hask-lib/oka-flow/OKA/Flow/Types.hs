@@ -72,6 +72,9 @@ instance ResultSet () where
 instance ResultSet (Result a) where
   toResultSet (Result i) = [i]
 
+instance ResultSet a => ResultSet [a] where
+  toResultSet = concatMap toResultSet
+
 instance (ResultSet a, ResultSet b) => ResultSet (a,b) where
   toResultSet (a,b) = toResultSet a <> toResultSet b
 
