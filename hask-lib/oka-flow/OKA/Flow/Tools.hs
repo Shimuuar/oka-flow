@@ -16,6 +16,7 @@ module OKA.Flow.Tools
   , rateLimitLMDB
     -- * External process
   , runExternalProcess
+  , runExternalProcessNoMeta
   , runJupyter
   ) where
 
@@ -107,15 +108,29 @@ runExternalProcess exe meta args = do
   where
     run = setStdin (byteStringInput $ JSON.encode meta)
         $ proc exe args
-    -- Kill process but allow it to die gracefully by sending SIGINT
-    -- first. GHC install handler for it but not for SIGTERM
-    softKill p = getPid (unsafeProcessHandle p) >>= \case
-      Nothing  -> pure ()
-      Just pid -> do
-        delay <- registerDelay 1_000_000
-        signalProcess sigINT pid
-        atomically $  (check =<< readTVar delay)
-                  <|> (void $ waitExitCodeSTM p)
+
+-- | Run external process that adheres to standard calling conventions
+runExternalProcessNoMeta
+  :: FilePath   -- ^ Path to executable
+  -> [FilePath] -- ^ Parameter list
+  -> IO ()
+runExternalProcessNoMeta exe args = do
+  withProcessWait_ run $ \pid -> do
+    _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
+    pure ()
+  where
+    run = proc exe args
+
+-- Kill process but allow it to die gracefully by sending SIGINT
+-- first. GHC install handler for it but not for SIGTERM
+softKill :: Process stdin stdout stderr -> IO ()
+softKill p = getPid (unsafeProcessHandle p) >>= \case
+  Nothing  -> pure ()
+  Just pid -> do
+    delay <- registerDelay 1_000_000
+    signalProcess sigINT pid
+    atomically $  (check =<< readTVar delay)
+              <|> (void $ waitExitCodeSTM p)
 
 
 -- | Run jupyter notebook as an external process
