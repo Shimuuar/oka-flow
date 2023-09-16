@@ -29,7 +29,6 @@ import Data.ByteString.Base16 qualified as Base16
 import Data.Coerce
 import GHC.Generics
 import OKA.Metadata           (Metadata)
-import OKA.Extra.Compat       (Generically(..))
 
 ----------------------------------------------------------------
 -- Workflow primitives
