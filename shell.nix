@@ -9,7 +9,7 @@ let
     oka-nix.overlay
   ];
 in
-pkgs.oka.haskell.shellFor {
+pkgs.oka.haskell94.shellFor {
   packages = hs: [
     (hs.callCabal2nix "oka-metadata" ./. {})
   ];

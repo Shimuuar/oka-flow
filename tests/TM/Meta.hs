@@ -17,6 +17,7 @@
 module TM.Meta (tests) where
 
 import Data.Typeable
+import Data.Aeson.Types           qualified as JSON
 import OKA.Metadata
 import Data.Map.Strict         qualified as Map
 import Data.Vector.Fixed       qualified as F
@@ -34,7 +35,7 @@ import GHC.Generics (Generic)
 
 tests :: TestTree
 tests = testGroup "Metadata"
-  [ testGroup "Roundtrip"
+  [ testGroup "Roundtrip MetaEncoding"
     [ testSerialise @BinD
     , testSerialise @Int
     , testSerialise @[Int]
@@ -46,57 +47,62 @@ tests = testGroup "Metadata"
     , testSerialise @(Map.Map Text      Int)
     , testSerialise @(Map.Map String    Int)
     , testSerialise @(Map.Map (Int,Int) Int)
-      --
     , testSerialise @ENUM
-    , testSerialise @Record
-    , testSerialise @Record2
     ]
-  , testGroup "Mangler-Tick"
-    [ testMangle "asd"        "asd"
-    , testMangle "Adf"        "adf"
-    , testMangle "AAb"        "AAb"
-    , testMangle "AAAb"       "AAAb"
-    , testMangle "AAAAbc"     "AAAAbc"
-    , testMangle "asdX"       "asd_X"
-    , testMangle "asdXX"      "asd_XX"
-    , testMangle "FooBar"     "foo_bar"
-    , testMangle "met'FooBar" "foo_bar"
+  , testGroup "Roundtrip IsMeta"
+    [ testIsMeta @Record
+    , testIsMeta @Record2
+    , testIsMeta @(Record2,Record)
+      -- Check clash detection
+    , testCase "Clash detected" $ case encodeMetadataEither (undefined :: (Record,Record)) of
+        Left  _ -> pure ()
+        Right _ -> assertFailure "Should detect key clash"
     ]
   ]
 
-testSerialise :: forall a. (Typeable a, Arbitrary a, Show a, Eq a, IsMeta a) => TestTree
+----------------------------------------------------------------
+-- Roundtrip tests
+----------------------------------------------------------------
+
+testSerialise :: forall a. (Typeable a, Arbitrary a, Show a, Eq a, MetaEncoding a) => TestTree
 testSerialise
   = testProperty (show (typeOf (undefined :: a)))
   $ \(a::a) -> fromMeta (toMeta a) == a
 
-testMangle :: String -> String -> TestTree
-testMangle field key = testCase (field ++ " -> " ++ key) $ do
-  key @=? mangleFieldName @ManglerTick field
+fromMeta :: MetaEncoding a => JSON.Value -> a
+fromMeta = either error id . JSON.parseEither parseMeta
 
+testIsMeta :: forall a. (Typeable a, Arbitrary a, Show a, Eq a, IsMeta a) => TestTree
+testIsMeta
+  = testProperty (show (typeOf (undefined :: a)))
+  $ \(a::a) -> decodeMetadata (encodeMetadata a) == a
+  
 ----------------------------------------------------------------
 -- Derivations
 ----------------------------------------------------------------
 
 data ENUM = A | B | C
   deriving stock (Show,Read,Eq,Generic)
-  deriving IsMeta    via AsReadShow ENUM
-  deriving Arbitrary via GenericArbitrary ENUM
+  deriving MetaEncoding via AsReadShow       ENUM
+  deriving Arbitrary    via GenericArbitrary ENUM
 
 data Record = Record
   { foo :: Int
   , bar :: Maybe Int
   }
   deriving stock (Show,Read,Eq,Generic)
-  deriving IsMeta    via AsRecord ManglerTick Record
-  deriving Arbitrary via GenericArbitrary Record
+  deriving MetaEncoding via AsRecord Record
+  deriving IsMeta       via AsMeta '["rec1"] Record
+  deriving Arbitrary    via GenericArbitrary Record
 
 data Record2 = Record2
-  { rec'foo    :: Int
-  , rec'BarBaz :: Maybe Int
+  { foo2 :: Int
+  , bar2 :: Maybe Int
   }
   deriving stock (Show,Read,Eq,Generic)
-  deriving IsMeta    via AsRecord ManglerTick Record2
-  deriving Arbitrary via GenericArbitrary Record2
+  deriving MetaEncoding via AsRecord             Record2
+  deriving IsMeta       via AsMeta ["rec2","xx"] Record2
+  deriving Arbitrary    via GenericArbitrary     Record2
 
 
 ----------------------------------------------------------------
