@@ -30,7 +30,7 @@
 -- overarching methodology it's difficult to work with. We need
 -- following features:
 --
--- 1. Standard and easy way for JSON\/YAML marshalling. 
+-- 1. Standard and easy way for JSON\/YAML marshalling.
 --
 -- 2. Ability to either specify all necessary types statically or to
 --    work with dynamic dictionary of parameters.
@@ -40,7 +40,8 @@
 module OKA.Metadata
   ( -- * Metadata
     Metadata(..)
-  , meta
+  , metadata
+  , metadataMay
   , IsMeta(..)
     -- ** Writing 'IsMeta' instances
   , MetaTree
@@ -145,23 +146,23 @@ instance Monoid Metadata where
 
 -- | Lens for accessing dictionary from dynamic 'Metadata'. Will fail if
 --   dictionary is not part of bundle
-meta :: forall a. IsMeta a => Lens' Metadata a
-meta = metaMay . lens unpack (const Just)
+metadata :: forall a. IsMeta a => Lens' Metadata a
+metadata = metadataMay . lens unpack (const Just)
   where
     unpack (Just a) = a
     unpack Nothing  = error $ "Metadata doesn't have data type: " ++ typeName @a
 
 -- | Lens for accessing dictionary from dynamic 'Metadata'.
-metaMay :: forall a. IsMeta a => Lens' Metadata (Maybe a)
-metaMay = lens fromMetadata (\m -> \case
-                                Just a  -> m <> toMetadata a
-                                Nothing -> deleteFromMetadata @a m
-                            )
+metadataMay :: forall a. IsMeta a => Lens' Metadata (Maybe a)
+metadataMay = lens fromMetadata (\m -> \case
+                                    Just a  -> m <> toMetadata a
+                                    Nothing -> deleteFromMetadata @a m
+                                )
 
 
 -- | Type class for data types for types that represent metadata and
 --   their products. It describes how to serialize them and how to
---   access them in dynamic product 'Metadata'. 
+--   access them in dynamic product 'Metadata'.
 --
 --   Note on serialization. Metadata is serialized as tree of JSON
 --   objects. Overlapping of keys is not allowed. Static checking of
@@ -171,7 +172,7 @@ class Typeable a => IsMeta a where
   metaTree :: MetaTree a
   -- | Convert data type to dynamic dictionary
   toMetadata :: a -> Metadata
-  -- | Lens for accessing 
+  -- | Lens for accessing
   fromMetadata :: Metadata -> Maybe a
   -- | Delete dictionaries corresponding to this data type from metadata
   deleteFromMetadata :: Metadata -> Metadata
@@ -215,7 +216,7 @@ encodeMetadataDynEither (Metadata m) = do
     asJSON (Leaf   json) = json
     asJSON (Branch mp)   = JSON.Object $ asJSON <$> mp
 
- 
+
 -- | Encode metadata as JSON value
 encodeMetadata :: forall a. IsMeta a => a -> JSON.Value
 encodeMetadata = either error id . encodeMetadataEither
@@ -256,7 +257,7 @@ readMetadataEither :: forall a m. (IsMeta a, MonadIO m) => FilePath -> m (Either
 readMetadataEither path = liftIO $ do
   YAML.decodeFileEither path <&> \case
     Left  err  -> Left $ show err
-    Right json -> decodeMetadataEither json 
+    Right json -> decodeMetadataEither json
 
 -- | Read metadata described by given data type from file.
 readMetadata :: forall a m. (IsMeta a, MonadIO m) => FilePath -> m a
@@ -353,7 +354,7 @@ zipSpine a2c b2c = go []
     merge path k = \case
       This  a   -> OK (a2c <$> a)
       That  b   -> OK (b2c <$> b)
-      These a b -> go (toText k : path) a b 
+      These a b -> go (toText k : path) a b
 
 
 
@@ -432,7 +433,7 @@ newtype AsMeta (path :: [Symbol]) a = AsMeta a
 
 instance (Typeable path, MetaEncoding a, IsMeta a, MetaPath path) => IsMeta (AsMeta path a) where
   metaTree = MetaTree $ OK $ Tree
-    { decoder = \m -> case m ^. metaMay @a of        
+    { decoder = \m -> case m ^. metadataMay @a of
         Nothing -> Left $ "Missing type: " ++ typeName @a
         Just a  -> Right (AsMeta a)
     , keyTree
@@ -459,7 +460,7 @@ instance (Typeable path, MetaEncoding a, IsMeta a, MetaPath path) => IsMeta (AsM
 
 
 
-  
+
 class MetaPath (xs :: [Symbol]) where
   getMetaPath :: [Text]
 
@@ -480,8 +481,8 @@ instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
   fromMetadata m = (,) <$> fromMetadata m <*> fromMetadata m
   deleteFromMetadata = deleteFromMetadata @a
                      . deleteFromMetadata @b
-    
-  
+
+
 instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
   metaTree
     = metaTreeIso (iso (\((a,b),c) -> (a,b,c)) (\(a,b,c) -> ((a,b),c)))
@@ -491,7 +492,7 @@ instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
   deleteFromMetadata = deleteFromMetadata @a
                      . deleteFromMetadata @b
                      . deleteFromMetadata @c
-                               
+
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
   metaTree
@@ -542,7 +543,7 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsM
     $ metaTree `metaTreeProduct` metaTree
   toMetadata (a,b,c,d,e,f,g) = mconcat [ toMetadata a, toMetadata b, toMetadata c
                                        , toMetadata d, toMetadata e, toMetadata f
-                                       , toMetadata g] 
+                                       , toMetadata g]
   fromMetadata m = (,,,,,,)
                 <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
                 <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
@@ -561,7 +562,7 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta 
     $ metaTree `metaTreeProduct` metaTree
   toMetadata (a,b,c,d,e,f,g,h) = mconcat [ toMetadata a, toMetadata b, toMetadata c
                                          , toMetadata d, toMetadata e, toMetadata f
-                                         , toMetadata g, toMetadata h] 
+                                         , toMetadata g, toMetadata h]
   fromMetadata m = (,,,,,,,)
                 <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
                 <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
