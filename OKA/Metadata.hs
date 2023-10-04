@@ -41,17 +41,22 @@ module OKA.Metadata
   ( -- * Metadata
     Metadata(..)
   , meta
-  , metaMay
-    -- * Serialization
-  , MetaEncoding(..)
   , IsMeta(..)
+    -- ** Writing 'IsMeta' instances
   , MetaTree
+  , metaTreeIso
+  , metaTreeProduct
+    -- ** Encoding & decoding
+  , encodeMetadataDynEither
+  , encodeMetadataDyn
   , encodeMetadataEither
   , encodeMetadata
   , decodeMetadataEither
   , decodeMetadata
   , readMetadataEither
   , readMetadata
+    -- * Serialization
+  , MetaEncoding(..)
     -- * Writing instances
   , (.::)
   , (.==)
@@ -93,6 +98,7 @@ import Data.Aeson.Types           qualified as JSON
 import Data.These
 import Data.Histogram.Bin
 import Data.Yaml                  qualified as YAML
+import Data.Foldable              (toList)
 import Data.Int
 import Data.Functor.Compose
 import Data.Map.Strict            qualified as Map
@@ -121,12 +127,12 @@ import GHC.Generics               qualified as Generics
 -- Metadata representation
 ----------------------------------------------------------------
 
--- | Dynamic dictionary of metadata for analysis. It's collection of
---   data types which could be looked up using types. See ('meta',
---   'metaMay').
+-- | Dynamic product of metadata dictionaries. Each is instance of
+--   'IsMeta' type class. Note this type class has instances for
+--   products for primitive dicts. Those are unpacked.
 newtype Metadata = Metadata { unMetadata :: Map TypeRep MetaEntry }
 
--- Helper data type which holds actual data
+-- Helper wrapper existential wrapper for metadata
 data MetaEntry where
   MetaEntry :: (IsMeta a) => a -> MetaEntry
 
@@ -137,27 +143,38 @@ instance Semigroup Metadata where
 instance Monoid Metadata where
   mempty = Metadata mempty
 
--- | Lens for looking up dictionary from metadata bundle
-metaMay :: forall a. (IsMeta a) => Lens' Metadata (Maybe a)
-{-# INLINE metaMay #-}
-metaMay = lens getM putM
-  where
-    getM (Metadata m) = do
-      MetaEntry a <- Map.lookup k m
-      cast a
-    --
-    putM (Metadata m) Nothing  = Metadata $ Map.delete k m
-    putM (Metadata m) (Just a) = Metadata $ Map.insert k (MetaEntry a) m
-    --
-    k = typeOf (undefined :: a)
-
--- | Lens for looking up dictionary from metadata bundle. Will fail if
+-- | Lens for accessing dictionary from dynamic 'Metadata'. Will fail if
 --   dictionary is not part of bundle
 meta :: forall a. IsMeta a => Lens' Metadata a
 meta = metaMay . lens unpack (const Just)
   where
     unpack (Just a) = a
     unpack Nothing  = error $ "Metadata doesn't have data type: " ++ typeName @a
+
+-- | Lens for accessing dictionary from dynamic 'Metadata'.
+metaMay :: forall a. IsMeta a => Lens' Metadata (Maybe a)
+metaMay = lens fromMetadata (\m -> \case
+                                Just a  -> m <> toMetadata a
+                                Nothing -> deleteFromMetadata @a m
+                            )
+
+
+-- | Type class for data types for types that represent metadata and
+--   their products. It describes how to serialize them and how to
+--   access them in dynamic product 'Metadata'. 
+--
+--   Note on serialization. Metadata is serialized as tree of JSON
+--   objects. Overlapping of keys is not allowed. Static checking of
+--   such property is not practical so it done in runtime.
+class Typeable a => IsMeta a where
+  -- | Description on how to serialize metadata into JSON tree
+  metaTree :: MetaTree a
+  -- | Convert data type to dynamic dictionary
+  toMetadata :: a -> Metadata
+  -- | Lens for accessing 
+  fromMetadata :: Metadata -> Maybe a
+  -- | Delete dictionaries corresponding to this data type from metadata
+  deleteFromMetadata :: Metadata -> Metadata
 
 
 
@@ -170,17 +187,35 @@ meta = metaMay . lens unpack (const Just)
 --   type class to allow different encodings and to provide better
 --   error messages.
 class Typeable a => MetaEncoding a where
-  parseMeta :: JSON.Value -> JSON.Parser a
-  toMeta    :: a -> JSON.Value
-
--- | Type class for top level metadata values. For serialization
---   purposes they are organized as tree (nested JSON objects) with
---   some JSON objects as a leaf. Overlapping of keys is not permitted
---   and will cause error on either serialization or deserialization.
-class Typeable a => IsMeta a where
-  metaTree :: MetaTree a
+  parseMeta  :: JSON.Value -> JSON.Parser a
+  metaToJson :: a -> JSON.Value
 
 
+encodeMetadataDyn :: Metadata -> JSON.Value
+encodeMetadataDyn = either error id . encodeMetadataDynEither
+
+encodeMetadataDynEither :: Metadata -> Either String JSON.Value
+encodeMetadataDynEither (Metadata m) = do
+  onErr (sequenceA entries) >>= \case
+    []   -> Right $ JSON.Object mempty
+    s:ss -> asJSON <$> onErr (reduce s ss)
+  where
+    onErr (Err err) = Left $ keyClashesMsg @Metadata err
+    onErr (OK  a  ) = Right a
+    --
+    entries = [ (fmap (\e -> entryEncoder e a) . keyTree) <$> unMetaTree metaTree
+              | MetaEntry a <- toList m
+              ]
+    --
+    reduce s0 []     = OK s0
+    reduce s0 (s:ss) = case zipSpine id id s0 s of
+      Err err -> Err err
+      OK  s'  -> reduce s' ss
+    --
+    asJSON (Leaf   json) = json
+    asJSON (Branch mp)   = JSON.Object $ asJSON <$> mp
+
+ 
 -- | Encode metadata as JSON value
 encodeMetadata :: forall a. IsMeta a => a -> JSON.Value
 encodeMetadata = either error id . encodeMetadataEither
@@ -234,42 +269,6 @@ readMetadata path = liftIO $ do
 
 
 
-instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
-  metaTree = metaTreeProduct metaTree metaTree
-
-instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
-  metaTree
-    = metaTreeIso (iso (\((a,b),c) -> (a,b,c)) (\(a,b,c) -> ((a,b),c)))
-    $ metaTree `metaTreeProduct` metaTree `metaTreeProduct` metaTree
-
-instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
-  metaTree
-    = metaTreeIso (iso (\((a,b),(c,d)) -> (a,b,c,d)) (\(a,b,c,d) -> ((a,b),(c,d))))
-    $ metaTree `metaTreeProduct` metaTree
-
-
-instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) where
-  metaTree
-    = metaTreeIso (iso (\((a,b),(c,d,e)) -> (a,b,c,d,e)) (\(a,b,c,d,e) -> ((a,b),(c,d,e))))
-    $ metaTree `metaTreeProduct` metaTree
-
-instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,c,d,e,f) where
-  metaTree
-    = metaTreeIso (iso (\((a,b,c),(d,e,f)) -> (a,b,c,d,e,f)) (\(a,b,c,d,e,f) -> ((a,b,c),(d,e,f))))
-    $ metaTree `metaTreeProduct` metaTree
-
-instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsMeta (a,b,c,d,e,f,g) where
-  metaTree
-    = metaTreeIso (iso (\((a,b,c),(d,e,f,g)) -> (a,b,c,d,e,f,g)) (\(a,b,c,d,e,f,g) -> ((a,b,c),(d,e,f,g))))
-    $ metaTree `metaTreeProduct` metaTree
-
-instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta h) => IsMeta (a,b,c,d,e,f,g,h) where
-  metaTree
-    = metaTreeIso (iso (\((a,b,c,d),(e,f,g,h)) -> (a,b,c,d,e,f,g,h))
-                       (\(a,b,c,d,e,f,g,h)     -> ((a,b,c,d),(e,f,g,h))))
-    $ metaTree `metaTreeProduct` metaTree
-
-      
 ----------------------------------------------------------------
 -- Bidirectional parser
 ----------------------------------------------------------------
@@ -366,8 +365,8 @@ zipSpine a2c b2c = go []
 newtype AsAeson a = AsAeson a
 
 instance (Typeable a, JSON.ToJSON a, JSON.FromJSON a) => MetaEncoding (AsAeson a) where
-  parseMeta = coerce (JSON.parseJSON @a)
-  toMeta    = coerce (JSON.toJSON    @a)
+  parseMeta  = coerce (JSON.parseJSON @a)
+  metaToJson = coerce (JSON.toJSON    @a)
 
 -- | Encode value using 'Show' and 'Read' instances.
 newtype AsReadShow a = AsReadShow a
@@ -380,7 +379,7 @@ instance (Show a, Read a, Typeable a) => MetaEncoding (AsReadShow a) where
           [(a,"")] -> pure (AsReadShow a)
           _        -> fail $ "Unable to read string: " ++ show s
         _ -> fail $ "Expected string but got " ++ constrName o
-  toMeta (AsReadShow a) = (String . T.pack . show) a
+  metaToJson (AsReadShow a) = (String . T.pack . show) a
 
 -- | Derive 'IsMeta' using generics. It will derive instance which
 --   uses exhaustive parser and will work only for record types
@@ -393,7 +392,7 @@ instance ( Generic a
          ) => MetaEncoding (AsRecord a) where
   parseMeta = JSON.prependFailure ("While parsing " ++ typeName @a ++ "\n")
             . metaWithObject (runObjParser $ AsRecord . Generics.to <$> grecParse)
-  toMeta (AsRecord a) = JSON.object $ grecToMeta $ Generics.from a
+  metaToJson (AsRecord a) = JSON.object $ grecToMeta $ Generics.from a
 
 class GRecParse f where
   grecParse :: ObjParser (f p)
@@ -439,7 +438,7 @@ instance (Typeable path, MetaEncoding a, IsMeta a, MetaPath path) => IsMeta (AsM
     , keyTree
         = flip (foldr $ \nm -> Branch . KM.singleton (fromText nm)) path
         $ Leaf Entry
-          { entryEncoder = \(AsMeta a) -> toMeta a
+          { entryEncoder = \(AsMeta a) -> metaToJson a
           , entryParser  = \json -> do
               let descend k parser
                     = JSON.prependFailure (" - " ++ T.unpack k ++ "\n")
@@ -453,7 +452,14 @@ instance (Typeable path, MetaEncoding a, IsMeta a, MetaPath path) => IsMeta (AsM
     }
     where
       path = getMetaPath @path
+  toMetadata (AsMeta a) = Metadata $ Map.singleton (typeOf a) (MetaEntry a)
+  fromMetadata (Metadata m) = do MetaEntry a <- Map.lookup (typeOf (undefined :: a)) m
+                                 AsMeta <$> cast a
+  deleteFromMetadata (Metadata m) = Metadata $ Map.delete (typeOf (undefined :: a)) m
 
+
+
+  
 class MetaPath (xs :: [Symbol]) where
   getMetaPath :: [Text]
 
@@ -466,6 +472,109 @@ instance (KnownSymbol n, MetaPath ns) => MetaPath (n ': ns) where
 ----------------------------------------------------------------
 -- Instances
 ----------------------------------------------------------------
+
+
+instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
+  metaTree = metaTreeProduct metaTree metaTree
+  toMetadata (a,b) = toMetadata a <> toMetadata b
+  fromMetadata m = (,) <$> fromMetadata m <*> fromMetadata m
+  deleteFromMetadata = deleteFromMetadata @a
+                     . deleteFromMetadata @b
+    
+  
+instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
+  metaTree
+    = metaTreeIso (iso (\((a,b),c) -> (a,b,c)) (\(a,b,c) -> ((a,b),c)))
+    $ metaTree `metaTreeProduct` metaTree `metaTreeProduct` metaTree
+  toMetadata (a,b,c) = mconcat [ toMetadata a, toMetadata b, toMetadata c]
+  fromMetadata m = (,,) <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m
+  deleteFromMetadata = deleteFromMetadata @a
+                     . deleteFromMetadata @b
+                     . deleteFromMetadata @c
+                               
+
+instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
+  metaTree
+    = metaTreeIso (iso (\((a,b),(c,d)) -> (a,b,c,d)) (\(a,b,c,d) -> ((a,b),(c,d))))
+    $ metaTree `metaTreeProduct` metaTree
+  toMetadata (a,b,c,d) = mconcat [ toMetadata a, toMetadata b, toMetadata c
+                                 , toMetadata d]
+  fromMetadata m = (,,,) <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
+  deleteFromMetadata = deleteFromMetadata @a
+                     . deleteFromMetadata @b
+                     . deleteFromMetadata @c
+                     . deleteFromMetadata @d
+
+instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) where
+  metaTree
+    = metaTreeIso (iso (\((a,b),(c,d,e)) -> (a,b,c,d,e)) (\(a,b,c,d,e) -> ((a,b),(c,d,e))))
+    $ metaTree `metaTreeProduct` metaTree
+  toMetadata (a,b,c,d,e) = mconcat [ toMetadata a, toMetadata b, toMetadata c
+                                   , toMetadata d, toMetadata e]
+  fromMetadata m = (,,,,)
+                <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
+                <*> fromMetadata m
+  deleteFromMetadata = deleteFromMetadata @a
+                     . deleteFromMetadata @b
+                     . deleteFromMetadata @c
+                     . deleteFromMetadata @d
+                     . deleteFromMetadata @e
+
+instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,c,d,e,f) where
+  metaTree
+    = metaTreeIso (iso (\((a,b,c),(d,e,f)) -> (a,b,c,d,e,f)) (\(a,b,c,d,e,f) -> ((a,b,c),(d,e,f))))
+    $ metaTree `metaTreeProduct` metaTree
+  toMetadata (a,b,c,d,e,f) = mconcat [ toMetadata a, toMetadata b, toMetadata c
+                                     , toMetadata d, toMetadata e, toMetadata f]
+  fromMetadata m = (,,,,,)
+                <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
+                <*> fromMetadata m <*> fromMetadata m
+  deleteFromMetadata = deleteFromMetadata @a
+                     . deleteFromMetadata @b
+                     . deleteFromMetadata @c
+                     . deleteFromMetadata @d
+                     . deleteFromMetadata @e
+                     . deleteFromMetadata @f
+
+instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsMeta (a,b,c,d,e,f,g) where
+  metaTree
+    = metaTreeIso (iso (\((a,b,c),(d,e,f,g)) -> (a,b,c,d,e,f,g)) (\(a,b,c,d,e,f,g) -> ((a,b,c),(d,e,f,g))))
+    $ metaTree `metaTreeProduct` metaTree
+  toMetadata (a,b,c,d,e,f,g) = mconcat [ toMetadata a, toMetadata b, toMetadata c
+                                       , toMetadata d, toMetadata e, toMetadata f
+                                       , toMetadata g] 
+  fromMetadata m = (,,,,,,)
+                <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
+                <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
+  deleteFromMetadata = deleteFromMetadata @a
+                     . deleteFromMetadata @b
+                     . deleteFromMetadata @c
+                     . deleteFromMetadata @d
+                     . deleteFromMetadata @e
+                     . deleteFromMetadata @f
+                     . deleteFromMetadata @g
+
+instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta h) => IsMeta (a,b,c,d,e,f,g,h) where
+  metaTree
+    = metaTreeIso (iso (\((a,b,c,d),(e,f,g,h)) -> (a,b,c,d,e,f,g,h))
+                       (\(a,b,c,d,e,f,g,h)     -> ((a,b,c,d),(e,f,g,h))))
+    $ metaTree `metaTreeProduct` metaTree
+  toMetadata (a,b,c,d,e,f,g,h) = mconcat [ toMetadata a, toMetadata b, toMetadata c
+                                         , toMetadata d, toMetadata e, toMetadata f
+                                         , toMetadata g, toMetadata h] 
+  fromMetadata m = (,,,,,,,)
+                <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
+                <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
+  deleteFromMetadata = deleteFromMetadata @a
+                     . deleteFromMetadata @b
+                     . deleteFromMetadata @c
+                     . deleteFromMetadata @d
+                     . deleteFromMetadata @e
+                     . deleteFromMetadata @f
+                     . deleteFromMetadata @g
+                     . deleteFromMetadata @h
+
+
 
 deriving via AsAeson Value  instance MetaEncoding Value
 deriving via AsAeson Text   instance MetaEncoding Text
@@ -488,7 +597,7 @@ instance (MetaEncoding a, MetaEncoding b) => MetaEncoding (a,b) where
     2 -> (,) <$> parseMeta (V.unsafeIndex arr 0)
              <*> parseMeta (V.unsafeIndex arr 1)
     n -> fail $ "Expecting 2-element array, got " ++ show n
-  toMeta (a,b) = Array $ V.fromList [toMeta a, toMeta b]
+  metaToJson (a,b) = Array $ V.fromList [metaToJson a, metaToJson b]
 
 instance (MetaEncoding a, MetaEncoding b, MetaEncoding c) => MetaEncoding (a,b,c) where
   parseMeta = JSON.withArray "(a, b, c)" $ \arr -> case V.length arr of
@@ -496,13 +605,13 @@ instance (MetaEncoding a, MetaEncoding b, MetaEncoding c) => MetaEncoding (a,b,c
               <*> parseMeta (V.unsafeIndex arr 1)
               <*> parseMeta (V.unsafeIndex arr 2)
     n -> fail $ "Expecting 3-element array, got " ++ show n
-  toMeta (a,b,c) = Array $ V.fromList [toMeta a, toMeta b, toMeta c]
+  metaToJson (a,b,c) = Array $ V.fromList [metaToJson a, metaToJson b, metaToJson c]
 
 instance (MetaEncoding a) => MetaEncoding (Maybe a) where
   parseMeta Null  = pure Nothing
   parseMeta o     = Just <$> parseMeta o
-  toMeta Nothing  = Null
-  toMeta (Just x) = toMeta x
+  metaToJson Nothing  = Null
+  metaToJson (Just x) = metaToJson x
 
 instance (Typeable k, JSON.FromJSONKey k, JSON.ToJSONKey k, Ord k, MetaEncoding a
          ) => MetaEncoding (Map.Map k a) where
@@ -529,38 +638,38 @@ instance (Typeable k, JSON.FromJSONKey k, JSON.ToJSONKey k, Ord k, MetaEncoding 
           . V.toList
         where
           errK k = JSON.prependFailure (" - key: "<>JSON.toString k<>"\n")
-  toMeta m = case JSON.toJSONKey of
+  metaToJson m = case JSON.toJSONKey of
     JSON.ToJSONKeyText  f _ -> JSON.object [ JSON.toText (f k) .== v | (k,v) <- Map.toList m ]
     JSON.ToJSONKeyValue f _ -> Array $ V.fromList
-      [ Array $ V.fromList [f k, coerce $ toMeta v] | (k,v) <- Map.toList m ]
+      [ Array $ V.fromList [f k, coerce $ metaToJson v] | (k,v) <- Map.toList m ]
 
 
 instance (MetaEncoding a) => MetaEncoding [a] where
-  parseMeta = fmap V.toList . parseMeta
-  toMeta    = Array . V.fromList . map toMeta
+  parseMeta  = fmap V.toList . parseMeta
+  metaToJson = Array . V.fromList . map metaToJson
 
 instance (MetaEncoding a, VU.Unbox a) => MetaEncoding (VU.Vector a) where
-  parseMeta = fmap VU.convert . parseMeta @(V.Vector a)
-  toMeta    = Array . V.map toMeta . V.convert
+  parseMeta  = fmap VU.convert . parseMeta @(V.Vector a)
+  metaToJson = Array . V.map metaToJson . V.convert
 
 instance (MetaEncoding a, VS.Storable a) => MetaEncoding (VS.Vector a) where
-  parseMeta = fmap VS.convert . parseMeta @(V.Vector a)
-  toMeta    = Array . V.map toMeta . V.convert
+  parseMeta  = fmap VS.convert . parseMeta @(V.Vector a)
+  metaToJson = Array . V.map metaToJson . V.convert
 
 instance (MetaEncoding a) => MetaEncoding (V.Vector a) where
-  parseMeta = JSON.prependFailure " - traversing Array\n"
-            . JSON.withArray "Vector" (traverse parseMeta)
-  toMeta    = Array . V.map toMeta
+  parseMeta  = JSON.prependFailure " - traversing Array\n"
+             . JSON.withArray "Vector" (traverse parseMeta)
+  metaToJson = Array . V.map metaToJson
 
 instance (MetaEncoding a, F.Arity n) => MetaEncoding (FB.Vec n a) where
-  parseMeta = parseFixedVec
-  toMeta    = fixedVecToMeta
+  parseMeta  = parseFixedVec
+  metaToJson = fixedVecToMeta
 instance (MetaEncoding a, FU.Unbox n a) => MetaEncoding (FU.Vec n a) where
-  parseMeta = parseFixedVec
-  toMeta    = fixedVecToMeta
+  parseMeta  = parseFixedVec
+  metaToJson = fixedVecToMeta
 instance (MetaEncoding a, VS.Storable a, F.Arity n) => MetaEncoding (FS.Vec n a) where
-  parseMeta = parseFixedVec
-  toMeta    = fixedVecToMeta
+  parseMeta  = parseFixedVec
+  metaToJson = fixedVecToMeta
 
 parseFixedVec :: forall a v. (MetaEncoding a, F.Vector v a) => JParser (v a)
 parseFixedVec
@@ -575,16 +684,16 @@ parseFixedVec
     )
 
 fixedVecToMeta :: (MetaEncoding a, F.Vector v a) => v a -> JSON.Value
-fixedVecToMeta = Array . V.fromList . map toMeta . F.toList
+fixedVecToMeta = Array . V.fromList . map metaToJson . F.toList
 
 instance MetaEncoding BinD where
   parseMeta o =  metaSExp3 "BinD"     binD     o
              <|> metaSExp3 "BinDstep" binDstep o
-  toMeta b = toMeta
+  metaToJson b = metaToJson
     [ "BinDstep"
-    , toMeta $ lowerLimit b
-    , toMeta $ binSize    b
-    , toMeta $ nBins      b
+    , metaToJson $ lowerLimit b
+    , metaToJson $ binSize    b
+    , metaToJson $ nBins      b
     ]
 
 
@@ -597,7 +706,7 @@ instance MetaEncoding BinD where
 o .:: k = parseMeta =<< (o .: k)
 
 (.==) :: MetaEncoding a => Text -> a -> (JSON.Key, JSON.Value)
-k .== v = (fromText k, toMeta v)
+k .== v = (fromText k, metaToJson v)
 
 metaSExp1 :: (Typeable r, MetaEncoding a)
           => Text -> (a -> r) -> JParser r

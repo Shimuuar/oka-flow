@@ -53,7 +53,13 @@ tests = testGroup "Metadata"
     [ testIsMeta @Record
     , testIsMeta @Record2
     , testIsMeta @(Record2,Record)
-      -- Check clash detection
+    , testIsMeta @(Record,Record2,Record3)
+    , testIsMeta @(Record,Record2,Record3,Record4)
+    , testIsMeta @(Record,Record2,Record3,Record4,Record5)
+    , testIsMeta @(Record,Record2,Record3,Record4,Record5,Record6)
+    , testIsMeta @(Record,Record2,Record3,Record4,Record5,Record6,Record7)
+    , testIsMeta @(Record,Record2,Record3,Record4,Record5,Record6,Record7,Record8)
+    -- Check clash detection
     , testCase "Clash detected" $ case encodeMetadataEither (undefined :: (Record,Record)) of
         Left  _ -> pure ()
         Right _ -> assertFailure "Should detect key clash"
@@ -67,15 +73,28 @@ tests = testGroup "Metadata"
 testSerialise :: forall a. (Typeable a, Arbitrary a, Show a, Eq a, MetaEncoding a) => TestTree
 testSerialise
   = testProperty (show (typeOf (undefined :: a)))
-  $ \(a::a) -> fromMeta (toMeta a) == a
+  $ \(a::a) -> fromMeta (metaToJson a) == a
 
 fromMeta :: MetaEncoding a => JSON.Value -> a
 fromMeta = either error id . JSON.parseEither parseMeta
 
 testIsMeta :: forall a. (Typeable a, Arbitrary a, Show a, Eq a, IsMeta a) => TestTree
-testIsMeta
-  = testProperty (show (typeOf (undefined :: a)))
-  $ \(a::a) -> decodeMetadata (encodeMetadata a) == a
+testIsMeta = testGroup (show (typeOf (undefined :: a)))
+  [ testProperty "JSON" (testIsMetaJSON @a)
+  , testProperty "Meta" (testIsMetaMeta @a)
+  ]
+
+testIsMetaJSON :: (IsMeta a, Eq a) => a -> Property
+testIsMetaJSON a
+  = property
+  $ decodeMetadata (encodeMetadata a) == a
+
+testIsMetaMeta :: (IsMeta a, Eq a) => a -> Property
+testIsMetaMeta a
+  = property
+  $ fromMetadata (toMetadata a) == Just a
+
+
   
 ----------------------------------------------------------------
 -- Derivations
@@ -104,6 +123,41 @@ data Record2 = Record2
   deriving IsMeta       via AsMeta ["rec2","xx"] Record2
   deriving Arbitrary    via GenericArbitrary     Record2
 
+data Record3 = Record3 { foo3 :: Int }
+  deriving stock (Show,Read,Eq,Generic)
+  deriving MetaEncoding via AsRecord          Record3
+  deriving IsMeta       via AsMeta '["rec3"]  Record3
+  deriving Arbitrary    via GenericArbitrary  Record3
+
+data Record4 = Record4 { foo4 :: Int }
+  deriving stock (Show,Read,Eq,Generic)
+  deriving MetaEncoding via AsRecord          Record4
+  deriving IsMeta       via AsMeta '["rec4"]  Record4
+  deriving Arbitrary    via GenericArbitrary  Record4
+
+data Record5 = Record5 { foo5 :: Int }
+  deriving stock (Show,Read,Eq,Generic)
+  deriving MetaEncoding via AsRecord          Record5
+  deriving IsMeta       via AsMeta '["rec5"]  Record5
+  deriving Arbitrary    via GenericArbitrary  Record5
+
+data Record6 = Record6 { foo6 :: Int }
+  deriving stock (Show,Read,Eq,Generic)
+  deriving MetaEncoding via AsRecord          Record6
+  deriving IsMeta       via AsMeta '["rec6"]  Record6
+  deriving Arbitrary    via GenericArbitrary  Record6
+
+data Record7 = Record7 { foo7 :: Int }
+  deriving stock (Show,Read,Eq,Generic)
+  deriving MetaEncoding via AsRecord          Record7
+  deriving IsMeta       via AsMeta '["rec7"]  Record7
+  deriving Arbitrary    via GenericArbitrary  Record7
+
+data Record8 = Record8 { foo8 :: Int }
+  deriving stock (Show,Read,Eq,Generic)
+  deriving MetaEncoding via AsRecord          Record8
+  deriving IsMeta       via AsMeta '["rec8"]  Record8
+  deriving Arbitrary    via GenericArbitrary  Record8
 
 ----------------------------------------------------------------
 
