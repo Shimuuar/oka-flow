@@ -78,6 +78,7 @@ module OKA.Metadata
     -- ** Exhaustive parser
   , ObjParser
   , runObjParser
+  , metaObject
   , metaField
   , metaFieldM
   ) where
@@ -777,6 +778,14 @@ runObjParser (ObjParser m) o = do
   unless (null o') $ fail $ unlines
     $ "Unknown keys:" : [ " - " ++ T.unpack (toText k) | k <- KM.keys o']
   pure a
+
+-- | Convert exhaustive object parser to standard JSON parser
+metaObject
+  :: forall a. Typeable a
+  => ObjParser a -> JParser a
+metaObject parser
+  = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
+  . metaWithObject (runObjParser parser)
 
 -- | Lookup mandatory field in the object
 metaField :: MetaEncoding a => Text -> ObjParser a
