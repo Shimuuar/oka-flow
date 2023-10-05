@@ -1,19 +1,30 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE DeriveGeneric       #-}
+{-# LANGUAGE DerivingStrategies  #-}
+{-# LANGUAGE DerivingVia         #-}
 {-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE KindSignatures      #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications    #-}
 -- |
 module TM.Flow (tests) where
 
+import Control.Lens     hiding ((.=))
 import Data.Aeson       ((.=),object)
 import Data.IORef
+import Data.Proxy
 import Data.Text        (Text,unpack)
 import System.IO.Temp   (withSystemTempDirectory)
 import System.FilePath  ((</>))
 import System.Directory (doesDirectoryExist)
 import Test.Tasty
 import Test.Tasty.HUnit
+import GHC.Generics     (Generic)
+import GHC.TypeLits
 
 import OKA.Metadata
 import OKA.Flow.Graph
@@ -23,18 +34,17 @@ import OKA.Flow
 tests :: TestTree
 tests = testGroup "Run flow"
   [ testCase "Single workflow" $ withSimpleFlow $ \ctx -> do
-      (obsA, flowA) <- flowProduceInt "nA"
-      let meta = Metadata $ object [ "nA" .= (100::Int) ]
+      (obsA, flowA) <- flowProduceInt @"nA"
+      let meta = toMetadata ( CounterMeta 100 :: CounterMeta "nA")
           flow = flowA ()
       runFlow ctx meta flow
       observe "flow A" obsA (Just 100)
     -- Forcing of pair works
   , testCase "Pair of workflows" $ withSimpleFlow $ \ctx -> do
-      (obsA, flowA) <- flowProduceInt "nA"
-      (obsB, flowB) <- flowProduceInt "nB"
-      let meta = Metadata $ object [ "nA" .= (100::Int)
-                                   , "nB" .= (200::Int)
-                                   ]
+      (obsA, flowA) <- flowProduceInt @"nA"
+      (obsB, flowB) <- flowProduceInt @"nB"
+      let meta = toMetadata ( CounterMeta 100 :: CounterMeta "nA"
+                            , CounterMeta 200 :: CounterMeta "nB")
           flow = do a <- flowA ()
                     b <- flowB ()
                     pure (a,b)
@@ -43,11 +53,10 @@ tests = testGroup "Run flow"
       observe "flow B" obsB (Just 200)
     -- Unused workflow is not executed
   , testCase "Dead workflow" $ withSimpleFlow $ \ctx -> do
-      (obsA, flowA) <- flowProduceInt "nA"
-      (obsB, flowB) <- flowProduceInt "nB"
-      let meta = Metadata $ object [ "nA" .= (100::Int)
-                                   , "nB" .= (200::Int)
-                                   ]
+      (obsA, flowA) <- flowProduceInt @"nA"
+      (obsB, flowB) <- flowProduceInt @"nB"
+      let meta = toMetadata ( CounterMeta 100 :: CounterMeta "nA"
+                            , CounterMeta 200 :: CounterMeta "nB")
           flow = do a <- flowA ()
                     _ <- flowB ()
                     pure a
@@ -56,9 +65,9 @@ tests = testGroup "Run flow"
       observe "flow B" obsB Nothing
     -- Chain of workflow
   , testCase "Chain" $ withSimpleFlow $ \ctx -> do
-      (obsA, flowA) <- flowProduceInt "nA"
+      (obsA, flowA) <- flowProduceInt @"nA"
       (obsS, flowS) <- flowSquare
-      let meta = Metadata $ object [ "nA" .= (100::Int) ]
+      let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
           flow = do a <- flowA ()
                     flowS a
       runFlow ctx meta flow
@@ -66,9 +75,9 @@ tests = testGroup "Run flow"
       observe "flow S" obsS (Just 10000)
     -- Caching works
   , testCase "Caching" $ withSimpleFlow $ \ctx -> do
-      (obsA, flowA) <- flowProduceInt "nA"
+      (obsA, flowA) <- flowProduceInt @"nA"
       (obsS, flowS) <- flowSquare
-      let meta  = Metadata $ object [ "nA" .= (100::Int) ]
+      let meta  = toMetadata (CounterMeta 100 :: CounterMeta "nA")
           flow1 = flowA ()
           flow2 = do a <- flowA ()
                      flowS a
@@ -78,9 +87,9 @@ tests = testGroup "Run flow"
       observe "flow S" obsS (Just 10000)
     -- Caching works for phony targets
   , testCase "Phony" $ withSimpleFlow $ \ctx -> do
-      (obsA, flowA) <- flowProduceInt "nA"
+      (obsA, flowA) <- flowProduceInt @"nA"
       (obsS, flowS) <- flowPhony
-      let meta  = Metadata $ object [ "nA" .= (100::Int) ]
+      let meta  = toMetadata (CounterMeta 100 :: CounterMeta "nA")
           flow1 = flowA ()
           flow2 = do a <- flowA ()
                      s <- flowS a
@@ -114,20 +123,29 @@ observe :: (Eq a, Show a) => String -> Observe a -> Maybe a -> IO ()
 observe msg (Observe val _) a = do
   assertEqual (msg ++ " value") a =<< readIORef val
 
+data CounterMeta (a :: Symbol) = CounterMeta
+  { count :: Int
+  }
+  deriving stock Generic
+  deriving MetaEncoding via AsRecord    (CounterMeta a)
+  deriving IsMeta       via AsMeta '[a] (CounterMeta a)
+
 
 -- exists :: Observe a -> IO (Maybe a)
 -- exists = readIORef . obsVal
 
 
 
-flowProduceInt :: Text -> IO (Observe Int, () -> Flow res eff (Result Int))
-flowProduceInt k = do
+flowProduceInt
+  :: forall name res eff. (KnownSymbol name)
+  => IO (Observe Int, () -> Flow res eff (Result Int))
+flowProduceInt = do
   obs <- Observe <$> newIORef Nothing <*> newIORef ""
   pure ( obs
        , liftWorkflow $ Workflow Action 
-         { workflowName = "produce-" ++ unpack k
+         { workflowName = "produce-" ++ (symbolVal (Proxy @name))
          , workflowRun  = \_ meta [] out -> do
-             let n = lookupMeta meta [k]
+             let n = meta ^. metadata @(CounterMeta name) . to count
              assertBool "Flow must called only once" =<<
                atomicModifyIORef' (obsVal  obs)
                  (\case

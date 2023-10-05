@@ -106,7 +106,7 @@ runExternalProcess exe meta args = do
     _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
     pure ()
   where
-    run = setStdin (byteStringInput $ JSON.encode meta)
+    run = setStdin (byteStringInput $ JSON.encode $ encodeMetadataDyn meta)
         $ proc exe args
 
 -- | Run external process that adheres to standard calling conventions
@@ -149,7 +149,7 @@ runJupyter notebook meta param = do
     createDirectory dir_config
     createDirectory dir_data
     cwd <- getCurrentDirectory
-    BL.writeFile file_meta $ JSON.encode meta
+    BL.writeFile file_meta $ JSON.encode $ encodeMetadataDyn meta
     --
     env <- getEnvironment
     let run = setEnv ( ("JUPYTER_DATA_DIR",   dir_data)

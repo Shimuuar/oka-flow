@@ -125,7 +125,7 @@ prepareFun FlowCtx{..} FIDSet{..} Fun{..} res = do
       let out    = flowCtxRoot </> toPath funOutput    -- Output directory
           build  = out ++ "-build"                     -- Temporary build directory
       createDirectory build
-      BL.writeFile (build </> "meta.json") $ JSON.encode $ let Metadata m = meta in m
+      BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadataDyn meta
       writeFile    (build </> "deps.txt")  $ unlines paramP
       _ <- action res meta params build `onException` removeDirectoryRecursive build
       renameDirectory build out

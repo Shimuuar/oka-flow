@@ -58,6 +58,7 @@ Test-suite oka-flow-tests
                   , oka-metadata
                     --
                   , aeson
+                  , lens
                   , containers
                   , directory
                   , temporary  >=1

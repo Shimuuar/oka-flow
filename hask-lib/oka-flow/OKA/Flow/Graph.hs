@@ -34,7 +34,7 @@ module OKA.Flow.Graph
 
 import Control.Lens
 import Control.Monad
-import Control.Monad.Operational
+import Control.Monad.Operational    hiding (view)
 import Control.Monad.Trans.State.Strict
 import Crypto.Hash.SHA1             qualified as SHA1
 import Data.Aeson                   qualified as JSON
@@ -117,7 +117,7 @@ instance MonadFail (Flow res eff) where
 
 -- | Add value which could be serialized to metadata to full medataset
 appendMeta :: IsMeta a => a -> Flow res eff ()
-appendMeta a = Flow $ _1 %= (<> toMeta a)
+appendMeta a = Flow $ _1 . metadata .= a
 
 -- | Modify metadata using given function
 modifyMeta :: (Metadata -> Metadata) -> Flow res eff ()
@@ -138,11 +138,11 @@ restrictMeta
   => Flow res eff a
   -> Flow res eff a
 restrictMeta action = scopeMeta $ do
-  modifyMeta (toMeta @meta . fromMeta @meta)
+  modifyMeta (toMetadata . view (metadata @meta))
   action
 
 projectMeta :: IsMeta a => Flow res eff a
-projectMeta = Flow $ fromMeta <$> use _1
+projectMeta = Flow $ use (_1 . metadata)
 
 ----------------------------------------------------------------
 -- Execution of the workflow
@@ -166,11 +166,12 @@ hashFun Fun{..} = case funWorkflow of
 
 -- Compute hash of metadata
 hashMeta :: Metadata -> Hash
-hashMeta (Metadata json)
+hashMeta
   = Hash
-  $ SHA1.hashlazy
-  $ JSONB.encodingToLazyByteString
-  $ encodeToBuilder json
+  . SHA1.hashlazy
+  . JSONB.encodingToLazyByteString
+  . encodeToBuilder
+  . encodeMetadataDyn
 
 encodeToBuilder :: JSON.Value -> JSONB.Encoding
 encodeToBuilder JSON.Null       = JSONB.null_
