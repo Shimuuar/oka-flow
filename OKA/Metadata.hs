@@ -577,7 +577,7 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta 
                      . deleteFromMetadata @h
 
 
-
+deriving via AsAeson Char   instance MetaEncoding Char
 deriving via AsAeson Value  instance MetaEncoding Value
 deriving via AsAeson Text   instance MetaEncoding Text
 deriving via AsAeson Bool   instance MetaEncoding Bool
