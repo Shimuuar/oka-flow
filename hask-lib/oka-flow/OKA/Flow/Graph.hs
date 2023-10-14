@@ -40,6 +40,8 @@ import Data.List                    (sortOn)
 import Data.Map.Strict              (Map, (!))
 import Data.Set                     (Set)
 import Data.Set                     qualified as Set
+import Data.Text                    qualified as T
+import Data.Text.Encoding           qualified as T
 import Data.Vector                  qualified as V
 
 import OKA.Metadata
@@ -130,15 +132,17 @@ hashFlowGraph gr = res where
 hashFun :: (k -> StorePath) -> Fun res k a -> Fun res k (Maybe StorePath)
 hashFun oracle fun = fun
   { output = case fun.workflow of
-      Workflow (Action nm _) -> Just $ StorePath nm (Hash hash)
       Phony{}                -> Nothing
+      Workflow (Action nm _) ->
+        let hash   = SHA1.hashlazy $ BL.fromChunks [h | Hash h <- hashes]
+            hashes = hashMeta fun.metadata
+                   : Hash (T.encodeUtf8 $ T.pack nm)
+                   : [ case oracle k of StorePath _ h -> h
+                     | k <- fun.param
+                     ]
+        in Just $ StorePath nm (Hash hash)
   }
   where
-    hash   = SHA1.hashlazy $ BL.fromChunks [h | Hash h <- hashes]
-    hashes = hashMeta fun.metadata
-           : [ case oracle k of StorePath _ h -> h
-             | k <- fun.param
-             ]
 
 -- Compute hash of metadata
 hashMeta :: Metadata -> Hash

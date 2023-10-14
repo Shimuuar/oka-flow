@@ -49,7 +49,7 @@ Library
                   , base16-bytestring    >=1
                   , vector               >=0.13
                   , unordered-containers >=0.2
-                    --
+                  , text                 >=2
                   , typed-process        >=0.2
                   , process
                   , unix
