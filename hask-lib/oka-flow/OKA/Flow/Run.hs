@@ -66,8 +66,7 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
   -- Evaluate dataflow graph
   gr <- fmap hashFlowGraph
       $ interpretWithMonad flowCtxEff
-      $ fmap addTargets
-      $ (fmap . fmap) snd
+      $ fmap (\(r,(_,gr)) -> addTargets r gr)
       $ runStateT m (meta, FlowGraph mempty mempty)
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr
@@ -83,7 +82,7 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
     | i <- Set.toList $ fidWanted targets
     ]
   where
-    addTargets (r,gr) = gr & flowTgtL %~ mappend (Set.fromList (toResultSet r))
+    addTargets r gr = gr & flowTgtL %~ mappend (Set.fromList (toResultSet r))
     targetExists path = flowTgtExists (flowCtxRoot </> storePath path)
 
 
