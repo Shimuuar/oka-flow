@@ -83,8 +83,8 @@ liftWorkflow exe p = Flow $ do
   _2 . flowGraphL . at fid .= Just Fun
     { funWorkflow = exe
     , funMetadata = meta
-    , funOutput   = (fid,())
-    , funParam    = (,()) <$> res
+    , funOutput   = ()
+    , funParam    = res
     }
   return $ Result fid
 

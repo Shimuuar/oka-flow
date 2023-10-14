@@ -47,7 +47,7 @@ data FlowCtx eff res = FlowCtx
   , flowCtxRes    :: res
     -- ^ Resources
   , flowEvalReport :: [StorePath] -> [StorePath] -> IO ()
-    -- ^ Function to report 
+    -- ^ Function to report
   }
 
 
@@ -71,14 +71,15 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr
   gr_exe  <- addTMVars gr
-  let getStorePath fids = concat [ gr ^.. flowGraphL . at fid . _Just . to funOutput . _2 . _Just
-                                 | fid <- toList fids ]
+  let getStorePath fids = concat [ gr ^.. flowGraphL . at fid . _Just . to funOutput . _Just
+                                 | fid <- toList fids
+                                 ]
       paths_wanted = getStorePath $ fidWanted targets
       paths_exist  = getStorePath $ fidExists targets
   flowEvalReport paths_exist paths_wanted
   -- Evaluator
   mapConcurrently_ id
-    [ prepareFun ctx targets (flowGraph gr_exe ! i) flowCtxRes
+    [ prepareFun ctx gr_exe targets (flowGraph gr_exe ! i) flowCtxRes
     | i <- Set.toList $ fidWanted targets
     ]
   where
@@ -86,22 +87,23 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
     targetExists path = flowTgtExists (flowCtxRoot </> storePath path)
 
 
--- Add TMVars to each node of graph. This is needed in order to 
+-- Add TMVars to each node of graph. This is needed in order to
 addTMVars :: FlowGraph res a -> IO (FlowGraph res (TMVar (), a))
 addTMVars = traverse $ \f -> do v <- newEmptyTMVarIO
                                 pure (v,f)
 
 -- Prepare function for evaluation
 prepareFun
-  :: FlowCtx eff res                              -- Evaluation context
-  -> FIDSet                                       -- Our target set
-  -> Fun res (FunID, (TMVar (), Maybe StorePath)) -- Function to evaluate
+  :: FlowCtx eff res                           -- Evaluation context
+  -> FlowGraph res (TMVar (), Maybe StorePath) -- Full dataflow graph
+  -> FIDSet                                    -- Our target set
+  -> Fun res FunID (TMVar (), Maybe StorePath) -- Function to evaluate
   -> res
   -> IO ()
-prepareFun FlowCtx{..} FIDSet{..} Fun{..} res = do
+prepareFun FlowCtx{..} FlowGraph{flowGraph=gr} FIDSet{..} Fun{..} res = do
   -- Check that all function parameters are already evaluated:
-  for_ funParam $ \(fid, (v,_)) -> do
-    when (fid `Set.notMember` fidExists) $ atomically $ readTMVar v
+  for_ funParam $ \fid -> when (fid `Set.notMember` fidExists) $
+    atomically $ readTMVar (fst $ outputOf fid)
   -- Run action
   case funWorkflow of
     -- Prepare normal action. We first create output directory and
@@ -110,15 +112,18 @@ prepareFun FlowCtx{..} FIDSet{..} Fun{..} res = do
     -- Execute phony action. We don't need to bother with setting up output
     Phony    act            -> act res meta params
   -- Signal that we successfully complete execution
-  atomically $ putTMVar tmvar ()
+  atomically $ putTMVar (fst funOutput) ()
   where
+    outputOf k = case gr ^. at k of
+      Just Fun{funOutput=a} -> a
+      Nothing -> error "INTERNAL ERROR: inconsistent flow graph"
+    --
     meta   = funMetadata                         -- Metadata
-    paramP = toPath <$> funParam                 -- Parameters relative to store
+    paramP = toPath . outputOf <$> funParam      -- Parameters relative to store
     params = [ flowCtxRoot </> p | p <- paramP ] -- Parameters as real path
     --
-    (_,(tmvar,_))       = funOutput  
-    toPath (_,(_,Just path)) = storePath path
-    toPath (_,(_,Nothing  )) = error "INTERNAL ERROR: dependence on PHONY node"
+    toPath (_,Just path) = storePath path
+    toPath (_,Nothing  ) = error "INTERNAL ERROR: dependence on PHONY node"
     --
     prepareNormal action = do
       let out    = flowCtxRoot </> toPath funOutput    -- Output directory

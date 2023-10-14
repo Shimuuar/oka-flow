@@ -1,5 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes        #-}
+{-# LANGUAGE DeriveFoldable             #-}
 {-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DeriveTraversable          #-}
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -59,52 +61,27 @@ import OKA.Flow.Types
 ----------------------------------------------------------------
 
 -- | Single workflow bound in dataflow graph.
-data Fun res a = Fun
+data Fun res k v = Fun
   { funWorkflow :: Workflow res
     -- ^ Execute workflow. It takes resource handle as parameter and
     --   tries to acquire resources and return actual function to run.
   , funMetadata :: Metadata
     -- ^ Metadata that should be supplied to the workflow
-  , funParam    :: [a]
+  , funParam    :: [k]
     -- ^ Parameters to workflow.
-  , funOutput   :: a
+  , funOutput   :: v
     -- ^ Output of workflow
   }
-  deriving stock (Functor)
+  deriving stock (Functor, Foldable, Traversable)
 
 -- | Complete dataflow graph
 data FlowGraph res a = FlowGraph
-  { flowGraph :: Map FunID (Fun res (FunID, a))
+  { flowGraph :: Map FunID (Fun res FunID a)
     -- ^ Dataflow graph with dependencies
   , flowTgt   :: Set FunID
     -- ^ Set of values for which we want to evaluate
   }
-  deriving (Functor) -- Safe but evaluates function for each graph node and vertex
-
-instance Foldable (FlowGraph res) where
-  foldMap f = foldMap (f . snd . funOutput) . flowGraph
-instance Traversable (FlowGraph res) where
-  traverse fun (FlowGraph gr tgt)
-    = (\m -> FlowGraph (fixup m) tgt) <$> gr'
-    where
-      gr' = traverse (\f -> (,f) <$> fun (snd $ funOutput f)) gr
-      -- Fixup graph
-      fixup gr0 = r where
-        r = gr0 <&> \(b,f) -> f
-          { funOutput = funOutput f & _2 .~ b
-          , funParam  = [ (i, snd $ funOutput $ r ! i) | (i,_) <- funParam f ]
-          }
-
-fmapFlowGraph
-  :: (Fun res b -> b)
-  -> FlowGraph res a
-  -> FlowGraph res b
-fmapFlowGraph fun gr = gr { flowGraph = r } where
-  r = convert <$> flowGraph gr
-  convert f = f' where
-    f' = f { funOutput = funOutput f & _2 .~ fun (snd <$> f')
-           , funParam  = [ (i, snd $ funOutput $ r ! i) | (i,_) <- funParam f ]
-           }
+  deriving stock (Functor, Foldable, Traversable)
 
 
 -- | Flow monad which we use to build workflow
@@ -144,25 +121,34 @@ restrictMeta action = scopeMeta $ do
 projectMeta :: IsMeta a => Flow res eff a
 projectMeta = Flow $ use (_1 . metadata)
 
+
 ----------------------------------------------------------------
 -- Execution of the workflow
 ----------------------------------------------------------------
 
 -- | Compute all hashes and resolve all nodes to corresponding paths
 hashFlowGraph :: FlowGraph res () -> FlowGraph res (Maybe StorePath)
-hashFlowGraph = fmapFlowGraph hashFun
+hashFlowGraph gr = res where
+  res      = gr & flowGraphL . mapped %~ hashFun oracle
+  oracle k = case res ^. flowGraphL . at k of
+    Nothing -> error "INTERNAL ERROR: flow graph is not consistent"
+    Just f  -> case funOutput f of
+      Nothing -> error "INTERNAL ERROR: dependence on PHONY node"
+      Just p  -> p
 
-hashFun :: Fun res (Maybe StorePath) -> Maybe StorePath
-hashFun Fun{..} = case funWorkflow of
-  Workflow (Action nm _) -> Just $ StorePath nm (Hash hash)
-  Phony{}                -> Nothing
+hashFun :: (k -> StorePath) -> Fun res k a -> Fun res k (Maybe StorePath)
+hashFun oracle Fun{..} = Fun
+  { funOutput = case funWorkflow of
+      Workflow (Action nm _) -> Just $ StorePath nm (Hash hash)
+      Phony{}                -> Nothing
+  , ..
+  }
   where
     hash   = SHA1.hashlazy $ BL.fromChunks [h | Hash h <- hashes]
     hashes = hashMeta funMetadata
-           : [ case p of
-                 Nothing              -> error "INTERNAL ERROR: dependence on PHONY node"
-                 Just (StorePath _ h) -> h
-             | p <- funParam]
+           : [ case oracle k of StorePath _ h -> h
+             | k <- funParam
+             ]
 
 -- Compute hash of metadata
 hashMeta :: Metadata -> Hash
@@ -214,20 +200,18 @@ shakeFlowGraph tgtExists (FlowGraph workflows targets)
             -- Phony targets are always executed
             Phony{}    -> pure False
             Workflow{} -> case funOutput f of
-              (_, Just path) -> tgtExists path
-              (_, Nothing)   -> error "INTERNAL ERROR: dependence on phony target"
+              Just path -> tgtExists path
+              Nothing   -> error "INTERNAL ERROR: dependence on phony target"
           case exists of
             True  -> pure $ fids & fidExistsL %~ Set.insert fid
-            False -> foldM addFID fids' (fst <$> funParam f)
+            False -> foldM addFID fids' (funParam f)
       where
         f     = workflows ! fid
         fids' = fids & fidWantedL %~ Set.insert fid
 
 data FIDSet = FIDSet
-  { fidExists :: !(Set FunID)
-    -- ^ Workflow already computed
-  , fidWanted :: !(Set FunID)
-    -- ^ We need to compute these workflows
+  { fidExists :: !(Set FunID) -- ^ Workflow already computed
+  , fidWanted :: !(Set FunID) -- ^ We need to compute these workflows
   }
   deriving (Show)
 
@@ -242,5 +226,5 @@ fidWantedL = lens fidWanted (\f x -> f {fidWanted = x})
 flowTgtL :: Lens' (FlowGraph res a) (Set FunID)
 flowTgtL = lens flowTgt (\x s -> x {flowTgt = s})
 
-flowGraphL :: Lens' (FlowGraph res a) (Map FunID (Fun res (FunID,a)))
+flowGraphL :: Lens (FlowGraph res a) (FlowGraph res b) (Map FunID (Fun res FunID a)) (Map FunID (Fun res FunID b))
 flowGraphL = lens flowGraph (\x s -> x {flowGraph = s})
