@@ -67,7 +67,22 @@ Library
 Test-suite oka-flow-tests
   type:             exitcode-stdio-1.0
   Default-Language: Haskell2010
-  ghc-options:      -Wall
+  ghc-options:      -Wall -Wno-incomplete-uni-patterns
+  Default-extensions: DeriveFoldable
+                    , DeriveFunctor
+                    , DeriveTraversable
+                    , DerivingStrategies
+                    , DuplicateRecordFields
+                    , GeneralizedNewtypeDeriving
+                    , ImportQualifiedPost
+                    , LambdaCase
+                    , NoFieldSelectors
+                    , NumericUnderscores
+                    , OverloadedRecordDot
+                    , ScopedTypeVariables
+                    , TypeApplications
+                    , TypeOperators
+                    , TupleSections
   Build-Depends:    base
                   , oka-flow
                   , oka-metadata

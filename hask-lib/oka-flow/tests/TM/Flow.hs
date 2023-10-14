@@ -13,11 +13,13 @@
 -- |
 module TM.Flow (tests) where
 
-import Control.Lens     hiding ((.=))
-import Data.Aeson       ((.=),object)
+import Control.Lens
 import Data.IORef
 import Data.Proxy
-import Data.Text        (Text,unpack)
+import Data.Foldable
+import Data.List        (sort)
+import Data.Map.Strict  qualified as Map
+import Data.Map.Strict  (Map)
 import System.IO.Temp   (withSystemTempDirectory)
 import System.FilePath  ((</>))
 import System.Directory (doesDirectoryExist)
@@ -38,7 +40,7 @@ tests = testGroup "Run flow"
       let meta = toMetadata ( CounterMeta 100 :: CounterMeta "nA")
           flow = flowA ()
       runFlow ctx meta flow
-      observe "flow A" obsA (Just 100)
+      observe "flow A" obsA [100]
     -- Forcing of pair works
   , testCase "Pair of workflows" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
@@ -49,8 +51,23 @@ tests = testGroup "Run flow"
                     b <- flowB ()
                     pure (a,b)
       runFlow ctx meta flow
-      observe "flow A" obsA (Just 100)
-      observe "flow B" obsB (Just 200)
+      observe "flow A" obsA [100]
+      observe "flow B" obsB [200]
+    -- Hashes for dependency are computed correctly
+  , testCase "Hash for dependency" $ withSimpleFlow $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt @"nA"
+      (obsB, flowB) <- flowProduceInt @"nB"
+      (obsS, flowS) <- flowSquare
+      let meta = toMetadata ( CounterMeta 100 :: CounterMeta "nA"
+                            , CounterMeta 200 :: CounterMeta "nB")
+          flow = do a <- flowA ()
+                    b <- flowB ()
+                    want =<< flowS a
+                    want =<< flowS b
+      runFlow ctx meta flow
+      observe "flow A" obsA [100]
+      observe "flow B" obsB [200]
+      observe "flow S" obsS [100_00, 400_00]
     -- Unused workflow is not executed
   , testCase "Dead workflow" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
@@ -61,8 +78,8 @@ tests = testGroup "Run flow"
                     _ <- flowB ()
                     pure a
       runFlow ctx meta flow
-      observe "flow A" obsA (Just 100)
-      observe "flow B" obsB Nothing
+      observe "flow A" obsA [100]
+      observe "flow B" obsB []
     -- Chain of workflow
   , testCase "Chain" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
@@ -71,8 +88,8 @@ tests = testGroup "Run flow"
           flow = do a <- flowA ()
                     flowS a
       runFlow ctx meta flow
-      observe "flow A" obsA (Just 100)
-      observe "flow S" obsS (Just 10000)
+      observe "flow A" obsA [100]
+      observe "flow S" obsS [10000]
     -- Caching works
   , testCase "Caching" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
@@ -83,8 +100,8 @@ tests = testGroup "Run flow"
                      flowS a
       runFlow ctx meta flow1
       runFlow ctx meta flow2
-      observe "flow A" obsA (Just 100)
-      observe "flow S" obsS (Just 10000)
+      observe "flow A" obsA [100]
+      observe "flow S" obsS [10000]
     -- Caching works for phony targets
   , testCase "Phony" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
@@ -96,8 +113,8 @@ tests = testGroup "Run flow"
                      pure s
       runFlow ctx meta flow1
       runFlow ctx meta flow2
-      observe "flow A" obsA (Just 100)
-      observe "flow S" obsS (Just 10000)
+      observe      "flow A" obsA [100]
+      observePhony "flow S" obsS [10000]
    -- Duplicate workflows are evaluated only once
   , testCase "Duplicate" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
@@ -105,7 +122,7 @@ tests = testGroup "Run flow"
           flow = do want =<< flowA ()
                     want =<< flowA ()
       runFlow ctx meta flow
-      observe "flow" obsA (Just 100)
+      observe "flow" obsA [100]
   ]
 
 withSimpleFlow :: (FlowCtx IO () -> IO a) -> IO a
@@ -122,15 +139,7 @@ withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
 -- Flows
 ----------------------------------------------------------------
 
-data Observe a = Observe
-  { obsVal  :: IORef (Maybe a)
-  , obsPath :: IORef FilePath
-  }
-
-observe :: (Eq a, Show a) => String -> Observe a -> Maybe a -> IO ()
-observe msg (Observe val _) a = do
-  assertEqual (msg ++ " value") a =<< readIORef val
-
+-- Metadata data type we're using
 data CounterMeta (a :: Symbol) = CounterMeta
   { count :: Int
   }
@@ -139,8 +148,43 @@ data CounterMeta (a :: Symbol) = CounterMeta
   deriving IsMeta       via AsMeta '[a] (CounterMeta a)
 
 
--- exists :: Observe a -> IO (Maybe a)
--- exists = readIORef . obsVal
+-- Tool for observation of execution of normal flows
+newtype Observe a = Observe (IORef (Map FilePath a))
+
+-- Create new ovservatory
+newObserve :: IO (Observe a)
+newObserve = Observe <$> newIORef mempty
+
+-- Save execution of a workflow
+saveObservation :: Observe a -> FilePath -> a -> IO ()
+saveObservation (Observe ref) out a = atomicModifyIORef' ref $ \m ->
+  case Map.lookup out m of
+    Just _  -> error "saveObservation: workflow run twice"
+    Nothing -> (Map.insert out a m, ())
+
+-- Observe single execution of a workflow
+observe :: (Ord a, Show a) => String -> Observe a -> [a] -> IO ()
+observe msg (Observe ref) a = do
+  assertEqual msg a =<< (sort . toList <$> readIORef ref)
+
+
+-- Tool for observation of execution of phony flows
+newtype ObsPhony a = ObsPhony (IORef [a])
+
+-- Create new ovservatory
+newObsPhony :: IO (ObsPhony a)
+newObsPhony = ObsPhony <$> newIORef mempty
+
+-- Save execution of a workflow
+saveObsPhony :: ObsPhony a -> a -> IO ()
+saveObsPhony (ObsPhony ref) a = atomicModifyIORef' ref $ \xs -> ((a:xs),())
+
+-- Require that workflow was not executed at all
+observePhony :: (Ord a, Show a) => String -> ObsPhony a -> [a] -> IO ()
+observePhony msg (ObsPhony ref) xs =
+  assertEqual msg xs =<< (sort . toList <$> readIORef ref)
+
+
 
 
 
@@ -148,51 +192,37 @@ flowProduceInt
   :: forall name res eff. (KnownSymbol name)
   => IO (Observe Int, () -> Flow res eff (Result Int))
 flowProduceInt = do
-  obs <- Observe <$> newIORef Nothing <*> newIORef ""
+  obs <- newObserve
   pure ( obs
-       , liftWorkflow $ Workflow Action 
+       , liftWorkflow $ Workflow Action
          { workflowName = "produce-" ++ (symbolVal (Proxy @name))
          , workflowRun  = \_ meta [] out -> do
-             let n = meta ^. metadata @(CounterMeta name) . to count
-             assertBool "Flow must called only once" =<<
-               atomicModifyIORef' (obsVal  obs)
-                 (\case
-                     Nothing -> (Just n, True)
-                     Just _  -> (Just n, False))
-             writeIORef (obsPath obs) out
+             let n = meta ^. metadata @(CounterMeta name) . to (.count)
+             saveObservation obs out n
              writeFile (out </> "out.txt") (show n)
          }
        )
 
 flowSquare :: IO (Observe Int, Result Int -> Flow res eff (Result Int))
 flowSquare = do
-  obs <- Observe <$> newIORef Nothing <*> newIORef ""
+  obs <- newObserve
   pure ( obs
        , liftWorkflow $ Workflow Action
          { workflowName = "square"
          , workflowRun  = \_ _ [p] out -> do
              n <- read @Int <$> readFile (p </> "out.txt")
              let n' = n * n
-             assertBool "Flow must called only once" =<<
-               atomicModifyIORef' (obsVal  obs)
-                 (\case
-                     Nothing -> (Just n', True)
-                     Just _  -> (Just n', False))
-             writeIORef (obsPath obs) out
+             saveObservation obs out n'
              writeFile (out </> "out.txt") (show n')
          }
        )
 
-flowPhony :: IO (Observe Int, Result Int -> Flow res eff (Result ()))
+flowPhony :: IO (ObsPhony Int, Result Int -> Flow res eff (Result ()))
 flowPhony = do
-  obs <- Observe <$> newIORef Nothing <*> newIORef ""
+  obs <- newObsPhony
   pure ( obs
        , liftWorkflow $ Phony $ \_ _ [p] -> do
            n <- read @Int <$> readFile (p </> "out.txt")
            let n' = n * n
-           assertBool "Flow must called only once" =<<
-             atomicModifyIORef' (obsVal  obs)
-               (\case
-                   Nothing -> (Just n', True)
-                   Just _  -> (Just n', False))
+           saveObsPhony obs n'
        )
