@@ -1,7 +1,4 @@
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE NumericUnderscores  #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- |
 -- Tools for defining concrete workflows.
 module OKA.Flow.Tools
@@ -71,7 +68,7 @@ defGhcOpts = [ "-O2"
 ----------------------------------------------------------------
 
 -- | We want to restrict number of simultaneous programs which connect to DB
-newtype LockLMDB = LockLMDB { getLockLMDB :: TVar Int }
+newtype LockLMDB = LockLMDB { get :: TVar Int }
 
 newLockLMDB :: Int -> IO LockLMDB
 newLockLMDB n = LockLMDB <$> newTVarIO n
@@ -84,7 +81,7 @@ rateLimitLMDB
 rateLimitLMDB res io =
   (acquire >> io) `finally` release
   where
-    lock = getLockLMDB $ getTyped res
+    lock = (getTyped @LockLMDB res).get
     acquire = atomically $ do n <- readTVar lock
                               when (n <= 0) retry
                               modifyTVar' lock (subtract 1)

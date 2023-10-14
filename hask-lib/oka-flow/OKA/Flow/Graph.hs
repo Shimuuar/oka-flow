@@ -1,16 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes        #-}
-{-# LANGUAGE DeriveFoldable             #-}
-{-# LANGUAGE DeriveFunctor              #-}
-{-# LANGUAGE DeriveTraversable          #-}
-{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE ImportQualifiedPost        #-}
-{-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE TupleSections              #-}
-{-# LANGUAGE TypeApplications           #-}
 -- |
 -- Implementation of dataflow graph.
 module OKA.Flow.Graph
@@ -62,23 +53,23 @@ import OKA.Flow.Types
 
 -- | Single workflow bound in dataflow graph.
 data Fun res k v = Fun
-  { funWorkflow :: Workflow res
+  { workflow :: Workflow res
     -- ^ Execute workflow. It takes resource handle as parameter and
     --   tries to acquire resources and return actual function to run.
-  , funMetadata :: Metadata
+  , metadata :: Metadata
     -- ^ Metadata that should be supplied to the workflow
-  , funParam    :: [k]
+  , param    :: [k]
     -- ^ Parameters to workflow.
-  , funOutput   :: v
+  , output   :: v
     -- ^ Output of workflow
   }
   deriving stock (Functor, Foldable, Traversable)
 
 -- | Complete dataflow graph
 data FlowGraph res a = FlowGraph
-  { flowGraph :: Map FunID (Fun res FunID a)
+  { graph   :: Map FunID (Fun res FunID a)
     -- ^ Dataflow graph with dependencies
-  , flowTgt   :: Set FunID
+  , targets :: Set FunID
     -- ^ Set of values for which we want to evaluate
   }
   deriving stock (Functor, Foldable, Traversable)
@@ -132,22 +123,21 @@ hashFlowGraph gr = res where
   res      = gr & flowGraphL . mapped %~ hashFun oracle
   oracle k = case res ^. flowGraphL . at k of
     Nothing -> error "INTERNAL ERROR: flow graph is not consistent"
-    Just f  -> case funOutput f of
+    Just f  -> case f.output of
       Nothing -> error "INTERNAL ERROR: dependence on PHONY node"
       Just p  -> p
 
 hashFun :: (k -> StorePath) -> Fun res k a -> Fun res k (Maybe StorePath)
-hashFun oracle Fun{..} = Fun
-  { funOutput = case funWorkflow of
+hashFun oracle fun = fun
+  { output = case fun.workflow of
       Workflow (Action nm _) -> Just $ StorePath nm (Hash hash)
       Phony{}                -> Nothing
-  , ..
   }
   where
     hash   = SHA1.hashlazy $ BL.fromChunks [h | Hash h <- hashes]
-    hashes = hashMeta funMetadata
+    hashes = hashMeta fun.metadata
            : [ case oracle k of StorePath _ h -> h
-             | k <- funParam
+             | k <- fun.param
              ]
 
 -- Compute hash of metadata
@@ -190,28 +180,28 @@ shakeFlowGraph
 shakeFlowGraph tgtExists (FlowGraph workflows targets)
   = foldM addFID (FIDSet mempty mempty) targets
   where
-    addFID fids@FIDSet{..} fid
+    addFID fids fid
       -- We already wisited these workflows
-      | fid `Set.member` fidExists = pure fids
-      | fid `Set.member` fidWanted = pure fids
+      | fid `Set.member` fids.exists = pure fids
+      | fid `Set.member` fids.wanted = pure fids
       -- Check if result has been computed already
       | otherwise = do
-          exists <- case funWorkflow f of
+          exists <- case f.workflow of
             -- Phony targets are always executed
             Phony{}    -> pure False
-            Workflow{} -> case funOutput f of
+            Workflow{} -> case f.output of
               Just path -> tgtExists path
               Nothing   -> error "INTERNAL ERROR: dependence on phony target"
           case exists of
             True  -> pure $ fids & fidExistsL %~ Set.insert fid
-            False -> foldM addFID fids' (funParam f)
+            False -> foldM addFID fids' (f.param)
       where
         f     = workflows ! fid
         fids' = fids & fidWantedL %~ Set.insert fid
 
 data FIDSet = FIDSet
-  { fidExists :: !(Set FunID) -- ^ Workflow already computed
-  , fidWanted :: !(Set FunID) -- ^ We need to compute these workflows
+  { exists :: !(Set FunID)    -- ^ Workflow already computed
+  , wanted :: !(Set FunID) -- ^ We need to compute these workflows
   }
   deriving (Show)
 
@@ -220,11 +210,11 @@ data FIDSet = FIDSet
 ----------------------------------------------------------------
 
 fidExistsL, fidWantedL :: Lens' FIDSet (Set FunID)
-fidExistsL = lens fidExists (\f x -> f {fidExists = x})
-fidWantedL = lens fidWanted (\f x -> f {fidWanted = x})
+fidExistsL = lens (.exists) (\f x -> f {exists = x})
+fidWantedL = lens (.wanted) (\f x -> f {wanted = x})
 
 flowTgtL :: Lens' (FlowGraph res a) (Set FunID)
-flowTgtL = lens flowTgt (\x s -> x {flowTgt = s})
+flowTgtL = lens (.targets) (\x s -> x {targets = s})
 
 flowGraphL :: Lens (FlowGraph res a) (FlowGraph res b) (Map FunID (Fun res FunID a)) (Map FunID (Fun res FunID b))
-flowGraphL = lens flowGraph (\x s -> x {flowGraph = s})
+flowGraphL = lens (.graph) (\x s -> x {graph = s})

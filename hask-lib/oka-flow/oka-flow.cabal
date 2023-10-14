@@ -15,6 +15,21 @@ Build-Type:     Simple
 Library
   Ghc-options:      -Wall -O2
   Default-Language: Haskell2010
+  Default-extensions: DeriveFoldable
+                    , DeriveFunctor
+                    , DeriveTraversable
+                    , DerivingStrategies
+                    , DuplicateRecordFields
+                    , GeneralizedNewtypeDeriving
+                    , ImportQualifiedPost
+                    , LambdaCase
+                    , NoFieldSelectors
+                    , NumericUnderscores
+                    , OverloadedRecordDot
+                    , ScopedTypeVariables
+                    , TypeApplications
+                    , TypeOperators
+                    , TupleSections
   --
   Build-Depends:    base                 >=4.12 && <5
                   , oka-metadata

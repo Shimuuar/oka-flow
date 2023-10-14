@@ -1,11 +1,4 @@
-{-# LANGUAGE DeriveFunctor        #-}
-{-# LANGUAGE DerivingStrategies   #-}
 {-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE ImportQualifiedPost  #-}
-{-# LANGUAGE LambdaCase           #-}
-{-# LANGUAGE ScopedTypeVariables  #-}
-{-# LANGUAGE TypeApplications     #-}
-{-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
 -- |
 -- Basic data types used in definition of dataflow program

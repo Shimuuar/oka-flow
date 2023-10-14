@@ -1,7 +1,9 @@
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE DerivingVia                #-}
+{-# LANGUAGE DuplicateRecordFields      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ImportQualifiedPost        #-}
+{-# LANGUAGE OverloadedRecordDot        #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE TupleSections              #-}
 -- |
@@ -71,20 +73,20 @@ liftWorkflow
 liftWorkflow exe p = Flow $ do
   (meta,gr) <- get
   -- Allocate new
-  let fid = case Map.lookupMax (flowGraph gr) of
+  let fid = case Map.lookupMax gr.graph of
               Just (FunID i, _) -> FunID (i + 1)
               Nothing           -> FunID 0
   -- Dependence on function without result is an error
   let res = toResultSet p
-      phonyDep i = isPhony $ funWorkflow $ flowGraph gr ! i
+      phonyDep i = isPhony $ (gr.graph ! i).workflow
   when (any phonyDep res) $ do
     error "Depending on phony target"
   -- Add workflow to graph
   _2 . flowGraphL . at fid .= Just Fun
-    { funWorkflow = exe
-    , funMetadata = meta
-    , funOutput   = ()
-    , funParam    = res
+    { workflow = exe
+    , metadata = meta
+    , output   = ()
+    , param    = res
     }
   return $ Result fid
 

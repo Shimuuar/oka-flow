@@ -1,10 +1,5 @@
-{-# LANGUAGE DeriveFunctor       #-}
-{-# LANGUAGE DerivingStrategies  #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE RecordWildCards     #-}
-{-# LANGUAGE TupleSections       #-}
 -- |
 module OKA.Flow.Run
   ( FlowCtx(..)
@@ -71,16 +66,16 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr
   gr_exe  <- addTMVars gr
-  let getStorePath fids = concat [ gr ^.. flowGraphL . at fid . _Just . to funOutput . _Just
+  let getStorePath fids = concat [ gr ^.. flowGraphL . at fid . _Just . to (.output) . _Just
                                  | fid <- toList fids
                                  ]
-      paths_wanted = getStorePath $ fidWanted targets
-      paths_exist  = getStorePath $ fidExists targets
+      paths_wanted = getStorePath targets.wanted
+      paths_exist  = getStorePath targets.exists
   flowEvalReport paths_exist paths_wanted
   -- Evaluator
   mapConcurrently_ id
-    [ prepareFun ctx gr_exe targets (flowGraph gr_exe ! i) flowCtxRes
-    | i <- Set.toList $ fidWanted targets
+    [ prepareFun ctx gr_exe targets (gr_exe.graph ! i) flowCtxRes
+    | i <- Set.toList targets.wanted
     ]
   where
     addTargets r gr = gr & flowTgtL %~ mappend (Set.fromList (toResultSet r))
@@ -100,33 +95,33 @@ prepareFun
   -> Fun res FunID (TMVar (), Maybe StorePath) -- Function to evaluate
   -> res
   -> IO ()
-prepareFun FlowCtx{..} FlowGraph{flowGraph=gr} FIDSet{..} Fun{..} res = do
+prepareFun FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = do
   -- Check that all function parameters are already evaluated:
-  for_ funParam $ \fid -> when (fid `Set.notMember` fidExists) $
+  for_ fun.param $ \fid -> when (fid `Set.notMember` exists) $
     atomically $ readTMVar (fst $ outputOf fid)
   -- Run action
-  case funWorkflow of
+  case fun.workflow of
     -- Prepare normal action. We first create output directory and
     -- write everything there. After we're done we rename it.
     Workflow (Action _ act) -> prepareNormal act
     -- Execute phony action. We don't need to bother with setting up output
     Phony    act            -> act res meta params
   -- Signal that we successfully complete execution
-  atomically $ putTMVar (fst funOutput) ()
+  atomically $ putTMVar (fst fun.output) ()
   where
     outputOf k = case gr ^. at k of
-      Just Fun{funOutput=a} -> a
+      Just f  -> f.output
       Nothing -> error "INTERNAL ERROR: inconsistent flow graph"
     --
-    meta   = funMetadata                         -- Metadata
-    paramP = toPath . outputOf <$> funParam      -- Parameters relative to store
+    meta   = fun.metadata                        -- Metadata
+    paramP = toPath . outputOf <$> fun.param     -- Parameters relative to store
     params = [ flowCtxRoot </> p | p <- paramP ] -- Parameters as real path
     --
     toPath (_,Just path) = storePath path
     toPath (_,Nothing  ) = error "INTERNAL ERROR: dependence on PHONY node"
     --
     prepareNormal action = do
-      let out    = flowCtxRoot </> toPath funOutput    -- Output directory
+      let out    = flowCtxRoot </> toPath fun.output   -- Output directory
           build  = out ++ "-build"                     -- Temporary build directory
       createDirectory build
       BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadataDyn meta
