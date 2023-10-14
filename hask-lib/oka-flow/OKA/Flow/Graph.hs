@@ -17,6 +17,7 @@ module OKA.Flow.Graph
   , projectMeta
     -- * Graph operations
   , hashFlowGraph
+  , deduplicateGraph
   , shakeFlowGraph
     -- * Lens
   , flowTgtL
@@ -36,8 +37,12 @@ import Data.Aeson.Encoding.Internal qualified as JSONB
 import Data.Aeson.KeyMap            qualified as KM
 import Data.Aeson.Key               (toText)
 import Data.ByteString.Lazy         qualified as BL
+import Data.Foldable
 import Data.List                    (sortOn)
+import Data.List.NonEmpty           qualified as NE
+import Data.List.NonEmpty           (NonEmpty(..))
 import Data.Map.Strict              (Map, (!))
+import Data.Map.Strict              qualified as Map
 import Data.Set                     (Set)
 import Data.Set                     qualified as Set
 import Data.Text                    qualified as T
@@ -173,7 +178,35 @@ jsArray v
     withComma a z = JSONB.comma <@> encodeToBuilder a <@> z
     JSONB.Encoding e1 <@> JSONB.Encoding e2 = JSONB.Encoding (e1 <> e2)
 
-
+-- | Remove duplicate nodes where different FunID correspond to same
+--   workflow
+deduplicateGraph
+  :: FlowGraph res (Maybe StorePath)
+  -> FlowGraph res (Maybe StorePath)
+deduplicateGraph gr
+  | null dupes = gr
+  | otherwise  = gr & flowGraphL %~ clean
+                    & flowTgtL   %~ (Set.\\ dupes)
+  where
+    clean = fmap replaceKey
+          . flip Map.withoutKeys dupes
+    replaceKey f = f { param = replace <$> f.param }
+    -- FIDs of duplicate
+    dupes       = Set.fromList [ fid | _ :| fids <- toList fid_mapping
+                                     , fid       <- fids
+                                     ]
+    -- Mapping for replacing FID
+    replace fid = replacement ^. at fid . non fid
+    replacement = Map.fromList [ (dup,fid) | fid :| fids <- toList fid_mapping
+                                           , dup <- fids
+                                           ]
+    -- Workflows that has more than one FID
+    fid_mapping
+      = Map.mapMaybe NE.nonEmpty
+      $ Map.fromListWith (<>) [(hash, [fid])
+                              | (fid,f)                 <- Map.toList gr.graph
+                              , Just (StorePath _ hash) <- [f.output]
+                              ]
 
 -- | Remove all workflows that already completed execution.
 shakeFlowGraph

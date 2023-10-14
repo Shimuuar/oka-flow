@@ -59,7 +59,7 @@ runFlow
   -> IO ()
 runFlow ctx@FlowCtx{..} meta (Flow m) = do
   -- Evaluate dataflow graph
-  gr <- fmap hashFlowGraph
+  gr <- fmap (deduplicateGraph . hashFlowGraph)
       $ interpretWithMonad flowCtxEff
       $ fmap (\(r,(_,gr)) -> addTargets r gr)
       $ runStateT m (meta, FlowGraph mempty mempty)

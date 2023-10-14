@@ -98,6 +98,14 @@ tests = testGroup "Run flow"
       runFlow ctx meta flow2
       observe "flow A" obsA (Just 100)
       observe "flow S" obsS (Just 10000)
+   -- Duplicate workflows are evaluated only once
+  , testCase "Duplicate" $ withSimpleFlow $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt @"nA"
+      let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
+          flow = do want =<< flowA ()
+                    want =<< flowA ()
+      runFlow ctx meta flow
+      observe "flow" obsA (Just 100)
   ]
 
 withSimpleFlow :: (FlowCtx IO () -> IO a) -> IO a

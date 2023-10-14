@@ -97,6 +97,7 @@ instance (ResultSet a) => GResultSet (K1 i a) where
 
 -- | SHA1 hash
 newtype Hash = Hash ByteString
+  deriving newtype (Eq,Ord)
 
 instance Show Hash where
   show (Hash hash) = show $ BC8.unpack $ Base16.encode hash
