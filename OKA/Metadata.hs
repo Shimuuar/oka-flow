@@ -61,6 +61,7 @@ module OKA.Metadata
   , MetaEncoding(..)
     -- * Writing instances
   , (.::)
+  , (.::?)
   , (.==)
   , metaWithObject
   , metaWithRecord
@@ -92,7 +93,7 @@ import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
 import Control.Lens
 
-import Data.Aeson                 (Value(..),(.:))
+import Data.Aeson                 (Value(..),(.:),(.:?))
 import Data.Aeson                 qualified as JSON
 import Data.Aeson.Key             qualified as JSON
 import Data.Aeson.KeyMap          qualified as KM
@@ -711,6 +712,11 @@ instance MetaEncoding BinD where
 -- | Parse sinlge field of metadata
 (.::) :: MetaEncoding a => JSON.Object -> JSON.Key -> JSON.Parser a
 o .:: k = parseMeta =<< (o .: k)
+
+-- | Parse sinlge field of metadata. Returns @Nothing@ if key is not
+--   present or null.
+(.::?) :: MetaEncoding a => JSON.Object -> JSON.Key -> JSON.Parser (Maybe a)
+o .::? k = traverse parseMeta =<< (o .:? k)
 
 (.==) :: MetaEncoding a => Text -> a -> (JSON.Key, JSON.Value)
 k .== v = (fromText k, metaToJson v)
