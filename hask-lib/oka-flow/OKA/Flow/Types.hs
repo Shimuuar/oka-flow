@@ -30,8 +30,8 @@ import OKA.Metadata           (Metadata)
 -- | Single action to be performed. It contains both workflow name and
 --   action to pefgorm workflow
 data Action res = Action
-  { workflowName :: String
-  , workflowRun  :: res -> Metadata -> [FilePath] -> FilePath -> IO ()
+  { name :: String
+  , run  :: res -> Metadata -> [FilePath] -> FilePath -> IO ()
   }
 
 -- | Descritpion of workflow function. It knows how to build

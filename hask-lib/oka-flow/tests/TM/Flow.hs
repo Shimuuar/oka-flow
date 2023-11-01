@@ -195,8 +195,8 @@ flowProduceInt = do
   obs <- newObserve
   pure ( obs
        , liftWorkflow $ Workflow Action
-         { workflowName = "produce-" ++ (symbolVal (Proxy @name))
-         , workflowRun  = \_ meta [] out -> do
+         { name = "produce-" ++ (symbolVal (Proxy @name))
+         , run  = \_ meta [] out -> do
              let n = meta ^. metadata @(CounterMeta name) . to (.count)
              saveObservation obs out n
              writeFile (out </> "out.txt") (show n)
@@ -208,8 +208,8 @@ flowSquare = do
   obs <- newObserve
   pure ( obs
        , liftWorkflow $ Workflow Action
-         { workflowName = "square"
-         , workflowRun  = \_ _ [p] out -> do
+         { name = "square"
+         , run  = \_ _ [p] out -> do
              n <- read @Int <$> readFile (p </> "out.txt")
              let n' = n * n
              saveObservation obs out n'
