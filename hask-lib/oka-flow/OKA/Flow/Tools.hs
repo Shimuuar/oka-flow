@@ -2,8 +2,14 @@
 -- |
 -- Tools for defining concrete workflows.
 module OKA.Flow.Tools
-  ( -- * GHC compilation
-    compileProgramGHC
+  ( -- * Executable implementation
+    metaFromStdin
+    -- * Command line arguments
+  , FlowArgument(..)
+  , parseFlowArguments
+  , parseSingleArgument
+    -- * GHC compilation
+  , compileProgramGHC
   , LockGHC
   , newLockGHC
   , defGhcOpts
@@ -22,17 +28,61 @@ import Control.Concurrent.MVar
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
+import Control.Monad.Except
+import Control.Monad.State.Strict
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
+import Data.Functor
 import Data.Generics.Product.Typed
 import System.Process.Typed
 import System.Directory
 import System.FilePath              ((</>))
 import System.IO.Temp
-import System.Environment           (getEnvironment)
+import System.Environment           (getEnvironment, getArgs)
 import System.Posix.Signals         (signalProcess, sigINT)
 import System.Process               (getPid)
 import OKA.Metadata
+
+----------------------------------------------------------------
+-- Standard tools for writing executables
+----------------------------------------------------------------
+
+-- | Read metadata from stdin
+metaFromStdin :: IsMeta a => IO a
+metaFromStdin = do
+  (BL.getContents <&> JSON.eitherDecode) >>= \case
+    Left  e  -> error $ "Cannot read metadata: " ++ e
+    Right js -> evaluate $ decodeMetadata js
+
+
+-- | Type class for decoding arguments that are passed on command line
+--   haskell data types.
+class FlowArgument a where
+  parserFlowArguments :: StateT [FilePath] (ExceptT String IO) a
+
+-- | Parse command line arguments following flow's conventions: first
+--   one is output directory rest are arguments.
+parseFlowArguments :: FlowArgument a => IO (FilePath,a)
+parseFlowArguments = getArgs >>= \case
+  [] -> error "parseFlowArguments: No output directory provided"
+  (out:paths) -> runExceptT (runStateT parserFlowArguments paths) >>= \case
+    Left  e      -> error $ "parseFlowArguments: " ++ e
+    Right (a,[]) -> pure (out,a)
+    Right (_,_)  -> error "parseFlowArguments: not all inputs are consumed"
+
+-- | Parse single input.
+parseSingleArgument :: StateT [FilePath] (ExceptT String IO) FilePath
+parseSingleArgument = do
+  get >>= \case
+    []   -> throwError "Not enough inputs"
+    s:ss -> s <$ put ss
+
+instance FlowArgument () where
+  parserFlowArguments = pure ()
+instance (FlowArgument a, FlowArgument b) => FlowArgument (a,b) where
+  parserFlowArguments = (,) <$> parserFlowArguments <*> parserFlowArguments
+instance (FlowArgument a, FlowArgument b, FlowArgument c) => FlowArgument (a,b,c) where
+  parserFlowArguments = (,,) <$> parserFlowArguments <*> parserFlowArguments <*> parserFlowArguments
 
 
 ----------------------------------------------------------------
