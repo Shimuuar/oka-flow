@@ -1,7 +1,8 @@
-{-# LANGUAGE AllowAmbiguousTypes        #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE RecordWildCards            #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE AllowAmbiguousTypes   #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RecordWildCards       #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 -- |
 -- Implementation of dataflow graph.
 module OKA.Flow.Graph
@@ -11,10 +12,8 @@ module OKA.Flow.Graph
   , FIDSet(..)
   , Flow(..)
   , appendMeta
-  , modifyMeta
   , scopeMeta
   , restrictMeta
-  , projectMeta
     -- * Graph operations
   , hashFlowGraph
   , deduplicateGraph
@@ -29,7 +28,7 @@ module OKA.Flow.Graph
 import Control.Lens
 import Control.Monad
 import Control.Monad.Operational    hiding (view)
-import Control.Monad.Trans.State.Strict
+import Control.Monad.State.Strict
 import Crypto.Hash.SHA1             qualified as SHA1
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Encoding          qualified as JSONB
@@ -90,22 +89,20 @@ newtype Flow res eff a = Flow
 instance MonadFail (Flow res eff) where
   fail = error
 
+instance MonadState Metadata (Flow res eff) where
+  get   = Flow $ gets fst
+  put m = Flow $ _1 .= m
+
 -- | Add value which could be serialized to metadata to full medataset
 appendMeta :: IsMeta a => a -> Flow res eff ()
-appendMeta a = Flow $ _1 . metadata .= a
-
--- | Modify metadata using given function
-modifyMeta :: (Metadata -> Metadata) -> Flow res eff ()
-modifyMeta f = Flow $ _1 %= f
+appendMeta a = metadata .= a
 
 -- | Scope metadata modifications. All changes to metadata done in
 --   provided callback will be discarded.
 scopeMeta :: Flow res eff a -> Flow res eff a
-scopeMeta (Flow action) = Flow $ do
-  m <- use _1
-  a <- action
-  _1 .= m
-  pure a
+scopeMeta action = do
+  m <- get
+  action <* put m
 
 -- | Restrict metadata to set necessary for encoding value of given type
 restrictMeta
@@ -113,11 +110,9 @@ restrictMeta
   => Flow res eff a
   -> Flow res eff a
 restrictMeta action = scopeMeta $ do
-  modifyMeta (toMetadata . view (metadata @meta))
+  modify (toMetadata . view (metadata @meta))
   action
 
-projectMeta :: IsMeta a => Flow res eff a
-projectMeta = Flow $ use (_1 . metadata)
 
 
 ----------------------------------------------------------------

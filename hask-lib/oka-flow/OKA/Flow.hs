@@ -27,10 +27,8 @@ module OKA.Flow
     -- * Flow monad
   , Flow
   , appendMeta
-  , modifyMeta
   , scopeMeta
   , restrictMeta
-  , projectMeta
   , Result
   , ResultSet(..)
   , want
