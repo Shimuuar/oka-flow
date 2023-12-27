@@ -39,7 +39,7 @@
 -- serialization they are leaves on JSON tree.
 module OKA.Metadata
   ( -- * Metadata
-    Metadata(..)
+    Metadata
   , metadata
   , metadataF
   , metadataMay
@@ -134,7 +134,7 @@ import GHC.Generics               qualified as Generics
 -- | Dynamic product of metadata dictionaries. Each is instance of
 --   'IsMeta' type class. Note this type class has instances for
 --   products for primitive dicts. Those are unpacked.
-newtype Metadata = Metadata { unMetadata :: Map TypeRep MetaEntry }
+newtype Metadata = Metadata (Map TypeRep MetaEntry)
 
 -- Helper wrapper existential wrapper for metadata
 data MetaEntry where
