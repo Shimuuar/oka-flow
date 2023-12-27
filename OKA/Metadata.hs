@@ -141,7 +141,7 @@ newtype Metadata = Metadata (Map TypeRep MetaEntry)
   deriving Semigroup via Dual (Map TypeRep MetaEntry)
   deriving newtype Monoid
 
--- Helper wrapper existential wrapper for metadata
+-- Helper existential wrapper for metadata
 data MetaEntry where
   MetaEntry :: (IsMeta a) => a -> MetaEntry
 
@@ -173,11 +173,13 @@ metadataMay = lens fromMetadata (\m -> \case
 --   objects. Overlapping of keys is not allowed. Static checking of
 --   such property is not practical so it done in runtime.
 class Typeable a => IsMeta a where
-  -- | Description on how to serialize metadata into JSON tree
+  -- | Description on how to serialize metadata into JSON tree. This
+  --   bidirectional parser allows to detect key collisions during
+  --   both encoding and decoding.
   metaTree :: MetaTree a
   -- | Convert data type to dynamic dictionary
   toMetadata :: a -> Metadata
-  -- | Lens for accessing
+  -- | Look up type in dictionary
   fromMetadata :: Metadata -> Maybe a
   -- | Delete dictionaries corresponding to this data type from metadata
   deleteFromMetadata :: Metadata -> Metadata
