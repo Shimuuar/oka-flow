@@ -107,6 +107,7 @@ import Data.Int
 import Data.Functor.Compose
 import Data.Map.Strict            qualified as Map
 import Data.Map.Strict            (Map)
+import Data.Monoid                (Dual(..))
 import Data.Typeable
 import Data.Word
 import Data.Coerce
@@ -134,18 +135,15 @@ import GHC.Generics               qualified as Generics
 -- | Dynamic product of metadata dictionaries. Each is instance of
 --   'IsMeta' type class. Note this type class has instances for
 --   products for primitive dicts. Those are unpacked.
+--
+--   Semigroup instance is right biased.
 newtype Metadata = Metadata (Map TypeRep MetaEntry)
+  deriving Semigroup via Dual (Map TypeRep MetaEntry)
+  deriving newtype Monoid
 
 -- Helper wrapper existential wrapper for metadata
 data MetaEntry where
   MetaEntry :: (IsMeta a) => a -> MetaEntry
-
--- | @<>@ is right biased.
-instance Semigroup Metadata where
-  (<>) = coerce (flip ((<>) @(Map TypeRep MetaEntry)))
-
-instance Monoid Metadata where
-  mempty = Metadata mempty
 
 -- | Lens for accessing dictionary from dynamic 'Metadata'. Will fail if
 --   dictionary is not part of bundle
