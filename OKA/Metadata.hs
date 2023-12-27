@@ -44,6 +44,7 @@ module OKA.Metadata
   , metadataF
   , metadataMay
   , filterMetadataByKey
+  , deleteFromMetadata
   , IsMeta(..)
     -- ** Writing 'IsMeta' instances
   , MetaTree
@@ -109,6 +110,7 @@ import Data.Functor.Compose
 import Data.Map.Strict            qualified as Map
 import Data.Map.Strict            (Map)
 import Data.Set                   (Set)
+import Data.Set                   qualified as Set
 import Data.Monoid                (Dual(..))
 import Data.Typeable
 import Data.Word
@@ -170,6 +172,11 @@ metadataMay = lens fromMetadata (\m -> \case
 filterMetadataByKey :: Set TypeRep -> Metadata -> Metadata
 filterMetadataByKey keys (Metadata m) = Metadata $ Map.restrictKeys m keys
 
+
+-- | Delete dictionaries corresponding to this data type from metadata
+deleteFromMetadata :: forall a. IsMeta a => Metadata -> Metadata
+deleteFromMetadata (Metadata m) = Metadata $ Map.withoutKeys m (metadataKeySet @a)
+
 -- | Type class for data types for types that represent metadata and
 --   their products. It describes how to serialize them and how to
 --   access them in dynamic product 'Metadata'.
@@ -186,8 +193,8 @@ class Typeable a => IsMeta a where
   toMetadata :: a -> Metadata
   -- | Look up type in dictionary
   fromMetadata :: Metadata -> Maybe a
-  -- | Delete dictionaries corresponding to this data type from metadata
-  deleteFromMetadata :: Metadata -> Metadata
+  -- | Set of keys for the type corresponding to the metadata
+  metadataKeySet :: Set TypeRep
 
 
 
@@ -468,7 +475,7 @@ instance (Typeable path, MetaEncoding a, IsMeta a, MetaPath path) => IsMeta (AsM
   toMetadata (AsMeta a) = Metadata $ Map.singleton (typeOf a) (MetaEntry a)
   fromMetadata (Metadata m) = do MetaEntry a <- Map.lookup (typeOf (undefined :: a)) m
                                  AsMeta <$> cast a
-  deleteFromMetadata (Metadata m) = Metadata $ Map.delete (typeOf (undefined :: a)) m
+  metadataKeySet = Set.singleton (typeOf (undefined :: a))
 
 
 
@@ -491,8 +498,8 @@ instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
   metaTree = metaTreeProduct metaTree metaTree
   toMetadata (a,b) = toMetadata a <> toMetadata b
   fromMetadata m = (,) <$> fromMetadata m <*> fromMetadata m
-  deleteFromMetadata = deleteFromMetadata @a
-                     . deleteFromMetadata @b
+  metadataKeySet = metadataKeySet @a
+                <> metadataKeySet @b
 
 
 instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
@@ -501,9 +508,9 @@ instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
     $ metaTree `metaTreeProduct` metaTree `metaTreeProduct` metaTree
   toMetadata (a,b,c) = mconcat [ toMetadata a, toMetadata b, toMetadata c]
   fromMetadata m = (,,) <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-  deleteFromMetadata = deleteFromMetadata @a
-                     . deleteFromMetadata @b
-                     . deleteFromMetadata @c
+  metadataKeySet = metadataKeySet @a
+                <> metadataKeySet @b
+                <> metadataKeySet @c
 
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
@@ -513,10 +520,10 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
   toMetadata (a,b,c,d) = mconcat [ toMetadata a, toMetadata b, toMetadata c
                                  , toMetadata d]
   fromMetadata m = (,,,) <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-  deleteFromMetadata = deleteFromMetadata @a
-                     . deleteFromMetadata @b
-                     . deleteFromMetadata @c
-                     . deleteFromMetadata @d
+  metadataKeySet = metadataKeySet @a
+                <> metadataKeySet @b
+                <> metadataKeySet @c
+                <> metadataKeySet @d
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) where
   metaTree
@@ -527,11 +534,11 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) wh
   fromMetadata m = (,,,,)
                 <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
                 <*> fromMetadata m
-  deleteFromMetadata = deleteFromMetadata @a
-                     . deleteFromMetadata @b
-                     . deleteFromMetadata @c
-                     . deleteFromMetadata @d
-                     . deleteFromMetadata @e
+  metadataKeySet = metadataKeySet @a
+                <> metadataKeySet @b
+                <> metadataKeySet @c
+                <> metadataKeySet @d
+                <> metadataKeySet @e
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,c,d,e,f) where
   metaTree
@@ -542,12 +549,12 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,
   fromMetadata m = (,,,,,)
                 <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
                 <*> fromMetadata m <*> fromMetadata m
-  deleteFromMetadata = deleteFromMetadata @a
-                     . deleteFromMetadata @b
-                     . deleteFromMetadata @c
-                     . deleteFromMetadata @d
-                     . deleteFromMetadata @e
-                     . deleteFromMetadata @f
+  metadataKeySet = metadataKeySet @a
+                <> metadataKeySet @b
+                <> metadataKeySet @c
+                <> metadataKeySet @d
+                <> metadataKeySet @e
+                <> metadataKeySet @f
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsMeta (a,b,c,d,e,f,g) where
   metaTree
@@ -559,13 +566,13 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsM
   fromMetadata m = (,,,,,,)
                 <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
                 <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-  deleteFromMetadata = deleteFromMetadata @a
-                     . deleteFromMetadata @b
-                     . deleteFromMetadata @c
-                     . deleteFromMetadata @d
-                     . deleteFromMetadata @e
-                     . deleteFromMetadata @f
-                     . deleteFromMetadata @g
+  metadataKeySet = metadataKeySet @a
+                <> metadataKeySet @b
+                <> metadataKeySet @c
+                <> metadataKeySet @d
+                <> metadataKeySet @e
+                <> metadataKeySet @f
+                <> metadataKeySet @g
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta h) => IsMeta (a,b,c,d,e,f,g,h) where
   metaTree
@@ -578,14 +585,14 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta 
   fromMetadata m = (,,,,,,,)
                 <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
                 <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-  deleteFromMetadata = deleteFromMetadata @a
-                     . deleteFromMetadata @b
-                     . deleteFromMetadata @c
-                     . deleteFromMetadata @d
-                     . deleteFromMetadata @e
-                     . deleteFromMetadata @f
-                     . deleteFromMetadata @g
-                     . deleteFromMetadata @h
+  metadataKeySet = metadataKeySet @a
+                <> metadataKeySet @b
+                <> metadataKeySet @c
+                <> metadataKeySet @d
+                <> metadataKeySet @e
+                <> metadataKeySet @f
+                <> metadataKeySet @g
+                <> metadataKeySet @h
 
 
 deriving via AsAeson Char   instance MetaEncoding Char
