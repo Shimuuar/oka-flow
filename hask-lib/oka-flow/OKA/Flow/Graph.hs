@@ -110,7 +110,7 @@ restrictMeta
   => Flow res eff a
   -> Flow res eff a
 restrictMeta action = scopeMeta $ do
-  modify (toMetadata . view (metadata @meta))
+  modify (restrictMetadata @meta)
   action
 
 
