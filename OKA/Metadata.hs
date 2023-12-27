@@ -43,6 +43,7 @@ module OKA.Metadata
   , metadata
   , metadataF
   , metadataMay
+  , filterMetadataByKey
   , IsMeta(..)
     -- ** Writing 'IsMeta' instances
   , MetaTree
@@ -107,6 +108,7 @@ import Data.Int
 import Data.Functor.Compose
 import Data.Map.Strict            qualified as Map
 import Data.Map.Strict            (Map)
+import Data.Set                   (Set)
 import Data.Monoid                (Dual(..))
 import Data.Typeable
 import Data.Word
@@ -164,6 +166,9 @@ metadataMay = lens fromMetadata (\m -> \case
                                     Nothing -> deleteFromMetadata @a m
                                 )
 
+-- | Only keep keys that are in the set of keys
+filterMetadataByKey :: Set TypeRep -> Metadata -> Metadata
+filterMetadataByKey keys (Metadata m) = Metadata $ Map.restrictKeys m keys
 
 -- | Type class for data types for types that represent metadata and
 --   their products. It describes how to serialize them and how to
