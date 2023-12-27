@@ -43,8 +43,9 @@ module OKA.Metadata
   , metadata
   , metadataF
   , metadataMay
-  , filterMetadataByKey
   , deleteFromMetadata
+  , restrictMetadata
+  , restrictMetadataByKey
   , IsMeta(..)
     -- ** Writing 'IsMeta' instances
   , MetaTree
@@ -168,10 +169,13 @@ metadataMay = lens fromMetadata (\m -> \case
                                     Nothing -> deleteFromMetadata @a m
                                 )
 
--- | Only keep keys that are in the set of keys
-filterMetadataByKey :: Set TypeRep -> Metadata -> Metadata
-filterMetadataByKey keys (Metadata m) = Metadata $ Map.restrictKeys m keys
+-- | Only keep keys which corresponds to a type
+restrictMetadata :: forall a. IsMeta a => Metadata -> Metadata
+restrictMetadata = restrictMetadataByKey (metadataKeySet @a)
 
+-- | Only keep keys that are in the set of keys
+restrictMetadataByKey :: Set TypeRep -> Metadata -> Metadata
+restrictMetadataByKey keys (Metadata m) = Metadata $ Map.restrictKeys m keys
 
 -- | Delete dictionaries corresponding to this data type from metadata
 deleteFromMetadata :: forall a. IsMeta a => Metadata -> Metadata
