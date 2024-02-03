@@ -1,6 +1,7 @@
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE RecordWildCards     #-}
 -- |
+-- Evaluator of dataflow graph.
 module OKA.Flow.Run
   ( FlowCtx(..)
   , runFlow
@@ -19,6 +20,7 @@ import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
 import Data.Map.Strict              ((!))
 import Data.Set                     qualified as Set
+import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import System.FilePath              ((</>))
 import System.Directory             (createDirectory,renameDirectory,removeDirectoryRecursive)
 
@@ -33,16 +35,20 @@ import OKA.Flow.Types
 
 -- | Evaluation context for dataflow program
 data FlowCtx eff res = FlowCtx
-  { flowCtxRoot   :: FilePath
+  { flowCtxRoot    :: FilePath
     -- ^ Root directory for cache
-  , flowTgtExists :: FilePath -> IO Bool
-    -- ^ Check that target does exists
-  , flowCtxEff    :: forall a. eff a -> IO a
-    -- ^ Evaluator for effect allowed in dataflow program
-  , flowCtxRes    :: res
+  , flowTgtExists  :: FilePath -> IO Bool
+    -- ^ Function which is used to check whether output exists
+  , flowCtxEff     :: forall a. eff a -> IO a
+    -- ^ Evaluator for effects allowed in dataflow program
+  , flowCtxRes     :: res
     -- ^ Resources
   , flowEvalReport :: [StorePath] -> [StorePath] -> IO ()
     -- ^ Function to report
+  , flowLogStart   :: StorePath -> IO ()
+    -- ^ Log action for start of evaluation
+  , flowLogEnd     :: StorePath -> NominalDiffTime -> IO ()
+    -- ^ Log action for end of evaluation
   }
 
 
@@ -121,10 +127,17 @@ prepareFun FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = do
     toPath (_,Nothing  ) = error "INTERNAL ERROR: dependence on PHONY node"
     --
     prepareNormal action = do
-      let out    = flowCtxRoot </> toPath fun.output   -- Output directory
-          build  = out ++ "-build"                     -- Temporary build directory
+      let path  = case fun.output of
+            (_, Just p) -> p
+            _           -> error "INTERNAL ERROR: phony node treated as normal"
+      let out   = flowCtxRoot </> storePath path -- Output directory
+          build = out ++ "-build"                -- Temporary build directory
       createDirectory build
       BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadataDyn meta
       writeFile    (build </> "deps.txt")  $ unlines paramP
-      _ <- action res meta params build `onException` removeDirectoryRecursive build
+      t1 <- getCurrentTime
+      flowLogStart path
+      _  <- action res meta params build `onException` removeDirectoryRecursive build
+      t2 <- getCurrentTime
+      flowLogEnd path (diffUTCTime t2 t1)
       renameDirectory build out

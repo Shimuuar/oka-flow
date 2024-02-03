@@ -132,6 +132,8 @@ withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
                  , flowCtxEff     = id
                  , flowCtxRes     = ()
                  , flowEvalReport = \_ _ -> pure ()
+                 , flowLogStart   = \_ -> pure ()
+                 , flowLogEnd     = \_ _ -> pure ()
                  }
 
 

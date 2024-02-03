@@ -34,27 +34,28 @@ Library
   Build-Depends:    base                 >=4.12 && <5
                   , oka-metadata
                     --
-                  , lens                 >=5
-                  , filepath
-                  , containers
-                  , stm                  >=2.4
-                  , async                >=2
-                  , mtl
-                  , transformers
                   , aeson                >=2
-                  , directory
-                  , bytestring
-                  , operational          >=0.2.4
-                  , cryptohash-sha1      >=0.11
+                  , async                >=2
                   , base16-bytestring    >=1
-                  , vector               >=0.13
-                  , unordered-containers >=0.2
-                  , text                 >=2
-                  , typed-process        >=0.2
-                  , process
-                  , unix
+                  , bytestring
+                  , containers
+                  , cryptohash-sha1      >=0.11
+                  , directory
+                  , filepath
                   , generic-lens         >=2.2
+                  , lens                 >=5
+                  , mtl
+                  , operational          >=0.2.4
+                  , process
+                  , stm                  >=2.4
                   , temporary            >=1.3
+                  , text                 >=2
+                  , time
+                  , transformers
+                  , typed-process        >=0.2
+                  , unix
+                  , unordered-containers >=0.2
+                  , vector               >=0.13
   Exposed-modules:
         OKA.Flow
         OKA.Flow.Graph
