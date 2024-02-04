@@ -1,6 +1,7 @@
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE RecordWildCards     #-}
 -- |
+-- Evaluator of dataflow graph.
 module OKA.Flow.Run
   ( FlowCtx(..)
   , runFlow
@@ -19,6 +20,7 @@ import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
 import Data.Map.Strict              ((!))
 import Data.Set                     qualified as Set
+import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import System.FilePath              ((</>))
 import System.Directory             (createDirectory,renameDirectory,removeDirectoryRecursive)
 
@@ -32,17 +34,21 @@ import OKA.Flow.Types
 
 
 -- | Evaluation context for dataflow program
-data FlowCtx eff res = FlowCtx
-  { flowCtxRoot   :: FilePath
+data FlowCtx eff = FlowCtx
+  { flowCtxRoot    :: FilePath
     -- ^ Root directory for cache
-  , flowTgtExists :: FilePath -> IO Bool
-    -- ^ Check that target does exists
-  , flowCtxEff    :: forall a. eff a -> IO a
-    -- ^ Evaluator for effect allowed in dataflow program
-  , flowCtxRes    :: res
+  , flowTgtExists  :: FilePath -> IO Bool
+    -- ^ Function which is used to check whether output exists
+  , flowCtxEff     :: forall a. eff a -> IO a
+    -- ^ Evaluator for effects allowed in dataflow program
+  , flowCtxRes     :: ResourceSet
     -- ^ Resources
   , flowEvalReport :: [StorePath] -> [StorePath] -> IO ()
     -- ^ Function to report
+  , flowLogStart   :: StorePath -> IO ()
+    -- ^ Log action for start of evaluation
+  , flowLogEnd     :: StorePath -> NominalDiffTime -> IO ()
+    -- ^ Log action for end of evaluation
   }
 
 
@@ -53,9 +59,9 @@ data FlowCtx eff res = FlowCtx
 -- | Execute dataflow program
 runFlow
   :: (ResultSet r)
-  => FlowCtx eff res -- ^ Evaluation context
-  -> Metadata        -- ^ Metadata for program
-  -> Flow res eff r  -- ^ Dataflow program
+  => FlowCtx eff -- ^ Evaluation context
+  -> Metadata    -- ^ Metadata for program
+  -> Flow eff r  -- ^ Dataflow program
   -> IO ()
 runFlow ctx@FlowCtx{..} meta (Flow m) = do
   -- Evaluate dataflow graph
@@ -83,31 +89,35 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
 
 
 -- Add TMVars to each node of graph. This is needed in order to
-addTMVars :: FlowGraph res a -> IO (FlowGraph res (TMVar (), a))
+addTMVars :: FlowGraph a -> IO (FlowGraph (TMVar (), a))
 addTMVars = traverse $ \f -> do v <- newEmptyTMVarIO
                                 pure (v,f)
 
 -- Prepare function for evaluation
 prepareFun
-  :: FlowCtx eff res                           -- Evaluation context
-  -> FlowGraph res (TMVar (), Maybe StorePath) -- Full dataflow graph
-  -> FIDSet                                    -- Our target set
-  -> Fun res FunID (TMVar (), Maybe StorePath) -- Function to evaluate
-  -> res
+  :: FlowCtx eff                           -- Evaluation context
+  -> FlowGraph (TMVar (), Maybe StorePath) -- Full dataflow graph
+  -> FIDSet                                -- Our target set
+  -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
+  -> ResourceSet
   -> IO ()
 prepareFun FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> when (fid `Set.notMember` exists) $
     atomically $ readTMVar (fst $ outputOf fid)
+  -- Request resources
+  atomically $ fun.requestRes res
   -- Run action
   case fun.workflow of
     -- Prepare normal action. We first create output directory and
     -- write everything there. After we're done we rename it.
-    Workflow (Action _ act) -> prepareNormal act
+    Workflow (Action _ act) -> prepareNormal (act res)
     -- Execute phony action. We don't need to bother with setting up output
     Phony    act            -> act res meta params
-  -- Signal that we successfully complete execution
-  atomically $ putTMVar (fst fun.output) ()
+  -- Signal that we successfully completed execution
+  atomically $ do
+    putTMVar (fst fun.output) ()
+    fun.releaseRes res
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output
@@ -121,10 +131,17 @@ prepareFun FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = do
     toPath (_,Nothing  ) = error "INTERNAL ERROR: dependence on PHONY node"
     --
     prepareNormal action = do
-      let out    = flowCtxRoot </> toPath fun.output   -- Output directory
-          build  = out ++ "-build"                     -- Temporary build directory
+      let path  = case fun.output of
+            (_, Just p) -> p
+            _           -> error "INTERNAL ERROR: phony node treated as normal"
+      let out   = flowCtxRoot </> storePath path -- Output directory
+          build = out ++ "-build"                -- Temporary build directory
       createDirectory build
       BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadataDyn meta
       writeFile    (build </> "deps.txt")  $ unlines paramP
-      _ <- action res meta params build `onException` removeDirectoryRecursive build
+      t1 <- getCurrentTime
+      flowLogStart path
+      _  <- action meta params build `onException` removeDirectoryRecursive build
+      t2 <- getCurrentTime
+      flowLogEnd path (diffUTCTime t2 t1)
       renameDirectory build out
