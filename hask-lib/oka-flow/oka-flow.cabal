@@ -42,7 +42,6 @@ Library
                   , cryptohash-sha1      >=0.11
                   , directory
                   , filepath
-                  , generic-lens         >=2.2
                   , lens                 >=5
                   , mtl
                   , operational          >=0.2.4

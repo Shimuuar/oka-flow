@@ -25,6 +25,7 @@ module OKA.Flow.Graph
   , fidWantedL
   ) where
 
+import Control.Concurrent.STM       (STM)
 import Control.Lens
 import Control.Monad
 import Control.Monad.Operational    hiding (view)
@@ -58,12 +59,16 @@ import OKA.Flow.Types
 ----------------------------------------------------------------
 
 -- | Single workflow bound in dataflow graph.
-data Fun res k v = Fun
-  { workflow :: Workflow res
+data Fun k v = Fun
+  { workflow :: Workflow
     -- ^ Execute workflow. It takes resource handle as parameter and
     --   tries to acquire resources and return actual function to run.
   , metadata :: Metadata
     -- ^ Metadata that should be supplied to the workflow
+  , requestRes :: ResourceSet -> STM ()
+    -- ^ Request resources for evaluation
+  , releaseRes :: ResourceSet -> STM ()
+    -- ^ Release resources after evaluation
   , param    :: [k]
     -- ^ Parameters to workflow.
   , output   :: v
@@ -72,8 +77,8 @@ data Fun res k v = Fun
   deriving stock (Functor, Foldable, Traversable)
 
 -- | Complete dataflow graph
-data FlowGraph res a = FlowGraph
-  { graph   :: Map FunID (Fun res FunID a)
+data FlowGraph a = FlowGraph
+  { graph   :: Map FunID (Fun FunID a)
     -- ^ Dataflow graph with dependencies
   , targets :: Set FunID
     -- ^ Set of values for which we want to evaluate
@@ -82,33 +87,33 @@ data FlowGraph res a = FlowGraph
 
 
 -- | Flow monad which we use to build workflow
-newtype Flow res eff a = Flow
-  (StateT (Metadata, FlowGraph res ()) (Program eff) a)
+newtype Flow eff a = Flow
+  (StateT (Metadata, FlowGraph ()) (Program eff) a)
   deriving newtype (Functor, Applicative, Monad)
 
-instance MonadFail (Flow res eff) where
+instance MonadFail (Flow eff) where
   fail = error
 
-instance MonadState Metadata (Flow res eff) where
+instance MonadState Metadata (Flow eff) where
   get   = Flow $ gets fst
   put m = Flow $ _1 .= m
 
 -- | Add value which could be serialized to metadata to full medataset
-appendMeta :: IsMeta a => a -> Flow res eff ()
+appendMeta :: IsMeta a => a -> Flow eff ()
 appendMeta a = metadata .= a
 
 -- | Scope metadata modifications. All changes to metadata done in
 --   provided callback will be discarded.
-scopeMeta :: Flow res eff a -> Flow res eff a
+scopeMeta :: Flow eff a -> Flow eff a
 scopeMeta action = do
   m <- get
   action <* put m
 
 -- | Restrict metadata to set necessary for encoding value of given type
 restrictMeta
-  :: forall meta res eff a. IsMeta meta
-  => Flow res eff a
-  -> Flow res eff a
+  :: forall meta eff a. IsMeta meta
+  => Flow eff a
+  -> Flow eff a
 restrictMeta action = scopeMeta $ do
   modify (restrictMetadata @meta)
   action
@@ -120,7 +125,7 @@ restrictMeta action = scopeMeta $ do
 ----------------------------------------------------------------
 
 -- | Compute all hashes and resolve all nodes to corresponding paths
-hashFlowGraph :: FlowGraph res () -> FlowGraph res (Maybe StorePath)
+hashFlowGraph :: FlowGraph () -> FlowGraph (Maybe StorePath)
 hashFlowGraph gr = res where
   res      = gr & flowGraphL . mapped %~ hashFun oracle
   oracle k = case res ^. flowGraphL . at k of
@@ -129,7 +134,7 @@ hashFlowGraph gr = res where
       Nothing -> error "INTERNAL ERROR: dependence on PHONY node"
       Just p  -> p
 
-hashFun :: (k -> StorePath) -> Fun res k a -> Fun res k (Maybe StorePath)
+hashFun :: (k -> StorePath) -> Fun k a -> Fun k (Maybe StorePath)
 hashFun oracle fun = fun
   { output = case fun.workflow of
       Phony{}                -> Nothing
@@ -176,8 +181,8 @@ jsArray v
 -- | Remove duplicate nodes where different FunID correspond to same
 --   workflow
 deduplicateGraph
-  :: FlowGraph res (Maybe StorePath)
-  -> FlowGraph res (Maybe StorePath)
+  :: FlowGraph (Maybe StorePath)
+  -> FlowGraph (Maybe StorePath)
 deduplicateGraph gr
   | null dupes = gr
   | otherwise  = gr & flowGraphL %~ clean
@@ -206,8 +211,8 @@ deduplicateGraph gr
 -- | Remove all workflows that already completed execution.
 shakeFlowGraph
   :: (Monad m)
-  => (StorePath -> m Bool)           -- ^ Predicate to check whether path exists
-  -> FlowGraph res (Maybe StorePath) -- ^ Dataflow graph
+  => (StorePath -> m Bool)       -- ^ Predicate to check whether path exists
+  -> FlowGraph (Maybe StorePath) -- ^ Dataflow graph
   -> m FIDSet
 shakeFlowGraph tgtExists (FlowGraph workflows targets)
   = foldM addFID (FIDSet mempty mempty) targets
@@ -245,8 +250,8 @@ fidExistsL, fidWantedL :: Lens' FIDSet (Set FunID)
 fidExistsL = lens (.exists) (\f x -> f {exists = x})
 fidWantedL = lens (.wanted) (\f x -> f {wanted = x})
 
-flowTgtL :: Lens' (FlowGraph res a) (Set FunID)
+flowTgtL :: Lens' (FlowGraph a) (Set FunID)
 flowTgtL = lens (.targets) (\x s -> x {targets = s})
 
-flowGraphL :: Lens (FlowGraph res a) (FlowGraph res b) (Map FunID (Fun res FunID a)) (Map FunID (Fun res FunID b))
+flowGraphL :: Lens (FlowGraph a) (FlowGraph b) (Map FunID (Fun FunID a)) (Map FunID (Fun FunID b))
 flowGraphL = lens (.graph) (\x s -> x {graph = s})

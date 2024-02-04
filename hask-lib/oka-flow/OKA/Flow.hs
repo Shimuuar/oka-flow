@@ -35,6 +35,10 @@ module OKA.Flow
   , liftWorkflow
   , liftPhony
   , liftEff
+    -- * Resources
+  , Resource(..)
+  , ResAsMutex(..)
+  , ResAsCounter(..)
     -- * Execution
   , FlowCtx(..)
   , runFlow
@@ -57,18 +61,19 @@ import OKA.Flow.Run
 ----------------------------------------------------------------
 
 -- | We want given workflow evaluated
-want :: ResultSet a => a -> Flow res eff ()
+want :: ResultSet a => a -> Flow eff ()
 want a = Flow $ _2 . flowTgtL %= (<> Set.fromList (toResultSet a))
 
 -- | Create new primitive flow.
 --
 --   This function does not provide any type safety by itself
 liftWorkflow
-  :: (ResultSet params)
-  => Workflow res -- ^ Executioner.
-  -> params       -- ^ Parameters
-  -> Flow res eff (Result a)
-liftWorkflow exe p = Flow $ do
+  :: (ResultSet params, Resource res)
+  => res
+  -> Workflow -- ^ Executioner.
+  -> params   -- ^ Parameters
+  -> Flow eff (Result a)
+liftWorkflow resource exe p = Flow $ do
   (meta,gr) <- get
   -- Allocate new
   let fid = case Map.lookupMax gr.graph of
@@ -81,21 +86,24 @@ liftWorkflow exe p = Flow $ do
     error "Depending on phony target"
   -- Add workflow to graph
   _2 . flowGraphL . at fid .= Just Fun
-    { workflow = exe
-    , metadata = meta
-    , output   = ()
-    , param    = res
+    { workflow   = exe
+    , metadata   = meta
+    , output     = ()
+    , requestRes = \r -> requestResource r resource
+    , releaseRes = \r -> releaseResource r resource
+    , param      = res
     }
   return $ Result fid
 
 -- | Lift phony workflow (not checked)
 liftPhony
-  :: (ResultSet params)
-  => (res -> Metadata -> [FilePath] -> IO ())
+  :: (ResultSet params, Resource res)
+  => res
+  -> (ResourceSet -> Metadata -> [FilePath] -> IO ())
   -> params
-  -> Flow res eff ()
-liftPhony exe p = want =<< liftWorkflow (Phony exe) p
+  -> Flow eff ()
+liftPhony res exe p = want =<< liftWorkflow res (Phony exe) p
 
 -- | Lift effect
-liftEff :: eff a -> Flow res eff a
+liftEff :: eff a -> Flow eff a
 liftEff = Flow . lift . singleton

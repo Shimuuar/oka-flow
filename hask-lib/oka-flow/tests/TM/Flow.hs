@@ -125,12 +125,12 @@ tests = testGroup "Run flow"
       observe "flow" obsA [100]
   ]
 
-withSimpleFlow :: (FlowCtx IO () -> IO a) -> IO a
+withSimpleFlow :: (FlowCtx IO -> IO a) -> IO a
 withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
   action FlowCtx { flowCtxRoot    = dir
                  , flowTgtExists  = doesDirectoryExist
                  , flowCtxEff     = id
-                 , flowCtxRes     = ()
+                 , flowCtxRes     = mempty
                  , flowEvalReport = \_ _ -> pure ()
                  , flowLogStart   = \_ -> pure ()
                  , flowLogEnd     = \_ _ -> pure ()
@@ -191,12 +191,12 @@ observePhony msg (ObsPhony ref) xs =
 
 
 flowProduceInt
-  :: forall name res eff. (KnownSymbol name)
-  => IO (Observe Int, () -> Flow res eff (Result Int))
+  :: forall name eff. (KnownSymbol name)
+  => IO (Observe Int, () -> Flow eff (Result Int))
 flowProduceInt = do
   obs <- newObserve
   pure ( obs
-       , liftWorkflow $ Workflow Action
+       , liftWorkflow () $ Workflow Action
          { name = "produce-" ++ (symbolVal (Proxy @name))
          , run  = \_ meta [] out -> do
              let n = meta ^. metadata @(CounterMeta name) . to (.count)
@@ -205,11 +205,11 @@ flowProduceInt = do
          }
        )
 
-flowSquare :: IO (Observe Int, Result Int -> Flow res eff (Result Int))
+flowSquare :: IO (Observe Int, Result Int -> Flow eff (Result Int))
 flowSquare = do
   obs <- newObserve
   pure ( obs
-       , liftWorkflow $ Workflow Action
+       , liftWorkflow () $ Workflow Action
          { name = "square"
          , run  = \_ _ [p] out -> do
              n <- read @Int <$> readFile (p </> "out.txt")
@@ -219,11 +219,11 @@ flowSquare = do
          }
        )
 
-flowPhony :: IO (ObsPhony Int, Result Int -> Flow res eff (Result ()))
+flowPhony :: IO (ObsPhony Int, Result Int -> Flow eff (Result ()))
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
-       , liftWorkflow $ Phony $ \_ _ [p] -> do
+       , liftWorkflow () $ Phony $ \_ _ [p] -> do
            n <- read @Int <$> readFile (p </> "out.txt")
            let n' = n * n
            saveObsPhony obs n'

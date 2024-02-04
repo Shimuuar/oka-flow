@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingVia      #-}
 {-# LANGUAGE FlexibleContexts #-}
 -- |
 -- Tools for defining concrete workflows.
@@ -8,15 +9,13 @@ module OKA.Flow.Tools
   , FlowArgument(..)
   , parseFlowArguments
   , parseSingleArgument
-    -- * GHC compilation
+    -- * Resources
+  , LockGHC(..)
   , compileProgramGHC
-  , LockGHC
-  , newLockGHC
   , defGhcOpts
-    -- * Rate limit
-  , LockLMDB
-  , newLockLMDB
-  , rateLimitLMDB
+  , LockLMDB(..)
+  , LockCoreCPU(..)
+  , LockMemGB(..)
     -- * External process
   , runExternalProcess
   , runExternalProcessNoMeta
@@ -24,7 +23,6 @@ module OKA.Flow.Tools
   ) where
 
 import Control.Applicative
-import Control.Concurrent.MVar
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
@@ -33,7 +31,6 @@ import Control.Monad.State.Strict
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
 import Data.Functor
-import Data.Generics.Product.Typed
 import System.Process.Typed
 import System.Directory
 import System.FilePath              ((</>))
@@ -42,6 +39,7 @@ import System.Environment           (getEnvironment, getArgs)
 import System.Posix.Signals         (signalProcess, sigINT)
 import System.Process               (getPid)
 import OKA.Metadata
+import OKA.Flow.Types
 
 ----------------------------------------------------------------
 -- Standard tools for writing executables
@@ -89,53 +87,48 @@ instance (FlowArgument a, FlowArgument b, FlowArgument c) => FlowArgument (a,b,c
 -- GHC compilation
 ----------------------------------------------------------------
 
--- | We want to have one concurrent build. Thus mutex
-newtype LockGHC = LockGHC (MVar ())
+-- | We want to have one concurrent build. This data type provides mutex
+data LockGHC = LockGHC 
+  deriving stock (Show,Eq)
+  deriving Resource via ResAsMutex LockGHC
 
--- | Create new lock
-newLockGHC :: IO LockGHC
-newLockGHC = LockGHC <$> newMVar ()
-
+-- | Compile program with GHC. Uses 'LockGHC' to ensure that only one
+--   compilation runs at a time.
 compileProgramGHC
-  :: (HasType LockGHC res)
-  => FilePath -- ^ Path to Main module
-  -> [String] -- ^ Options to pass to GHC
-  -> (res -> IO ())
+  :: FilePath    -- ^ Path to Main module
+  -> [String]    -- ^ Options to pass to GHC
+  -> ResourceSet -- ^ Set of resources
+  -> IO ()
 compileProgramGHC exe opts res
-  = withMVar lock $ \() -> withProcessWait_ ghc $ \_ -> pure ()
+  = withResources res LockGHC
+  $ withProcessWait_ ghc
+  $ \_ -> pure ()
   where
-    LockGHC lock = getTyped res
     ghc = proc "ghc" (exe:opts)
 
+-- | Default GHC options
 defGhcOpts :: [String]
 defGhcOpts = [ "-O2"
              , "-threaded"
              , "-with-rtsopts=-T -A8m"
              ]
 
-----------------------------------------------------------------
--- Limit number of programs using LMDB
-----------------------------------------------------------------
+
 
 -- | We want to restrict number of simultaneous programs which connect to DB
-newtype LockLMDB = LockLMDB { get :: TVar Int }
+newtype LockLMDB = LockLMDB Int
+  deriving stock (Show,Eq)
+  deriving Resource via ResAsCounter LockLMDB
 
-newLockLMDB :: Int -> IO LockLMDB
-newLockLMDB n = LockLMDB <$> newTVarIO n
+newtype LockCoreCPU = LockCoreCPU Int
+  deriving stock (Show,Eq)
+  deriving Resource via ResAsCounter LockCoreCPU
 
-rateLimitLMDB
-  :: (HasType LockLMDB res)
-  => res
-  -> IO a
-  -> IO a
-rateLimitLMDB res io =
-  (acquire >> io) `finally` release
-  where
-    lock = (getTyped @LockLMDB res).get
-    acquire = atomically $ do n <- readTVar lock
-                              when (n <= 0) retry
-                              modifyTVar' lock (subtract 1)
-    release = atomically $ do modifyTVar lock (+1)
+-- | How much memory flow is expected to use in GB
+newtype LockMemGB = LockMemGB Int
+  deriving stock (Show,Eq)
+  deriving Resource via ResAsCounter LockMemGB
+
 
 
 ----------------------------------------------------------------
