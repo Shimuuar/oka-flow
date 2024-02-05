@@ -225,7 +225,7 @@ newtype ResAsMutex a = ResAsMutex a
 
 instance Typeable a => Resource (ResAsMutex a) where
   createResource _ r = do
-    lock <- newEmptyTMVarIO
+    lock <- newTMVarIO ()
     pure $! basicAddResource @a r
       ( \_ -> takeTMVar lock
       , \_ -> putTMVar  lock ()
@@ -248,7 +248,7 @@ instance (Typeable a, Coercible a Int) => Resource (ResAsCounter a) where
             when (k > n) $ error $ show $
               "Resource[" <> show ty <> "]: request cannot be satisfied"
             modifyTVar' counter (subtract k)
-            check . (> 0) =<< readTVar counter
+            check . (>= 0) =<< readTVar counter
       , \(coerce -> k) -> do
             when (k < 0) $ error $ show $
               "Resource[" <> show ty <> "]: negative amount requested"
