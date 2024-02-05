@@ -1,5 +1,6 @@
-{-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE MultiWayIf      #-}
+{-# LANGUAGE RankNTypes      #-}
+{-# LANGUAGE RecordWildCards #-}
 -- |
 -- Evaluator of dataflow graph.
 module OKA.Flow.Run
@@ -21,6 +22,7 @@ import Data.Foldable
 import Data.Map.Strict              ((!))
 import Data.Set                     qualified as Set
 import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
+import Data.Typeable
 import System.FilePath              ((</>))
 import System.Directory             (createDirectory,renameDirectory,removeDirectoryRecursive)
 
@@ -49,6 +51,7 @@ data FlowCtx eff = FlowCtx
     -- ^ Log action for start of evaluation
   , flowLogEnd     :: StorePath -> NominalDiffTime -> IO ()
     -- ^ Log action for end of evaluation
+  , flowCrashReport :: String -> IO ()
   }
 
 
@@ -101,7 +104,7 @@ prepareFun
   -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
   -> ResourceSet
   -> IO ()
-prepareFun FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = do
+prepareFun FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport $ do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> when (fid `Set.notMember` exists) $
     atomically $ readTMVar (fst $ outputOf fid)
@@ -145,3 +148,11 @@ prepareFun FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = do
       t2 <- getCurrentTime
       flowLogEnd path (diffUTCTime t2 t1)
       renameDirectory build out
+    --
+    crashReport = handle $ \(SomeException e) -> do
+      let name = case fun.output of
+            (_,Just p)  -> storePath p
+            (_,Nothing) -> "<PHONY>"
+      if | Just AsyncCancelled <- cast e -> pure ()
+         | otherwise -> flowCrashReport $ "CRASHED: " ++ name ++ ": " ++ show e
+      throwIO e
