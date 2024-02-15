@@ -1,4 +1,4 @@
-Cabal-Version:  2.2
+Cabal-Version:  3.0
 Name:           oka-flow
 Version:        0.1
 Synopsis:       Simple dataflow programming framework
@@ -12,9 +12,7 @@ Author:         Aleksey Khudyakov <alexey.skladnoy@gmail.com>
 Maintainer:     Aleksey Khudyakov <alexey.skladnoy@gmail.com>
 Build-Type:     Simple
 
-Library
-  Ghc-options:      -Wall -O2
-  Default-Language: Haskell2010
+common extensions
   Default-extensions: DeriveFoldable
                     , DeriveFunctor
                     , DeriveTraversable
@@ -30,6 +28,11 @@ Library
                     , TypeApplications
                     , TypeOperators
                     , TupleSections
+                
+Library
+  import:           extensions
+  Ghc-options:      -Wall -O2
+  Default-Language: Haskell2010
   --
   Build-Depends:    base                 >=4.12 && <5
                   , oka-metadata
@@ -64,24 +67,10 @@ Library
         OKA.Flow.Std
 
 Test-suite oka-flow-tests
+  import:           extensions
   type:             exitcode-stdio-1.0
   Default-Language: Haskell2010
   ghc-options:      -Wall -Wno-incomplete-uni-patterns
-  Default-extensions: DeriveFoldable
-                    , DeriveFunctor
-                    , DeriveTraversable
-                    , DerivingStrategies
-                    , DuplicateRecordFields
-                    , GeneralizedNewtypeDeriving
-                    , ImportQualifiedPost
-                    , LambdaCase
-                    , NoFieldSelectors
-                    , NumericUnderscores
-                    , OverloadedRecordDot
-                    , ScopedTypeVariables
-                    , TypeApplications
-                    , TypeOperators
-                    , TupleSections
   Build-Depends:    base
                   , oka-flow
                   , oka-metadata
