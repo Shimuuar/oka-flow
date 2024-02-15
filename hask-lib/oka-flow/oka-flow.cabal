@@ -66,6 +66,17 @@ Library
         OKA.Flow.Tools
         OKA.Flow.Std
 
+executable oka-flow
+  import:           extensions
+  Ghc-options:      -Wall -Wno-incomplete-uni-patterns
+  Default-Language: Haskell2010
+  --
+  hs-source-dirs:   exe
+  main-is:          Main.hs
+  build-depends:    base
+                  , oka-flow
+                  , optparse-applicative >= 0.18
+
 Test-suite oka-flow-tests
   import:           extensions
   type:             exitcode-stdio-1.0
