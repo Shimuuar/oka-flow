@@ -24,7 +24,7 @@ import Data.Set                     qualified as Set
 import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import Data.Typeable
 import System.FilePath              ((</>))
-import System.Directory             (createDirectory,renameDirectory,removeDirectoryRecursive)
+import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive)
 
 import OKA.Metadata
 import OKA.Flow.Graph
@@ -139,6 +139,7 @@ prepareFun FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport $ do
             _           -> error "INTERNAL ERROR: phony node treated as normal"
       let out   = flowCtxRoot </> storePath path -- Output directory
           build = out ++ "-build"                -- Temporary build directory
+      createDirectoryIfMissing False (flowCtxRoot </> path.name)
       createDirectory build
       BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadataDyn meta
       writeFile    (build </> "deps.txt")  $ unlines paramP

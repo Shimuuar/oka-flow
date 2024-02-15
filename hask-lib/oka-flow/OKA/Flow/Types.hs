@@ -38,6 +38,7 @@ import Data.ByteString.Base16 qualified as Base16
 import Data.Map.Strict        qualified as Map
 import Data.Coerce
 import Data.Typeable
+import System.FilePath        ((</>))
 import GHC.Generics
 import OKA.Metadata           (Metadata)
 
@@ -271,9 +272,12 @@ instance Show Hash where
   show (Hash hash) = show $ BC8.unpack $ Base16.encode hash
 
 -- | Path in nix-like storage.
-data StorePath = StorePath String Hash
+data StorePath = StorePath
+  { name :: String
+  , hash :: Hash
+  }
   deriving (Show)
 
 -- | Compute file name of directory in nix-like store.
 storePath :: StorePath -> FilePath
-storePath (StorePath nm (Hash hash)) = nm ++ "-" ++ BC8.unpack (Base16.encode hash)
+storePath (StorePath nm (Hash hash)) = nm </> BC8.unpack (Base16.encode hash)
