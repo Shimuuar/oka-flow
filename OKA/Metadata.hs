@@ -30,7 +30,6 @@ module OKA.Metadata
   , IsMeta(..)
     -- ** Writing 'IsMeta' instances
   , MetaTree
-  , metaTreeIso
   , metaTreeProduct
     -- ** Encoding & decoding
   , encodeMetadataDynEither
@@ -239,6 +238,7 @@ readMetadata path = liftIO $ do
 --   supported
 newtype MetaTree a = MetaTree { get :: Err [[Text]] (Spine (Entry a)) }
 
+
 -- | Either with accumulating Applicative instance
 data Err e a = Err e
              | OK  a
@@ -266,12 +266,9 @@ data Entry a = Entry
 instance Contravariant Entry where
   contramap f e = Entry (e.encoder . f) e.parser
 
+instance Contravariant MetaTree where
+  contramap f (MetaTree m) = MetaTree ((fmap . fmap) (contramap f) m)
 
--- | Apply isomorphism to tree of metadata
-metaTreeIso :: Iso' a b -> MetaTree a -> MetaTree b
-metaTreeIso len (MetaTree tree) = MetaTree $ go <$> tree
-  where
-    go t = contramap (view (from len)) <$> t
 
 -- | Product of two trees.
 metaTreeProduct
@@ -365,7 +362,7 @@ instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
 
 instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
   metaTree
-    = metaTreeIso (iso (\((a,b),c) -> (a,b,c)) (\(a,b,c) -> ((a,b),c)))
+    = contramap (\(a,b,c) -> ((a,b),c))
     $ metaTree `metaTreeProduct` metaTree `metaTreeProduct` metaTree
   toMetadata (a,b,c) = mconcat [ toMetadata a, toMetadata b, toMetadata c]
   fromMetadata m = (,,) <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m
@@ -376,7 +373,7 @@ instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
   metaTree
-    = metaTreeIso (iso (\((a,b),(c,d)) -> (a,b,c,d)) (\(a,b,c,d) -> ((a,b),(c,d))))
+    = contramap (\(a,b,c,d) -> ((a,b),(c,d)))
     $ metaTree `metaTreeProduct` metaTree
   toMetadata (a,b,c,d) = mconcat [ toMetadata a, toMetadata b, toMetadata c
                                  , toMetadata d]
@@ -388,7 +385,7 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) where
   metaTree
-    = metaTreeIso (iso (\((a,b),(c,d,e)) -> (a,b,c,d,e)) (\(a,b,c,d,e) -> ((a,b),(c,d,e))))
+    = contramap (\(a,b,c,d,e) -> ((a,b),(c,d,e)))
     $ metaTree `metaTreeProduct` metaTree
   toMetadata (a,b,c,d,e) = mconcat [ toMetadata a, toMetadata b, toMetadata c
                                    , toMetadata d, toMetadata e]
@@ -403,7 +400,7 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) wh
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,c,d,e,f) where
   metaTree
-    = metaTreeIso (iso (\((a,b,c),(d,e,f)) -> (a,b,c,d,e,f)) (\(a,b,c,d,e,f) -> ((a,b,c),(d,e,f))))
+    = contramap (\(a,b,c,d,e,f) -> ((a,b,c),(d,e,f)))
     $ metaTree `metaTreeProduct` metaTree
   toMetadata (a,b,c,d,e,f) = mconcat [ toMetadata a, toMetadata b, toMetadata c
                                      , toMetadata d, toMetadata e, toMetadata f]
@@ -419,7 +416,7 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsMeta (a,b,c,d,e,f,g) where
   metaTree
-    = metaTreeIso (iso (\((a,b,c),(d,e,f,g)) -> (a,b,c,d,e,f,g)) (\(a,b,c,d,e,f,g) -> ((a,b,c),(d,e,f,g))))
+    = contramap (\(a,b,c,d,e,f,g) -> ((a,b,c),(d,e,f,g)))
     $ metaTree `metaTreeProduct` metaTree
   toMetadata (a,b,c,d,e,f,g) = mconcat [ toMetadata a, toMetadata b, toMetadata c
                                        , toMetadata d, toMetadata e, toMetadata f
@@ -437,8 +434,7 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsM
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta h) => IsMeta (a,b,c,d,e,f,g,h) where
   metaTree
-    = metaTreeIso (iso (\((a,b,c,d),(e,f,g,h)) -> (a,b,c,d,e,f,g,h))
-                       (\(a,b,c,d,e,f,g,h)     -> ((a,b,c,d),(e,f,g,h))))
+    = contramap (\(a,b,c,d,e,f,g,h) -> ((a,b,c,d),(e,f,g,h)))
     $ metaTree `metaTreeProduct` metaTree
   toMetadata (a,b,c,d,e,f,g,h) = mconcat [ toMetadata a, toMetadata b, toMetadata c
                                          , toMetadata d, toMetadata e, toMetadata f
