@@ -32,10 +32,6 @@ module OKA.Metadata.Encoding
   , AsAeson(..)
   , AsReadShow(..)
   , AsRecord(..)
-    -- * Helpers
-  , typeName
-  , constrName
-  , fieldName
   ) where
 
 import Control.Applicative
@@ -69,6 +65,7 @@ import Text.Printf
 import GHC.Generics               hiding (from,to)
 import GHC.Generics               qualified as Generics
 import GHC.TypeLits
+import OKA.Metadata.Util
 
 ----------------------------------------------------------------
 -- Metadata encoding
@@ -321,8 +318,6 @@ instance {-# OVERLAPPING #-} (MetaEncoding a, KnownSymbol fld
   grecToMeta (M1 (K1 (Just a))) = [fieldName @fld .== a]
   grecToMeta (M1 (K1 Nothing )) = []
 
-fieldName :: forall fld. (KnownSymbol fld) => Text
-fieldName = T.pack $ symbolVal (Proxy @fld)
 
 
 ----------------------------------------------------------------
@@ -425,20 +420,3 @@ instance (Typeable k, JSON.FromJSONKey k, JSON.ToJSONKey k, Ord k, MetaEncoding 
     JSON.ToJSONKeyText  f _ -> JSON.object [ JSON.toText (f k) .== v | (k,v) <- Map.toList m ]
     JSON.ToJSONKeyValue f _ -> Array $ V.fromList
       [ Array $ V.fromList [f k, coerce $ metaToJson v] | (k,v) <- Map.toList m ]
-
-
-----------------------------------------------------------------
--- Helpers
-----------------------------------------------------------------
-
-typeName :: forall a. Typeable a => String
-typeName = show (typeOf (undefined :: a))
-
-constrName :: JSON.Value -> String
-constrName = \case
-  Object{} -> "object"
-  Array{}  -> "array"
-  Number{} -> "number"
-  String{} -> "string"
-  Bool{}   -> "boolean"
-  Null     -> "null"

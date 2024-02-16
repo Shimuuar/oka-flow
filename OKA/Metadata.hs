@@ -53,7 +53,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Lens
 
-import Data.Aeson                 (Value(..),(.:))
+import Data.Aeson                 ((.:))
 import Data.Aeson                 qualified as JSON
 import Data.Aeson.KeyMap          qualified as KM
 import Data.Aeson.Key             (fromText,toText)
@@ -73,7 +73,7 @@ import Data.Text                  qualified as T
 import GHC.TypeLits
 
 import OKA.Metadata.Encoding
-
+import OKA.Metadata.Util
 
 ----------------------------------------------------------------
 -- Metadata representation
