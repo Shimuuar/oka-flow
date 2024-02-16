@@ -1,4 +1,4 @@
-Cabal-Version:  2.2
+Cabal-Version:  3.0
 Name:           oka-metadata
 Version:        0.1
 Synopsis:       Metadata for data analysis
@@ -12,8 +12,15 @@ Category:       Data
 Build-Type:     Simple
 
 Library
-  Ghc-options:      -Wall -O2
-  Default-Language: Haskell2010
+  Ghc-options:        -Wall -O2
+  Default-Language:   Haskell2010
+  Default-Extensions: GHC2021
+                      NoPolyKinds
+                      DataKinds
+                      DerivingStrategies
+                      DerivingVia
+                      LambdaCase
+                      ViewPatterns
   --
   Build-Depends:    base                >=4.12 && <5
                   , aeson               >=2
