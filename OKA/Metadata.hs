@@ -47,7 +47,6 @@ module OKA.Metadata
   , AsMeta(..)
   ) where
 
-import Control.Applicative
 import Control.Exception                 (throwIO)
 import Control.Monad
 import Control.Monad.IO.Class
@@ -194,7 +193,9 @@ decodeMetadataEither json =
     Err err -> Left $ keyClashesMsg @a err
     OK Tree{..} -> do
       m <- consumeKM keyTree
-      decoder m
+      case fromMetadata m of
+        Just a  -> pure a
+        Nothing -> error "Invalid conversion. IsMeta is bugged"
   where
     consumeKM :: Spine (Entry a) -> Either String Metadata
     consumeKM (Leaf Entry{..}) = do
@@ -248,10 +249,7 @@ instance Monoid e => Applicative (Err e) where
   OK  f  <*> OK  a  = OK (f a)
 
 -- Decoder tree
-data Tree a = Tree
-  { decoder :: Metadata -> Either String a -- Decoder from set of records
-  , keyTree :: Spine (Entry a)             -- Tree itself
-  }
+newtype Tree a = Tree { keyTree :: Spine (Entry a) }
 
 -- Spine of a key tree
 data Spine a
@@ -276,9 +274,7 @@ instance Contravariant Entry where
 metaTreeIso :: Iso' a b -> MetaTree a -> MetaTree b
 metaTreeIso len (MetaTree tree) = MetaTree $ go <$> tree
   where
-    go Tree{..} = Tree { decoder = (fmap . fmap) (view len) decoder
-                       , keyTree = contramap (view (from len)) <$> keyTree
-                       }
+    go Tree{..} = Tree { keyTree = contramap (view (from len)) <$> keyTree }
 
 -- | Product of two trees.
 metaTreeProduct
@@ -294,10 +290,7 @@ metaTreeProduct (MetaTree meta1) (MetaTree meta2) =
     merge treeA treeB =
       case zipSpine (contramap fst) (contramap snd) (keyTree treeA) (keyTree treeB) of
         Err e    -> Err e
-        OK  keys -> OK Tree
-          { decoder = (liftA2 . liftA2) (,) (decoder treeA) (decoder treeB)
-          , keyTree = keys
-          }
+        OK  keys -> OK Tree { keyTree = keys }
 
 zipSpine :: (a -> c) -> (b -> c) -> Spine a -> Spine b -> Err [[Text]] (Spine c)
 zipSpine a2c b2c = go []
@@ -327,10 +320,7 @@ newtype AsMeta (path :: [Symbol]) a = AsMeta a
 
 instance (Typeable path, MetaEncoding a, IsMeta a, MetaPath path) => IsMeta (AsMeta path a) where
   metaTree = MetaTree $ OK $ Tree
-    { decoder = \m -> case m ^. metadataMay @a of
-        Nothing -> Left $ "Missing type: " ++ typeName @a
-        Just a  -> Right (AsMeta a)
-    , keyTree
+    { keyTree
         = flip (foldr $ \nm -> Branch . KM.singleton (fromText nm)) path
         $ Leaf Entry
           { entryEncoder = \(AsMeta a) -> metaToJson a
