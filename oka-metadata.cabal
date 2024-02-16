@@ -36,6 +36,7 @@ Library
                   , yaml
   Exposed-modules:
         OKA.Metadata
+        OKA.Metadata.Encoding
 
 Test-suite oka-metadata-tests
    type:             exitcode-stdio-1.0
