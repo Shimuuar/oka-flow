@@ -38,32 +38,13 @@ module OKA.Metadata
   , decodeMetadata
   , readMetadataEither
   , readMetadata
-    -- * Serialization
+    -- * JSON serialization
   , MetaEncoding(..)
-    -- * Writing instances
-  , (.::)
-  , (.::?)
-  , (.==)
-  , metaWithObject
-  , metaWithRecord
     -- ** Deriving via
   , AsAeson(..)
   , AsReadShow(..)
   , AsRecord(..)
   , AsMeta(..)
-    -- ** Special purpose parsers
-  , metaSExp1
-  , metaSExp1With
-  , metaSExp2
-  , metaSExp2With
-  , metaSExp3
-  , metaSExp3With
-    -- ** Exhaustive parser
-  , ObjParser
-  , runObjParser
-  , metaObject
-  , metaField
-  , metaFieldM
   ) where
 
 import Control.Applicative
