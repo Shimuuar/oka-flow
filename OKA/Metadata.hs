@@ -59,7 +59,6 @@ import Data.Aeson.KeyMap          qualified as KM
 import Data.Aeson.Key             (fromText,toText)
 import Data.Aeson.Types           qualified as JSON
 import Data.These
-import Data.Histogram.Bin
 import Data.Yaml                  qualified as YAML
 import Data.Foldable              (toList)
 import Data.Map.Strict            qualified as Map
@@ -469,16 +468,6 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta 
                 <> metadataKeySet @f
                 <> metadataKeySet @g
                 <> metadataKeySet @h
-
-instance MetaEncoding BinD where
-  parseMeta o =  metaSExp3 "BinD"     binD     o
-             <|> metaSExp3 "BinDstep" binDstep o
-  metaToJson b = metaToJson
-    [ "BinDstep"
-    , metaToJson $ lowerLimit b
-    , metaToJson $ binSize    b
-    , metaToJson $ nBins      b
-    ]
 
 
 ----------------------------------------------------------------

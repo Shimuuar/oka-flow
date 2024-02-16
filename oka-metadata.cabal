@@ -24,7 +24,6 @@ Library
   --
   Build-Depends:    base                >=4.12 && <5
                   , aeson               >=2
-                  , histogram-fill
                   , scientific
                   , transformers
                   , text
@@ -58,8 +57,6 @@ Test-suite oka-metadata-tests
                    , containers
                    , text
                    , fixed-vector
-                   , histogram-fill
-                   , histogram-fill-quickcheck
    hs-source-dirs: tests
    main-is:        Main.hs
    other-modules:  TM.Meta

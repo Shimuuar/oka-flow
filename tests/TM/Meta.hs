@@ -28,16 +28,13 @@ import Test.Tasty.QuickCheck
 import Test.Tasty.HUnit
 import Test.QuickCheck.Arbitrary.Generic
 import Test.QuickCheck.Instances ()
-import Data.Histogram.Bin
-import Data.Histogram.QuickCheck ()
 import GHC.Generics (Generic)
 
 
 tests :: TestTree
 tests = testGroup "Metadata"
   [ testGroup "Roundtrip MetaEncoding"
-    [ testSerialise @BinD
-    , testSerialise @Int
+    [ testSerialise @Int
     , testSerialise @[Int]
     , testSerialise @(Int,Double)
     , testSerialise @(Int,Double,(Int,Int))
