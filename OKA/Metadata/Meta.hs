@@ -21,6 +21,9 @@ module OKA.Metadata.Meta
     -- * 'IsMeta' type class
   , IsMeta(..)
   , MetaTree
+  , primToMetadata
+  , primFromMetadata
+  , singletonMetaTree
   , (<<>>)
     -- ** Encoding & decoding
   , encodeMetadataDynEither
@@ -38,7 +41,6 @@ module OKA.Metadata.Meta
   , AsMeta(..)
   ) where
 
-import Control.Monad
 import Control.Lens
 
 import Data.Aeson                 ((.:))
@@ -46,6 +48,7 @@ import Data.Aeson                 qualified as JSON
 import Data.Aeson.KeyMap          qualified as KM
 import Data.Aeson.Key             (fromText,toText)
 import Data.Aeson.Types           qualified as JSON
+import Data.Coerce
 import Data.These
 import Data.Foldable              (toList)
 import Data.Functor.Contravariant
@@ -182,28 +185,35 @@ encodeMetadataEither a = case metaTree.get of
     reduce (Leaf Entry{..}) = encoder a
     reduce (Branch m)       = JSON.Object $ reduce <$> m
 
+
+-- | Decode metadata from JSON value
+decodeMetadata :: forall a. IsMeta a => JSON.Value -> a
+decodeMetadata = either error id . decodeMetadataEither
+
 -- | Decode metadata from JSON value
 decodeMetadataEither :: forall a. IsMeta a => JSON.Value -> Either String a
 decodeMetadataEither json =
   case (metaTree @a).get of
     Err err  -> Left $ keyClashesMsg @a err
     OK  tree -> do
-      m <- consumeKM tree
+      m <- JSON.parseEither (parseTree tree) json
       case fromMetadata m of
         Just a  -> pure a
         Nothing -> error "Invalid conversion. IsMeta is bugged"
   where
-    consumeKM :: Spine (Entry a) -> Either String Metadata
-    consumeKM (Leaf leaf) = do
-      e@(MetaEntry a) <- leaf.parser json
-      pure $ Metadata $ Map.singleton (typeOf a) e
-    consumeKM (Branch kmap)
-      = foldM (\m tree -> (m <>) <$> consumeKM tree) mempty kmap
+    parseTree :: Spine (Entry a) -> JSON.Value -> JSON.Parser Metadata
+    parseTree (Leaf   leaf) js = leaf.parser js
+    parseTree (Branch kmap) js =
+      mconcat <$> sequence [ descend k (parseTree tr) js
+                           | (k,tr) <- KM.toList kmap
+                           ]
 
--- | Decode metadata from JSON value
-decodeMetadata :: forall a. IsMeta a => JSON.Value -> a
-decodeMetadata = either error id . decodeMetadataEither
-
+descend :: KM.Key
+        -> (JSON.Value -> JSON.Parser a)
+        -> (JSON.Value -> JSON.Parser a)
+descend k parser
+  = JSON.prependFailure (" - " ++ T.unpack (toText k) ++ "\n")
+  . metaWithObject (\o -> parser =<< (o .: k))
 
 
 ----------------------------------------------------------------
@@ -237,7 +247,7 @@ data Spine a
 -- | Leaf corresponding to a single record in metadata tree
 data Entry a = Entry
   { encoder :: a -> JSON.Value
-  , parser  :: JSON.Value -> Either String MetaEntry
+  , parser  :: JSON.Value -> JSON.Parser Metadata
   }
 
 instance Contravariant Entry where
@@ -276,30 +286,37 @@ zipSpine = go []
 -- Deriving & instances
 ----------------------------------------------------------------
 
+-- | Implementation of 'toMetadata' for primitive entry
+primToMetadata :: (IsMeta a) => a -> Metadata
+primToMetadata a = Metadata $ Map.singleton (typeOf a) (MetaEntry a)
+
+-- | Implementation of 'fromMetadata' for primitive entry
+primFromMetadata :: forall a. (IsMeta a) => Metadata -> Maybe a
+primFromMetadata (Metadata m) = do
+  MetaEntry a <- Map.lookup (typeOf (undefined :: a)) m
+  cast a
+
+-- | Implementation of 'metaTree' for primitive entry
+singletonMetaTree :: forall a. (MetaEncoding a, IsMeta a) => [Text] -> MetaTree a
+singletonMetaTree path
+  = MetaTree
+  $ OK
+  $ flip (foldr $ \nm -> Branch . KM.singleton (fromText nm)) path
+  $ Leaf Entry
+    { encoder = metaToJson @a
+    , parser  = \json -> do
+        a <- JSON.prependFailure ("While parsing metadata " ++ typeName @a ++ "\n")
+           $ parseMeta @a json
+        return $ mempty & metadata .~ a
+    }
+
 -- | Derive 'IsMeta' instance with given path
 newtype AsMeta (path :: [Symbol]) a = AsMeta a
 
 instance (Typeable path, MetaEncoding a, IsMeta a, MetaPath path) => IsMeta (AsMeta path a) where
-  metaTree = MetaTree $ OK
-    $ flip (foldr $ \nm -> Branch . KM.singleton (fromText nm)) path
-    $ Leaf Entry
-      { encoder = \(AsMeta a) -> metaToJson a
-      , parser  = \json -> do
-          let descend k parser
-                = JSON.prependFailure (" - " ++ T.unpack k ++ "\n")
-                . metaWithObject (\o -> parser =<< (o .: fromText k))
-          let parser
-                = JSON.prependFailure ("While parsing metadata " ++ typeName @a ++ "\n")
-                . foldr descend (parseMeta @a) path
-          a <- JSON.parseEither parser json
-          pure $ MetaEntry a
-      }
-    where
-      path = getMetaPath @path
-  --
-  toMetadata (AsMeta a) = Metadata $ Map.singleton (typeOf a) (MetaEntry a)
-  fromMetadata (Metadata m) = do MetaEntry a <- Map.lookup (typeOf (undefined :: a)) m
-                                 AsMeta <$> cast a
+  metaTree       = coerce (singletonMetaTree @a (getMetaPath @path))
+  toMetadata     = coerce (primToMetadata @a)
+  fromMetadata   = coerce (primFromMetadata @a)
   metadataKeySet = Set.singleton (typeOf (undefined :: a))
 
 
