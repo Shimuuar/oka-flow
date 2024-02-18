@@ -115,7 +115,7 @@ restrictMeta
   => Flow eff a
   -> Flow eff a
 restrictMeta action = scopeMeta $ do
-  modify (restrictMetadata @meta)
+  modify (restrictMetaByType @meta)
   action
 
 
