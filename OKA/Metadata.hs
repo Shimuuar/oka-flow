@@ -148,8 +148,6 @@ class Typeable a => IsMeta a where
 -- JSON encoding of metadata
 ----------------------------------------------------------------
 
-
-
 encodeMetadataDyn :: Metadata -> JSON.Value
 encodeMetadataDyn = either error id . encodeMetadataDynEither
 
@@ -281,10 +279,7 @@ metaTreeProduct (MetaTree meta1) (MetaTree meta2) =
     OK (Err e) -> MetaTree (Err e)
     OK (OK  r) -> MetaTree (OK r)
   where
-    merge treeA treeB =
-      case zipSpine (contramap fst) (contramap snd) treeA treeB of
-        Err e    -> Err e
-        OK  keys -> OK keys
+    merge = zipSpine (contramap fst) (contramap snd)
 
 zipSpine :: (a -> c) -> (b -> c) -> Spine a -> Spine b -> Err [[Text]] (Spine c)
 zipSpine a2c b2c = go []
@@ -305,9 +300,6 @@ zipSpine a2c b2c = go []
 ----------------------------------------------------------------
 -- Deriving & instances
 ----------------------------------------------------------------
-
-
-
 
 -- | Derive 'IsMeta' instance with given path
 newtype AsMeta (path :: [Symbol]) a = AsMeta a
