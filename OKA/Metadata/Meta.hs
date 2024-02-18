@@ -18,10 +18,10 @@ module OKA.Metadata.Meta
   , restrictMetaByKeys
   , deleteFromMetaByType
   , deleteFromMetaByKeys
+    -- * 'IsMeta' type class
   , IsMeta(..)
-    -- ** Writing 'IsMeta' instances
   , MetaTree
-  , metaTreeProduct
+  , (<<>>)
     -- ** Encoding & decoding
   , encodeMetadataDynEither
   , encodeMetadataDyn
@@ -48,6 +48,7 @@ import Data.Aeson.Key             (fromText,toText)
 import Data.Aeson.Types           qualified as JSON
 import Data.These
 import Data.Foldable              (toList)
+import Data.Functor.Contravariant
 import Data.Map.Strict            qualified as Map
 import Data.Map.Strict            (Map)
 import Data.Set                   (Set)
@@ -160,7 +161,7 @@ encodeMetadataDynEither (Metadata m) = do
               ]
     --
     reduce s0 []     = OK s0
-    reduce s0 (s:ss) = case zipSpine id id s0 s of
+    reduce s0 (s:ss) = case zipSpine s0 s of
       Err err -> Err err
       OK  s'  -> reduce s' ss
     --
@@ -211,11 +212,6 @@ decodeMetadata json = case decodeMetadataEither json of
 -- Bidirectional parser
 ----------------------------------------------------------------
 
--- | Bidirectional parser for metadata. Only product types are
---   supported
-newtype MetaTree a = MetaTree { get :: Err [[Text]] (Spine (Entry a)) }
-
-
 -- | Either with accumulating Applicative instance
 data Err e a = Err e
              | OK  a
@@ -227,6 +223,12 @@ instance Monoid e => Applicative (Err e) where
   Err e  <*> OK  _  = Err e
   OK  _  <*> Err e  = Err e
   OK  f  <*> OK  a  = OK (f a)
+
+
+
+-- | Bidirectional parser for metadata. Only product types are
+--   supported
+newtype MetaTree a = MetaTree { get :: Err [[Text]] (Spine (Entry a)) }
 
 -- | Spine of a key tree
 data Spine a
@@ -247,21 +249,17 @@ instance Contravariant MetaTree where
   contramap f (MetaTree m) = MetaTree ((fmap . fmap) (contramap f) m)
 
 
--- | Product of two trees.
-metaTreeProduct
-  :: MetaTree a
-  -> MetaTree b
-  -> MetaTree (a,b)
-metaTreeProduct (MetaTree meta1) (MetaTree meta2) =
-  case merge <$> meta1 <*> meta2 of
+-- | Union of two trees. It's almost associative and may produce
+--   different error but result in case of success is always same.
+(<<>>) :: MetaTree a -> MetaTree a -> MetaTree a
+MetaTree meta1 <<>> MetaTree meta2 =
+  case zipSpine <$> meta1 <*> meta2 of
     Err e      -> MetaTree (Err e)
     OK (Err e) -> MetaTree (Err e)
     OK (OK  r) -> MetaTree (OK r)
-  where
-    merge = zipSpine (contramap fst) (contramap snd)
 
-zipSpine :: (a -> c) -> (b -> c) -> Spine a -> Spine b -> Err [[Text]] (Spine c)
-zipSpine a2c b2c = go []
+zipSpine :: Spine a -> Spine a -> Err [[Text]] (Spine a)
+zipSpine = go []
   where
     go path (Branch m1) (Branch m2)
       = fmap Branch
@@ -270,8 +268,8 @@ zipSpine a2c b2c = go []
     go path _ _ = Err [reverse path]
     --
     merge path k = \case
-      This  a   -> OK (a2c <$> a)
-      That  b   -> OK (b2c <$> b)
+      This  a   -> OK a
+      That  b   -> OK b
       These a b -> go (toText k : path) a b
 
 
@@ -324,7 +322,8 @@ instance (KnownSymbol n, MetaPath ns) => MetaPath (n ': ns) where
 
 
 instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
-  metaTree = metaTreeProduct metaTree metaTree
+  metaTree = (fst >$< metaTree)
+        <<>> (snd >$< metaTree)
   toMetadata (a,b) = toMetadata a <> toMetadata b
   fromMetadata m = (,) <$> fromMetadata m <*> fromMetadata m
   metadataKeySet = metadataKeySet @a
@@ -332,9 +331,9 @@ instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
 
 
 instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
-  metaTree
-    = contramap (\(a,b,c) -> ((a,b),c))
-    $ metaTree `metaTreeProduct` metaTree `metaTreeProduct` metaTree
+  metaTree = ((\(a,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,a,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,a) -> a) >$< metaTree)
   toMetadata (a,b,c) = mconcat [ toMetadata a, toMetadata b, toMetadata c]
   fromMetadata m = (,,) <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m
   metadataKeySet = metadataKeySet @a
@@ -343,23 +342,30 @@ instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
 
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
-  metaTree
-    = contramap (\(a,b,c,d) -> ((a,b),(c,d)))
-    $ metaTree `metaTreeProduct` metaTree
-  toMetadata (a,b,c,d) = mconcat [ toMetadata a, toMetadata b, toMetadata c
-                                 , toMetadata d]
+  metaTree = ((\(a,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,a,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,a,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,a) -> a) >$< metaTree)
+  toMetadata (a,b,c,d) = mconcat
+    [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
+    ]
   fromMetadata m = (,,,) <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
+
   metadataKeySet = metadataKeySet @a
                 <> metadataKeySet @b
                 <> metadataKeySet @c
                 <> metadataKeySet @d
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) where
-  metaTree
-    = contramap (\(a,b,c,d,e) -> ((a,b),(c,d,e)))
-    $ metaTree `metaTreeProduct` metaTree
-  toMetadata (a,b,c,d,e) = mconcat [ toMetadata a, toMetadata b, toMetadata c
-                                   , toMetadata d, toMetadata e]
+  metaTree = ((\(a,_,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,a,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,a,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,a,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,_,a) -> a) >$< metaTree)
+  toMetadata (a,b,c,d,e) = mconcat
+    [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
+    , toMetadata e
+    ]
   fromMetadata m = (,,,,)
                 <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
                 <*> fromMetadata m
@@ -370,11 +376,16 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) wh
                 <> metadataKeySet @e
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,c,d,e,f) where
-  metaTree
-    = contramap (\(a,b,c,d,e,f) -> ((a,b,c),(d,e,f)))
-    $ metaTree `metaTreeProduct` metaTree
-  toMetadata (a,b,c,d,e,f) = mconcat [ toMetadata a, toMetadata b, toMetadata c
-                                     , toMetadata d, toMetadata e, toMetadata f]
+  metaTree = ((\(a,_,_,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,a,_,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,a,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,a,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,_,a,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,_,_,a) -> a) >$< metaTree)
+  toMetadata (a,b,c,d,e,f) = mconcat
+    [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
+    , toMetadata e, toMetadata f
+    ]
   fromMetadata m = (,,,,,)
                 <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
                 <*> fromMetadata m <*> fromMetadata m
@@ -386,12 +397,17 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,
                 <> metadataKeySet @f
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsMeta (a,b,c,d,e,f,g) where
-  metaTree
-    = contramap (\(a,b,c,d,e,f,g) -> ((a,b,c),(d,e,f,g)))
-    $ metaTree `metaTreeProduct` metaTree
-  toMetadata (a,b,c,d,e,f,g) = mconcat [ toMetadata a, toMetadata b, toMetadata c
-                                       , toMetadata d, toMetadata e, toMetadata f
-                                       , toMetadata g]
+  metaTree = ((\(a,_,_,_,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,a,_,_,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,a,_,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,a,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,_,a,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,_,_,a,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,_,_,_,a) -> a) >$< metaTree)
+  toMetadata (a,b,c,d,e,f,g) = mconcat
+    [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
+    , toMetadata e, toMetadata f, toMetadata g
+    ]
   fromMetadata m = (,,,,,,)
                 <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
                 <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
@@ -404,12 +420,18 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsM
                 <> metadataKeySet @g
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta h) => IsMeta (a,b,c,d,e,f,g,h) where
-  metaTree
-    = contramap (\(a,b,c,d,e,f,g,h) -> ((a,b,c,d),(e,f,g,h)))
-    $ metaTree `metaTreeProduct` metaTree
-  toMetadata (a,b,c,d,e,f,g,h) = mconcat [ toMetadata a, toMetadata b, toMetadata c
-                                         , toMetadata d, toMetadata e, toMetadata f
-                                         , toMetadata g, toMetadata h]
+  metaTree = ((\(a,_,_,_,_,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,a,_,_,_,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,a,_,_,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,a,_,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,_,a,_,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,_,_,a,_,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,_,_,_,a,_) -> a) >$< metaTree)
+        <<>> ((\(_,_,_,_,_,_,_,a) -> a) >$<  metaTree)
+  toMetadata (a,b,c,d,e,f,g,h) = mconcat
+    [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
+    , toMetadata e, toMetadata f, toMetadata g, toMetadata h
+    ]
   fromMetadata m = (,,,,,,,)
                 <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
                 <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
