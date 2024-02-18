@@ -56,6 +56,7 @@ tests = testGroup "Metadata"
     , testIsMeta @(Record,Record2,Record3,Record4,Record5,Record6)
     , testIsMeta @(Record,Record2,Record3,Record4,Record5,Record6,Record7)
     , testIsMeta @(Record,Record2,Record3,Record4,Record5,Record6,Record7,Record8)
+    , testIsMeta @((Record,Record2),Record3,Record4)
     -- Check clash detection
     , testCase "Clash detected" $ case encodeMetadataEither (undefined :: (Record,Record)) of
         Left  _ -> pure ()
@@ -77,14 +78,20 @@ fromMeta = either error id . JSON.parseEither parseMeta
 
 testIsMeta :: forall a. (Typeable a, Arbitrary a, Show a, Eq a, IsMeta a) => TestTree
 testIsMeta = testGroup (show (typeOf (undefined :: a)))
-  [ testProperty "JSON" (testIsMetaJSON @a)
-  , testProperty "Meta" (testIsMetaMeta @a)
+  [ testProperty "JSON"  (testIsMetaJSON   @a)
+  , testProperty "JSON2" (testEncodeIsSame @a)
+  , testProperty "Meta"  (testIsMetaMeta   @a)
   ]
 
 testIsMetaJSON :: (IsMeta a, Eq a) => a -> Property
 testIsMetaJSON a
   = property
   $ decodeMetadata (encodeMetadata a) == a
+
+testEncodeIsSame :: (IsMeta a) => a -> Property
+testEncodeIsSame a
+  = property
+  $ encodeMetadata a == encodeMetadataDyn (toMetadata a)
 
 testIsMetaMeta :: (IsMeta a, Eq a) => a -> Property
 testIsMetaMeta a
