@@ -233,9 +233,7 @@ instance Monoid e => Applicative (Err e) where
   OK  f  <*> OK  a  = OK (f a)
 
 
-
--- | Bidirectional parser for metadata. Only product types are
---   supported
+-- | JSON structure for data type of type @a@
 newtype MetaTree a = MetaTree { get :: Err [[Text]] (Spine (Entry a)) }
 
 -- | Spine of a key tree
@@ -245,6 +243,9 @@ data Spine a
   deriving stock (Functor)
 
 -- | Leaf corresponding to a single record in metadata tree
+--
+--   NOTE: We can't use GADTs here since it will interfere with
+--         coercions of MetaTree
 data Entry a = Entry
   { encoder :: a -> JSON.Value
   , parser  :: JSON.Value -> JSON.Parser Metadata
