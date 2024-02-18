@@ -202,9 +202,7 @@ decodeMetadataEither json =
 
 -- | Decode metadata from JSON value
 decodeMetadata :: forall a. IsMeta a => JSON.Value -> a
-decodeMetadata json = case decodeMetadataEither json of
-  Right a -> a
-  Left  e -> error e
+decodeMetadata = either error id . decodeMetadataEither
 
 
 
