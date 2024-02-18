@@ -25,6 +25,7 @@ module OKA.Metadata.Meta
   , primFromMetadata
   , singletonMetaTree
   , (<<>>)
+  , MetaPath(..)
     -- ** Encoding & decoding
   , encodeMetadataDynEither
   , encodeMetadataDyn
@@ -298,11 +299,11 @@ primFromMetadata (Metadata m) = do
   cast a
 
 -- | Implementation of 'metaTree' for primitive entry
-singletonMetaTree :: forall a. (MetaEncoding a, IsMeta a) => [Text] -> MetaTree a
+singletonMetaTree :: forall a. (MetaEncoding a, IsMeta a) => [KM.Key] -> MetaTree a
 singletonMetaTree path
   = MetaTree
   $ OK
-  $ flip (foldr $ \nm -> Branch . KM.singleton (fromText nm)) path
+  $ flip (foldr $ \k -> Branch . KM.singleton k) path
   $ Leaf Entry
     { encoder = metaToJson @a
     , parser  = \json -> do
@@ -316,21 +317,23 @@ newtype AsMeta (path :: [Symbol]) a = AsMeta a
 
 instance (Typeable path, MetaEncoding a, IsMeta a, MetaPath path) => IsMeta (AsMeta path a) where
   metaTree       = coerce (singletonMetaTree @a (getMetaPath @path))
-  toMetadata     = coerce (primToMetadata @a)
-  fromMetadata   = coerce (primFromMetadata @a)
+  toMetadata     = coerce (primToMetadata    @a)
+  fromMetadata   = coerce (primFromMetadata  @a)
   metadataKeySet = Set.singleton (typeOf (undefined :: a))
 
 
 
-
+-- | Type class for converting type level literals into sequence of
+--   JSON keys
 class MetaPath (xs :: [Symbol]) where
-  getMetaPath :: [Text]
+  getMetaPath :: [KM.Key]
 
 instance MetaPath '[] where
   getMetaPath = []
 
 instance (KnownSymbol n, MetaPath ns) => MetaPath (n ': ns) where
-  getMetaPath = fieldName @n : getMetaPath @ns
+  getMetaPath = fromText (fieldName @n) : getMetaPath @ns
+
 
 ----------------------------------------------------------------
 -- Instances
