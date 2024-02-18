@@ -24,9 +24,10 @@ module OKA.Metadata
   , metadata
   , metadataF
   , metadataMay
-  , deleteFromMetadata
-  , restrictMetadata
-  , restrictMetadataByKey
+  , restrictMetaByType
+  , restrictMetaByKeys
+  , deleteFromMetaByType
+  , deleteFromMetaByKeys
   , IsMeta(..)
     -- ** Writing 'IsMeta' instances
   , MetaTree
@@ -108,20 +109,24 @@ metadataF = metadataMay . _Just
 metadataMay :: forall a. IsMeta a => Lens' Metadata (Maybe a)
 metadataMay = lens fromMetadata (\m -> \case
                                     Just a  -> m <> toMetadata a
-                                    Nothing -> deleteFromMetadata @a m
+                                    Nothing -> deleteFromMetaByType @a m
                                 )
 
 -- | Only keep keys which corresponds to a type
-restrictMetadata :: forall a. IsMeta a => Metadata -> Metadata
-restrictMetadata = restrictMetadataByKey (metadataKeySet @a)
+restrictMetaByType :: forall a. IsMeta a => Metadata -> Metadata
+restrictMetaByType = restrictMetaByKeys (metadataKeySet @a)
 
 -- | Only keep keys that are in the set of keys
-restrictMetadataByKey :: Set TypeRep -> Metadata -> Metadata
-restrictMetadataByKey keys (Metadata m) = Metadata $ Map.restrictKeys m keys
+restrictMetaByKeys :: Set TypeRep -> Metadata -> Metadata
+restrictMetaByKeys keys (Metadata m) = Metadata $ Map.restrictKeys m keys
 
 -- | Delete dictionaries corresponding to this data type from metadata
-deleteFromMetadata :: forall a. IsMeta a => Metadata -> Metadata
-deleteFromMetadata (Metadata m) = Metadata $ Map.withoutKeys m (metadataKeySet @a)
+deleteFromMetaByType :: forall a. IsMeta a => Metadata -> Metadata
+deleteFromMetaByType = deleteFromMetaByKeys (metadataKeySet @a)
+
+-- | Delete dictionaries corresponding to this data type from metadata
+deleteFromMetaByKeys :: Set TypeRep -> Metadata -> Metadata
+deleteFromMetaByKeys k (Metadata m) = Metadata $ Map.withoutKeys m k
 
 -- | Type class for data types for types that represent metadata and
 --   their products. It describes how to serialize them and how to
