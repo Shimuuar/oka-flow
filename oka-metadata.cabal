@@ -36,6 +36,7 @@ Library
   Exposed-modules:
         OKA.Metadata
         OKA.Metadata.Encoding
+        OKA.Metadata.Meta
   Other-modules:
         OKA.Metadata.Util
 
