@@ -80,9 +80,10 @@ import OKA.Metadata.Util
 -- Metadata representation
 ----------------------------------------------------------------
 
--- | Dynamic product of metadata dictionaries. Each is instance of
---   'IsMeta' type class. Note this type class has instances for
---   products for primitive dicts. Those are unpacked.
+-- | Dynamically typed collection of values which could be looked up
+--   by their type and serialized into JSON. API supports both
+--   operations with single types and products of several types (as
+--   tuples).
 --
 --   Semigroup instance is right biased.
 newtype Metadata = Metadata (Map TypeRep MetaEntry)
@@ -153,9 +154,13 @@ class Typeable a => IsMeta a where
 -- JSON encoding of metadata
 ----------------------------------------------------------------
 
+-- | Encode dynamic dictionary. Throw exception in case there's key
+--   overlap.
 encodeMetadataDyn :: Metadata -> JSON.Value
 encodeMetadataDyn = either error id . encodeMetadataDynEither
 
+-- | Encode dynamic dictionary. Returns @Left@ in case there's key
+--   overlap.
 encodeMetadataDynEither :: Metadata -> Either String JSON.Value
 encodeMetadataDynEither (Metadata m) = do
   onErr (sequenceA entries) >>= \case
@@ -178,11 +183,11 @@ encodeMetadataDynEither (Metadata m) = do
     asJSON (Branch mp)   = JSON.Object $ asJSON <$> mp
 
 
--- | Encode metadata as JSON value
+-- | Encode metadata as JSON value. Will throw error in case of key clash
 encodeMetadata :: forall a. IsMeta a => a -> JSON.Value
 encodeMetadata = either error id . encodeMetadataEither
 
--- | Encode metadata as JSON value
+-- | Encode metadata as JSON value. Returns @Left@ in case of key clash.
 encodeMetadataEither :: forall a. IsMeta a => a -> Either String JSON.Value
 encodeMetadataEither a = case metaTree.get of
   Err err  -> Left  $ keyClashesMsg @a err
