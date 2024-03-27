@@ -339,6 +339,11 @@ instance (KnownSymbol n, MetaPath ns) => MetaPath (n ': ns) where
 -- Instances
 ----------------------------------------------------------------
 
+instance IsMeta () where
+  metaTree       = MetaTree $ OK $ Branch mempty
+  toMetadata   _ = Metadata mempty
+  fromMetadata _ = Just ()
+  metadataKeySet = mempty
 
 instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
   metaTree = (fst >$< metaTree)
