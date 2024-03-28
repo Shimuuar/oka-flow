@@ -5,10 +5,14 @@
 module OKA.Flow.Tools
   ( -- * Executable implementation
     metaFromStdin
-    -- * Command line arguments
+    -- ** Output serialization
+  , FlowOutput(..)
+  , AsMetaEncoded(..)
+    -- ** Command line arguments
   , FlowArgument(..)
   , parseFlowArguments
   , parseSingleArgument
+  , AsFlowOutput(..)
     -- * Resources
   , LockGHC(..)
   , compileProgramGHC
@@ -29,6 +33,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State.Strict
 import Data.Aeson                   qualified as JSON
+import Data.Aeson.Types             qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
 import Data.Functor
 import System.Process.Typed
@@ -51,6 +56,30 @@ metaFromStdin = do
   (BL.getContents <&> JSON.eitherDecode) >>= \case
     Left  e  -> error $ "Cannot read metadata: " ++ e
     Right js -> evaluate $ decodeMetadata js
+
+
+-- | Type class for serialization of output to store
+class FlowOutput a where
+  -- | Write output to the given directory.
+  writeOutput :: FilePath -> a -> IO ()
+  -- | Read output from given directory
+  readOutput :: FilePath -> IO a
+
+
+-- | Save value as a JSON encoded with 'MetaEncoding' in @data.json@ file.
+newtype AsMetaEncoded a = AsMetaEncoded a
+  deriving FlowArgument via AsFlowOutput (AsMetaEncoded a)
+
+instance MetaEncoding a => FlowOutput (AsMetaEncoded a) where
+  writeOutput dir (AsMetaEncoded a) =
+    BL.writeFile (dir </> "data.json") $ JSON.encode $ metaToJson a
+  readOutput dir = do
+    bs <- BL.readFile (dir </> "data.json")
+    case JSON.decode bs of
+      Nothing -> error "Invalid JSON"
+      Just js -> case JSON.parseEither parseMeta js of
+        Left  e -> error $ "Cannot decode PErr: " ++ show e
+        Right x -> pure (AsMetaEncoded x)
 
 
 -- | Type class for decoding arguments that are passed on command line
@@ -81,6 +110,16 @@ instance (FlowArgument a, FlowArgument b) => FlowArgument (a,b) where
   parserFlowArguments = (,) <$> parserFlowArguments <*> parserFlowArguments
 instance (FlowArgument a, FlowArgument b, FlowArgument c) => FlowArgument (a,b,c) where
   parserFlowArguments = (,,) <$> parserFlowArguments <*> parserFlowArguments <*> parserFlowArguments
+
+-- | Derive instance of 'FlowArgument' for instance of 'FlowOutput'
+newtype AsFlowOutput a = AsFlowOutput a
+
+instance FlowOutput a => FlowArgument (AsFlowOutput a) where
+  parserFlowArguments = do
+    path <- parseSingleArgument
+    a    <- liftIO $ readOutput path
+    pure $ AsFlowOutput a
+
 
 
 ----------------------------------------------------------------
