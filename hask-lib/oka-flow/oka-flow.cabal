@@ -75,6 +75,11 @@ executable oka-flow
   main-is:          Main.hs
   build-depends:    base
                   , oka-flow
+                  , aeson
+                  , filepath
+                  , directory
+                  , containers
+                  , transformers
                   , optparse-applicative >= 0.18
 
 Test-suite oka-flow-tests
