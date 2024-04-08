@@ -100,11 +100,12 @@ cmdPrune = do
     let paths   = Path name <$> hashes
         revdeps = foldl' (addToClosure (invertMap pathset)) mempty paths
     --
-    let ppr p = putStrLn $ "Deleting: " ++ pprPath p
-    case yes of
-      False -> forM_ revdeps ppr
-      True  -> forM_ revdeps $ \p@(Path nm h) -> do
-        ppr p
+    let prefix = case yes of
+          True  -> "Deleting: "
+          False -> "Dry-run: "
+    forM_ revdeps $ \p@(Path nm h) -> do
+      putStrLn $ prefix ++ pprPath p
+      when yes $ do
         removeDirectoryRecursive (store </> nm </> h)
         
 
