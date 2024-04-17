@@ -7,6 +7,7 @@ module OKA.Flow.Tools
     metaFromStdin
     -- ** Output serialization
   , FlowOutput(..)
+  , FlowInput(..)
   , AsMetaEncoded(..)
     -- ** Command line arguments
   , FlowArgument(..)
@@ -58,12 +59,20 @@ metaFromStdin = do
     Right js -> evaluate $ decodeMetadata js
 
 
--- | Type class for serialization of output to store
+-- | Type class which describes how data type should be stored to
+--   output.
 class FlowOutput a where
   -- | Write output to the given directory.
-  writeOutput :: FilePath -> a -> IO ()
+  writeOutput :: FilePath -- ^ Output directory
+              -> a        -- ^ Value to be saved
+              -> IO ()
+
+-- | Type class which describes how data type should be read from
+--   output.
+class FlowInput a where
   -- | Read output from given directory
-  readOutput :: FilePath -> IO a
+  readOutput :: FilePath -- ^ Directory to read from
+             -> IO a
 
 
 -- | Save value as a JSON encoded with 'MetaEncoding' in @data.json@ file.
@@ -73,6 +82,8 @@ newtype AsMetaEncoded a = AsMetaEncoded a
 instance MetaEncoding a => FlowOutput (AsMetaEncoded a) where
   writeOutput dir (AsMetaEncoded a) =
     BL.writeFile (dir </> "data.json") $ JSON.encode $ metaToJson a
+
+instance MetaEncoding a => FlowInput (AsMetaEncoded a) where
   readOutput dir = do
     bs <- BL.readFile (dir </> "data.json")
     case JSON.decode bs of
@@ -114,7 +125,7 @@ instance (FlowArgument a, FlowArgument b, FlowArgument c) => FlowArgument (a,b,c
 -- | Derive instance of 'FlowArgument' for instance of 'FlowOutput'
 newtype AsFlowOutput a = AsFlowOutput a
 
-instance FlowOutput a => FlowArgument (AsFlowOutput a) where
+instance FlowInput a => FlowArgument (AsFlowOutput a) where
   parserFlowArguments = do
     path <- parseSingleArgument
     a    <- liftIO $ readOutput path
