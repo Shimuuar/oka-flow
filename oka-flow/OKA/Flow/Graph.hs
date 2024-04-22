@@ -25,6 +25,7 @@ module OKA.Flow.Graph
   , fidWantedL
   ) where
 
+import Control.Applicative
 import Control.Concurrent.STM       (STM)
 import Control.Lens
 import Control.Monad
@@ -97,6 +98,12 @@ instance MonadFail (Flow eff) where
 instance MonadState Metadata (Flow eff) where
   get   = Flow $ gets fst
   put m = Flow $ _1 .= m
+
+instance Semigroup a => Semigroup (Flow eff a) where
+  (<>) = liftA2 (<>)
+instance Monoid a => Monoid (Flow eff a) where
+  mempty = pure mempty
+
 
 -- | Add value which could be serialized to metadata to full medataset
 appendMeta :: IsMeta a => a -> Flow eff ()
