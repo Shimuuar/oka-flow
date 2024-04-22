@@ -1,0 +1,111 @@
+Cabal-Version:  3.0
+Name:           oka-flow
+Version:        0.1
+Synopsis:       Simple dataflow programming framework
+Description:
+  This is attempt to create simple dataflow framework for use in data
+  analysis. It should be simple to use 
+
+License:        BSD-3-Clause
+License-File:   LICENSE
+Author:         Aleksey Khudyakov <alexey.skladnoy@gmail.com>
+Maintainer:     Aleksey Khudyakov <alexey.skladnoy@gmail.com>
+Build-Type:     Simple
+
+common extensions
+  Default-extensions: DeriveFoldable
+                    , DeriveFunctor
+                    , DeriveTraversable
+                    , DerivingStrategies
+                    , DuplicateRecordFields
+                    , GeneralizedNewtypeDeriving
+                    , ImportQualifiedPost
+                    , LambdaCase
+                    , NoFieldSelectors
+                    , NumericUnderscores
+                    , OverloadedRecordDot
+                    , ScopedTypeVariables
+                    , TypeApplications
+                    , TypeOperators
+                    , TupleSections
+                
+Library
+  import:           extensions
+  Ghc-options:      -Wall -O2
+  Default-Language: Haskell2010
+  --
+  Build-Depends:    base                 >=4.12 && <5
+                  , oka-metadata
+                    --
+                  , aeson                >=2
+                  , async                >=2
+                  , base16-bytestring    >=1
+                  , bytestring
+                  , containers
+                  , cryptohash-sha1      >=0.11
+                  , directory
+                  , filepath
+                  , lens                 >=5
+                  , mtl
+                  , operational          >=0.2.4
+                  , process
+                  , stm                  >=2.4
+                  , temporary            >=1.3
+                  , text                 >=2
+                  , time
+                  , transformers
+                  , typed-process        >=0.2
+                  , unix
+                  , unordered-containers >=0.2
+                  , vector               >=0.13
+  Exposed-modules:
+        OKA.Flow
+        OKA.Flow.Graph
+        OKA.Flow.Run
+        OKA.Flow.Types
+        OKA.Flow.Tools
+        OKA.Flow.Std
+
+executable oka-flow
+  import:           extensions
+  Ghc-options:      -Wall -Wno-incomplete-uni-patterns
+  Default-Language: Haskell2010
+  --
+  hs-source-dirs:   exe
+  main-is:          Main.hs
+  build-depends:    base
+                  , oka-flow
+                  , aeson
+                  , filepath
+                  , directory
+                  , containers
+                  , transformers
+                  , optparse-applicative >= 0.18
+
+Test-suite oka-flow-tests
+  import:           extensions
+  type:             exitcode-stdio-1.0
+  Default-Language: Haskell2010
+  ghc-options:      -Wall -Wno-incomplete-uni-patterns
+  Build-Depends:    base
+                  , oka-flow
+                  , oka-metadata
+                    --
+                  , aeson
+                  , lens
+                  , containers
+                  , directory
+                  , temporary  >=1
+                  , transformers
+                  , filepath
+                  , operational
+                  , unordered-containers
+                  , lens
+                  , text
+                    --
+                  , tasty
+                  , tasty-quickcheck
+                  , tasty-hunit
+  hs-source-dirs: tests
+  main-is:        Main.hs
+  other-modules:  TM.Flow
