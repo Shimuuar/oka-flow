@@ -260,7 +260,7 @@ runJupyter
 --        notebooks concurrently
 runJupyter notebook meta param = do
   withParametersInEnv meta param $ \env_param -> do
-    withSystemTempDirectory "oka-juju" $ \tmp -> do
+    withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
       let dir_config  = tmp </> "config"
           dir_data    = tmp </> "data"
       createDirectory dir_config
