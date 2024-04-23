@@ -241,14 +241,13 @@ runJupyter notebook meta param = do
         file_meta   = tmp </> "meta.json"
     createDirectory dir_config
     createDirectory dir_data
-    cwd <- getCurrentDirectory
     BL.writeFile file_meta $ JSON.encode $ encodeMetadataDyn meta
     --
     env <- getEnvironment
     let run = setEnv ( ("JUPYTER_DATA_DIR",   dir_data)
                      : ("JUPYTER_CONFIG_DIR", dir_config)
                      : ("OKA_META", file_meta)
-                     : [ ("OKA_ARG_" ++ show i, cwd </> arg)
+                     : [ ("OKA_ARG_" ++ show i, arg)
                        | (i,arg) <- [1::Int ..] `zip` param
                        ]
                      ++ env
