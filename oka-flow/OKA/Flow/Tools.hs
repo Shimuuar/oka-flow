@@ -3,7 +3,7 @@
 -- |
 -- Tools for defining concrete workflows.
 module OKA.Flow.Tools
-  ( -- * Executable implementation
+  ( -- * Interaction with output
     metaFromStdin
     -- ** Output serialization
   , FlowOutput(..)
@@ -170,6 +170,7 @@ newtype LockLMDB = LockLMDB Int
   deriving stock (Show,Eq)
   deriving Resource via ResAsCounter LockLMDB
 
+-- | Number of CPU cores that flow is allowed to utilize.
 newtype LockCoreCPU = LockCoreCPU Int
   deriving stock (Show,Eq)
   deriving Resource via ResAsCounter LockCoreCPU
@@ -191,7 +192,8 @@ newtype LockMemGB = LockMemGB Int
 runExternalProcess
   :: FilePath   -- ^ Path to executable
   -> Metadata   -- ^ Metadata to pass to process
-  -> [FilePath] -- ^ Parameter list
+  -> [FilePath] -- ^ Parameter list. When called as part of a workflow
+                --   absolute paths will be passed.
   -> IO ()
 runExternalProcess exe meta args = do
   withProcessWait_ run $ \pid -> do
@@ -205,7 +207,8 @@ runExternalProcess exe meta args = do
 --   but don't pass metadata to it. Useful for phony targets.
 runExternalProcessNoMeta
   :: FilePath   -- ^ Path to executable
-  -> [FilePath] -- ^ Parameter list
+  -> [FilePath] -- ^ Parameter list. When called as part of a workflow
+                --   absolute paths will be passed.
   -> IO ()
 runExternalProcessNoMeta exe args = do
   withProcessWait_ run $ \pid -> do
@@ -230,7 +233,8 @@ softKill p = getPid (unsafeProcessHandle p) >>= \case
 runJupyter
   :: FilePath   -- ^ Notebook name
   -> Metadata   -- ^ Metadata
-  -> [FilePath] -- ^ Parameters
+  -> [FilePath] -- ^ Parameter list. When called as part of a workflow
+                --   absolute paths will be passed.
   -> IO ()
 -- FIXME: We need mutex although not badly. No reason to run two
 --        notebooks concurrently
