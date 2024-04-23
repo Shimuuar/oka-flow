@@ -185,7 +185,9 @@ newtype LockMemGB = LockMemGB Int
 -- Run external processes
 ----------------------------------------------------------------
 
--- | Run external process that adheres to standard calling conventions
+-- | Run external process that adheres to standard calling
+--   conventions: metadata is written to the stdin of a process and
+--   parameters are passed as command line parameters.
 runExternalProcess
   :: FilePath   -- ^ Path to executable
   -> Metadata   -- ^ Metadata to pass to process
@@ -200,6 +202,7 @@ runExternalProcess exe meta args = do
         $ proc exe args
 
 -- | Run external process that adheres to standard calling conventions
+--   but don't pass metadata to it. Useful for phony targets.
 runExternalProcessNoMeta
   :: FilePath   -- ^ Path to executable
   -> [FilePath] -- ^ Parameter list
