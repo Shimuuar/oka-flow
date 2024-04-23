@@ -18,7 +18,6 @@ module OKA.Flow.Tools
   , LockGHC(..)
   , compileProgramGHC
   , defGhcOpts
-  , LockLMDB(..)
   , LockCoreCPU(..)
   , LockMemGB(..)
     -- * External process
@@ -161,13 +160,6 @@ defGhcOpts = [ "-O2"
              , "-threaded"
              , "-with-rtsopts=-T -A8m"
              ]
-
-
-
--- | We want to restrict number of simultaneous programs which connect to DB
-newtype LockLMDB = LockLMDB Int
-  deriving stock (Show,Eq)
-  deriving Resource via ResAsCounter LockLMDB
 
 -- | Number of CPU cores that flow is allowed to utilize.
 newtype LockCoreCPU = LockCoreCPU Int
