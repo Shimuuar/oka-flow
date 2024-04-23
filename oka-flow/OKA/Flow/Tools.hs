@@ -24,6 +24,7 @@ module OKA.Flow.Tools
     -- * External process
   , runExternalProcess
   , runExternalProcessNoMeta
+  , withParametersInEnv
   , runJupyter
   ) where
 
@@ -229,6 +230,25 @@ softKill p = getPid (unsafeProcessHandle p) >>= \case
               <|> (void $ waitExitCodeSTM p)
 
 
+-- | Pass metadata parameters in the environment. Metadata is written
+--   in temporary file which is deleted when callback returns.
+--
+--   Path to JSON encoded metadata will be passed in @OKA_META@
+--   variable, absolute paths to parameters will be passed in
+--   @OKA_ARG_#@ variables.
+withParametersInEnv
+  :: Metadata                    -- ^ Metadata
+  -> [FilePath]                  -- ^ Parameters
+  -> ([(String,String)] -> IO a) -- ^ Callback
+  -> IO a
+withParametersInEnv meta param action = do
+  withSystemTempFile "oka-flow-metadata-" $ \file_meta h -> do
+    BL.hPutStr h $ JSON.encode $ encodeMetadataDyn meta
+    action $ ("OKA_META", file_meta)
+           : [ ("OKA_ARG_" ++ show i, arg)
+             | (i,arg) <- [1::Int ..] `zip` param
+             ]
+
 -- | Run jupyter notebook as an external process
 runJupyter
   :: FilePath   -- ^ Notebook name
@@ -239,24 +259,17 @@ runJupyter
 -- FIXME: We need mutex although not badly. No reason to run two
 --        notebooks concurrently
 runJupyter notebook meta param = do
-  withSystemTempDirectory "oka-juju" $ \tmp -> do
-    let dir_config  = tmp </> "config"
-        dir_data    = tmp </> "data"
-        file_meta   = tmp </> "meta.json"
-    createDirectory dir_config
-    createDirectory dir_data
-    BL.writeFile file_meta $ JSON.encode $ encodeMetadataDyn meta
-    --
-    env <- getEnvironment
-    let run = setEnv ( ("JUPYTER_DATA_DIR",   dir_data)
-                     : ("JUPYTER_CONFIG_DIR", dir_config)
-                     : ("OKA_META", file_meta)
-                     : [ ("OKA_ARG_" ++ show i, arg)
-                       | (i,arg) <- [1::Int ..] `zip` param
-                       ]
-                     ++ env
-                     )
-            $ proc "jupyter" [ "notebook" , notebook
-                             , "--browser", "chromium"
-                             ]
-    withProcessWait_ run $ \_ -> pure ()
+  withParametersInEnv meta param $ \env_param -> do
+    withSystemTempDirectory "oka-juju" $ \tmp -> do
+      let dir_config  = tmp </> "config"
+          dir_data    = tmp </> "data"
+      createDirectory dir_config
+      createDirectory dir_data
+      env <- getEnvironment
+      let run = setEnv ([ ("JUPYTER_DATA_DIR",   dir_data)
+                        , ("JUPYTER_CONFIG_DIR", dir_config)
+                        ] ++ env_param ++ env)
+              $ proc "jupyter" [ "notebook" , notebook
+                               , "--browser", "chromium"
+                               ]
+      withProcessWait_ run $ \_ -> pure ()
