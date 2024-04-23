@@ -25,7 +25,6 @@ module OKA.Flow.Tools
   , runExternalProcess
   , runExternalProcessNoMeta
   , withParametersInEnv
-  , runJupyter
   ) where
 
 import Control.Applicative
@@ -39,10 +38,9 @@ import Data.Aeson.Types             qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
 import Data.Functor
 import System.Process.Typed
-import System.Directory
 import System.FilePath              ((</>))
 import System.IO.Temp
-import System.Environment           (getEnvironment, getArgs)
+import System.Environment           (getArgs)
 import System.Posix.Signals         (signalProcess, sigINT)
 import System.Process               (getPid)
 import OKA.Metadata
@@ -248,28 +246,3 @@ withParametersInEnv meta param action = do
            : [ ("OKA_ARG_" ++ show i, arg)
              | (i,arg) <- [1::Int ..] `zip` param
              ]
-
--- | Run jupyter notebook as an external process
-runJupyter
-  :: FilePath   -- ^ Notebook name
-  -> Metadata   -- ^ Metadata
-  -> [FilePath] -- ^ Parameter list. When called as part of a workflow
-                --   absolute paths will be passed.
-  -> IO ()
--- FIXME: We need mutex although not badly. No reason to run two
---        notebooks concurrently
-runJupyter notebook meta param = do
-  withParametersInEnv meta param $ \env_param -> do
-    withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
-      let dir_config  = tmp </> "config"
-          dir_data    = tmp </> "data"
-      createDirectory dir_config
-      createDirectory dir_data
-      env <- getEnvironment
-      let run = setEnv ([ ("JUPYTER_DATA_DIR",   dir_data)
-                        , ("JUPYTER_CONFIG_DIR", dir_config)
-                        ] ++ env_param ++ env)
-              $ proc "jupyter" [ "notebook" , notebook
-                               , "--browser", "chromium"
-                               ]
-      withProcessWait_ run $ \_ -> pure ()

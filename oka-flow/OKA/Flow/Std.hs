@@ -4,12 +4,16 @@ module OKA.Flow.Std
   ( -- * Saved metadata
     SavedMeta(..)
   , stdSaveMeta
+  , stdJupyter
   ) where
 
 import Control.Monad.IO.Class
 import Control.Monad.State.Strict
 import System.FilePath            ((</>))
-import System.Directory           (createFileLink)
+import System.Directory           (createFileLink,createDirectory)
+import System.Process.Typed
+import System.IO.Temp
+import System.Environment         (getEnvironment)
 
 import OKA.Flow.Tools
 import OKA.Flow
@@ -40,3 +44,27 @@ stdSaveMeta a = scopeMeta $ do
         createFileLink "meta.json" (out </> "saved.json")
     }) ()
 
+-- | Run jupyter notebook. Metadata and parameters are passed in
+--   environment variables.
+stdJupyter
+  :: (ResultSet p)
+  => FilePath   -- ^ Notebook name
+  -> p          -- ^ Parameters to pass to notebook.
+  -> Flow eff ()
+-- FIXME: We need mutex although not badly. No reason to run two
+--        notebooks concurrently
+stdJupyter notebook = liftPhony () $ \_ meta param -> do
+  withParametersInEnv meta param $ \env_param -> do
+    withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
+      let dir_config  = tmp </> "config"
+          dir_data    = tmp </> "data"
+      createDirectory dir_config
+      createDirectory dir_data
+      env <- getEnvironment
+      let run = setEnv ([ ("JUPYTER_DATA_DIR",   dir_data)
+                        , ("JUPYTER_CONFIG_DIR", dir_config)
+                        ] ++ env_param ++ env)
+              $ proc "jupyter" [ "notebook" , notebook
+                               , "--browser", "chromium"
+                               ]
+      withProcessWait_ run $ \_ -> pure ()
