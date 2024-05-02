@@ -197,7 +197,7 @@ flowProduceInt
 flowProduceInt = do
   obs <- newObserve
   pure ( obs
-       , liftWorkflow () $ Workflow Action
+       , liftWorkflow () $ Action
          { name = "produce-" ++ (symbolVal (Proxy @name))
          , run  = \_ meta [] out -> do
              let n = meta ^. metadata @(CounterMeta name) . to (.count)
@@ -210,7 +210,7 @@ flowSquare :: IO (Observe Int, Result Int -> Flow eff (Result Int))
 flowSquare = do
   obs <- newObserve
   pure ( obs
-       , liftWorkflow () $ Workflow Action
+       , liftWorkflow () $ Action
          { name = "square"
          , run  = \_ _ [p] out -> do
              n <- read @Int <$> readFile (p </> "out.txt")
@@ -220,11 +220,11 @@ flowSquare = do
          }
        )
 
-flowPhony :: IO (ObsPhony Int, Result Int -> Flow eff (Result ()))
+flowPhony :: IO (ObsPhony Int, Result Int -> Flow eff ())
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
-       , liftWorkflow () $ Phony $ \_ _ [p] -> do
+       , liftPhony () $ \_ _ [p] -> do
            n <- read @Int <$> readFile (p </> "out.txt")
            let n' = n * n
            saveObsPhony obs n'
