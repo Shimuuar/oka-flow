@@ -55,7 +55,7 @@ stdJupyter
   -> Flow eff ()
 -- FIXME: We need mutex although not badly. No reason to run two
 --        notebooks concurrently
-stdJupyter notebook = liftPhony () $ \_ meta param -> do
+stdJupyter notebook = basicLiftPhony () $ \_ meta param -> do
   withParametersInEnv meta param $ \env_param -> do
     withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
       let dir_config  = tmp </> "config"

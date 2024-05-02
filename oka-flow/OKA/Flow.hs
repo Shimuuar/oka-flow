@@ -33,6 +33,7 @@ module OKA.Flow
   , ResultSet(..)
   , want
   , liftWorkflow
+  , basicLiftPhony
   , liftPhony
   , liftEff
     -- * Resources
@@ -55,6 +56,8 @@ import OKA.Metadata
 import OKA.Flow.Graph
 import OKA.Flow.Types
 import OKA.Flow.Run
+import OKA.Flow.Tools
+
 
 ----------------------------------------------------------------
 -- Flow monad
@@ -105,16 +108,28 @@ liftWorkflow res action p = basicLiftWorkflow res (Workflow action) p
 
 
 -- | Lift phony workflow (not checked)
-liftPhony
+basicLiftPhony
   :: (ResultSet params, Resource res)
   => res
-     -- ^ Resources required by
+     -- ^ Resources required by workflow
   -> (ResourceSet -> Metadata -> [FilePath] -> IO ())
      -- ^ Action to execute
   -> params
      -- ^ Parameters to pass to workflow
   -> Flow eff ()
-liftPhony res exe p = want =<< basicLiftWorkflow res (Phony exe) p
+basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony exe) p
+
+-- | Lift phony action using standard tools
+liftPhony
+  :: (Resource res, FlowArgument args)
+  => res
+     -- ^ Resources required by workflow
+  -> (Metadata -> args -> IO ())
+  -> AsRes args
+  -> Flow eff ()
+liftPhony res exe = basicLiftPhony res $ \_ meta args -> do
+  a <- runFlowArguments args
+  exe meta a
 
 -- | Lift effect
 liftEff :: eff a -> Flow eff a

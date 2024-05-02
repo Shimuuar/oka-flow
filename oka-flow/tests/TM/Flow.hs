@@ -224,7 +224,7 @@ flowPhony :: IO (ObsPhony Int, Result Int -> Flow eff ())
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
-       , liftPhony () $ \_ _ [p] -> do
+       , basicLiftPhony () $ \_ _ [p] -> do
            n <- read @Int <$> readFile (p </> "out.txt")
            let n' = n * n
            saveObsPhony obs n'

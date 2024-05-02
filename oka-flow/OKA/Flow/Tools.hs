@@ -15,7 +15,8 @@ module OKA.Flow.Tools
     -- ** Command line arguments
   , ArgumentParser
   , FlowArgument(..)
-  , parseFlowArguments
+  , runFlowArguments
+  , runFlowArgumentsFromEnv
   , parseSingleArgument
   , AsFlowOutput(..)
     -- * Resources
@@ -114,15 +115,20 @@ class (ResultSet (AsRes a)) => FlowArgument a where
   -- | Parse value from arguments
   parserFlowArguments :: ArgumentParser a
 
+runFlowArguments :: FlowArgument a => [FilePath] -> IO a
+runFlowArguments paths = parserFlowArguments.get paths >>= \case
+  Left  e      -> error $ "runFlowArguments: " ++ e
+  Right (a,[]) -> pure a
+  Right (_,_)  -> error "runFlowArguments: not all inputs are consumed"
+
+
 -- | Parse command line arguments following flow's conventions: first
 --   one is output directory rest are arguments.
-parseFlowArguments :: FlowArgument a => IO (FilePath,a)
-parseFlowArguments = getArgs >>= \case
-  [] -> error "parseFlowArguments: No output directory provided"
-  (out:paths) -> parserFlowArguments.get paths >>= \case
-    Left  e      -> error $ "parseFlowArguments: " ++ e
-    Right (a,[]) -> pure (out,a)
-    Right (_,_)  -> error "parseFlowArguments: not all inputs are consumed"
+runFlowArgumentsFromEnv :: FlowArgument a => IO (FilePath,a)
+runFlowArgumentsFromEnv = getArgs >>= \case
+  [] -> error "runFlowArgumentsFromEnv: No output directory provided"
+  (out:paths) -> do a <- runFlowArguments paths
+                    pure (out,a)
 
 -- | Parse single input.
 parseSingleArgument :: ArgumentParser FilePath
@@ -158,7 +164,7 @@ instance FlowInput a => FlowArgument (AsFlowOutput a) where
 ----------------------------------------------------------------
 
 -- | We want to have one concurrent build. This data type provides mutex
-data LockGHC = LockGHC 
+data LockGHC = LockGHC
   deriving stock (Show,Eq)
   deriving Resource via ResAsMutex LockGHC
 
