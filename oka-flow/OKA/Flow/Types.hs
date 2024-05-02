@@ -16,6 +16,8 @@ module OKA.Flow.Types
   , ResourceSet
   , Resource(..)
   , withResources
+  , WrappedResource
+  , wrapResource
     -- ** Deriving
   , ResAsMutex(..)
   , ResAsCounter(..)
@@ -128,7 +130,6 @@ withResources res r = bracket_ ini fini where
   ini  = atomically $ requestResource res r
   fini = atomically $ releaseResource res r
 
-
 -- | Primitive for adding resource to set of resources
 basicAddResource
   :: forall a. Typeable a
@@ -171,6 +172,27 @@ class Typeable a => Resource a where
   -- | Release resource to set. Should not block
   releaseResource :: ResourceSet -> a -> STM ()
 
+
+-- | Existential wrapper for resource request.
+newtype WrappedResource = WrappedResource [SomeR]
+
+instance Resource WrappedResource where
+  createResource  (WrappedResource as) r = foldM (flip createResource) r as
+  requestResource r (WrappedResource as) = forM_ as $ requestResource r
+  releaseResource r (WrappedResource as) = forM_ as $ releaseResource r
+
+-- | Convert resource request into existential wrapper
+wrapResource :: Resource a => a -> WrappedResource
+wrapResource a = WrappedResource [SomeR a]
+
+
+data SomeR where
+  SomeR :: (Resource a) => a -> SomeR
+
+instance Resource SomeR where
+  createResource  (SomeR a) r = createResource  a r
+  requestResource r (SomeR a) = requestResource r a
+  releaseResource r (SomeR a) = releaseResource r a
 
 instance Resource () where
   createResource      = pure pure
