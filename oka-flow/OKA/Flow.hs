@@ -64,16 +64,13 @@ import OKA.Flow.Run
 want :: ResultSet a => a -> Flow eff ()
 want a = Flow $ _2 . flowTgtL %= (<> Set.fromList (toResultSet a))
 
--- | Create new primitive flow.
---
---   This function does not provide any type safety by itself
-liftWorkflow
+basicLiftWorkflow
   :: (ResultSet params, Resource res)
   => res
   -> Workflow -- ^ Executioner.
   -> params   -- ^ Parameters
   -> Flow eff (Result a)
-liftWorkflow resource exe p = Flow $ do
+basicLiftWorkflow resource exe p = Flow $ do
   (meta,gr) <- get
   -- Allocate new
   let fid = case Map.lookupMax gr.graph of
@@ -95,14 +92,29 @@ liftWorkflow resource exe p = Flow $ do
     }
   return $ Result fid
 
+-- | Create new primitive workflow.
+--
+--   This function does not provide any type safety by itself!
+liftWorkflow
+  :: (ResultSet params, Resource res)
+  => res    -- ^ Resources required by workflow
+  -> Action -- ^ Action to execute
+  -> params -- ^ Parameters
+  -> Flow eff (Result a)
+liftWorkflow res action p = basicLiftWorkflow res (Workflow action) p
+
+
 -- | Lift phony workflow (not checked)
 liftPhony
   :: (ResultSet params, Resource res)
   => res
+     -- ^ Resources required by
   -> (ResourceSet -> Metadata -> [FilePath] -> IO ())
+     -- ^ Action to execute
   -> params
+     -- ^ Parameters to pass to workflow
   -> Flow eff ()
-liftPhony res exe p = want =<< liftWorkflow res (Phony exe) p
+liftPhony res exe p = want =<< basicLiftWorkflow res (Phony exe) p
 
 -- | Lift effect
 liftEff :: eff a -> Flow eff a

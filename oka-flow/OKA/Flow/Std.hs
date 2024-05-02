@@ -36,13 +36,13 @@ instance (IsMeta a) => FlowArgument (SavedMeta a) where
 stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
 stdSaveMeta a = scopeMeta $ do
   put $ toMetadata a
-  liftWorkflow () (Workflow Action
+  liftWorkflow () Action
     { name = "std.SavedMeta"
-    , run  = \_ _meta _args out -> do
-        case _args of [] -> pure ()
-                      _  -> error "stdSaveMeta does not take any arguments"
+    , run  = \_ _meta args out -> do
+        case args of [] -> pure ()
+                     _  -> error "stdSaveMeta does not take any arguments"
         createFileLink "meta.json" (out </> "saved.json")
-    }) ()
+    } ()
 
 -- | Run jupyter notebook. Metadata and parameters are passed in
 --   environment variables.
