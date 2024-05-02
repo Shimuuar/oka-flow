@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 -- |
 -- Standard workflows
 module OKA.Flow.Std
@@ -28,6 +29,7 @@ import OKA.Metadata
 data SavedMeta a = SavedMeta a
 
 instance (IsMeta a) => FlowArgument (SavedMeta a) where
+  type AsRes (SavedMeta a) = Result (SavedMeta a)
   parserFlowArguments = do
     path <- parseSingleArgument
     liftIO $ SavedMeta <$> readMetadata (path </> "saved.json")

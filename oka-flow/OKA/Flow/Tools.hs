@@ -1,6 +1,8 @@
-{-# LANGUAGE DerivingVia      #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RoleAnnotations  #-}
+{-# LANGUAGE DerivingVia          #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE RoleAnnotations      #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE UndecidableInstances #-}
 -- |
 -- Tools for defining concrete workflows.
 module OKA.Flow.Tools
@@ -104,7 +106,11 @@ newtype ArgumentParser a = ArgumentParser
 
 -- | Type class for decoding arguments that are passed on command line
 --   haskell data types.
-class FlowArgument a where
+class (ResultSet (AsRes a)) => FlowArgument a where
+  -- | Representation of value of type @a@ as set of @Result@s. It's
+  --   expected that when passed to workflow value of this type should
+  --   parse successfully.
+  type AsRes a
   -- | Parse value from arguments
   parserFlowArguments :: ArgumentParser a
 
@@ -126,16 +132,20 @@ parseSingleArgument = do
     s:ss -> s <$ put ss
 
 instance FlowArgument () where
+  type AsRes () = ()
   parserFlowArguments = pure ()
 instance (FlowArgument a, FlowArgument b) => FlowArgument (a,b) where
+  type AsRes (a,b) = (AsRes a, AsRes b)
   parserFlowArguments = (,) <$> parserFlowArguments <*> parserFlowArguments
 instance (FlowArgument a, FlowArgument b, FlowArgument c) => FlowArgument (a,b,c) where
+  type AsRes (a,b,c) = (AsRes a, AsRes b, AsRes c)
   parserFlowArguments = (,,) <$> parserFlowArguments <*> parserFlowArguments <*> parserFlowArguments
 
 -- | Derive instance of 'FlowArgument' for instance of 'FlowOutput'
 newtype AsFlowOutput a = AsFlowOutput a
 
 instance FlowInput a => FlowArgument (AsFlowOutput a) where
+  type AsRes (AsFlowOutput a) = Result a
   parserFlowArguments = do
     path <- parseSingleArgument
     a    <- liftIO $ readOutput path
