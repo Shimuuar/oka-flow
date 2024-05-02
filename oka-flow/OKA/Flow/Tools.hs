@@ -1,5 +1,6 @@
 {-# LANGUAGE DerivingVia      #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RoleAnnotations  #-}
 -- |
 -- Tools for defining concrete workflows.
 module OKA.Flow.Tools
@@ -10,6 +11,7 @@ module OKA.Flow.Tools
   , FlowInput(..)
   , AsMetaEncoded(..)
     -- ** Command line arguments
+  , ArgumentParser
   , FlowArgument(..)
   , parseFlowArguments
   , parseSingleArgument
@@ -91,23 +93,33 @@ instance MetaEncoding a => FlowInput (AsMetaEncoded a) where
         Right x -> pure (AsMetaEncoded x)
 
 
+type role ArgumentParser representational
+
+-- | Monad for parsing command line arguments
+newtype ArgumentParser a = ArgumentParser
+  { get :: [FilePath] -> IO (Either String (a, [FilePath]))
+  }
+  deriving (Functor,Applicative,Monad,MonadIO,MonadError String,MonadState [FilePath])
+       via StateT [FilePath] (ExceptT String IO)
+
 -- | Type class for decoding arguments that are passed on command line
 --   haskell data types.
 class FlowArgument a where
-  parserFlowArguments :: StateT [FilePath] (ExceptT String IO) a
+  -- | Parse value from arguments
+  parserFlowArguments :: ArgumentParser a
 
 -- | Parse command line arguments following flow's conventions: first
 --   one is output directory rest are arguments.
 parseFlowArguments :: FlowArgument a => IO (FilePath,a)
 parseFlowArguments = getArgs >>= \case
   [] -> error "parseFlowArguments: No output directory provided"
-  (out:paths) -> runExceptT (runStateT parserFlowArguments paths) >>= \case
+  (out:paths) -> parserFlowArguments.get paths >>= \case
     Left  e      -> error $ "parseFlowArguments: " ++ e
     Right (a,[]) -> pure (out,a)
     Right (_,_)  -> error "parseFlowArguments: not all inputs are consumed"
 
 -- | Parse single input.
-parseSingleArgument :: StateT [FilePath] (ExceptT String IO) FilePath
+parseSingleArgument :: ArgumentParser FilePath
 parseSingleArgument = do
   get >>= \case
     []   -> throwError "Not enough inputs"
