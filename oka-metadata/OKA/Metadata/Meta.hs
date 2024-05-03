@@ -197,11 +197,12 @@ decodeMetadataEither json =
   case (metaTree @a).get of
     Err err  -> Left $ keyClashesMsg @a err
     OK  tree -> do
-      m <- JSON.parseEither (parseTree tree) json
+      m <- JSON.parseEither (annotate . parseTree tree) json
       case fromMetadata m of
         Just a  -> pure a
         Nothing -> error "Invalid conversion. IsMeta is bugged"
   where
+    annotate = JSON.prependFailure ("\nFailed to decode metadata " ++ show (typeOf (undefined :: a)) ++ "\n")
     parseTree :: Spine (Entry a) -> JSON.Value -> JSON.Parser Metadata
     parseTree (Leaf   leaf) js = leaf.parser js
     parseTree (Branch kmap) js =
