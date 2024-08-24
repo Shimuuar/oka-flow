@@ -13,14 +13,16 @@ Build-Type:     Simple
 
 Library
   Ghc-options:        -Wall -O2
-  Default-Language:   Haskell2010
-  Default-Extensions: GHC2021
-                      NoPolyKinds
+  Default-Language:   GHC2021
+  Default-Extensions: NoPolyKinds
                       DataKinds
                       DerivingStrategies
                       DerivingVia
                       LambdaCase
                       ViewPatterns
+                      NoFieldSelectors
+                      DuplicateRecordFields
+                      OverloadedRecordDot
   --
   Build-Depends:    base                >=4.12 && <5
                   , aeson               >=2

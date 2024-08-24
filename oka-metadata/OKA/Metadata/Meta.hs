@@ -1,7 +1,4 @@
 {-# LANGUAGE AllowAmbiguousTypes   #-}
-{-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE NoFieldSelectors      #-}
-{-# LANGUAGE OverloadedRecordDot   #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE RecordWildCards       #-}
 {-# LANGUAGE UndecidableInstances  #-}
