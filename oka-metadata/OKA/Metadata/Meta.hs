@@ -30,6 +30,8 @@ module OKA.Metadata.Meta
   , encodeMetadata
   , decodeMetadataEither
   , decodeMetadata
+    -- * Exceptions
+  , MetadataError(..)
     -- ** Deriving via
   , AsAeson(..)
   , AsReadShow(..)
@@ -38,6 +40,7 @@ module OKA.Metadata.Meta
   ) where
 
 import Control.Lens
+import Control.Exception
 
 import Data.Aeson                 ((.:))
 import Data.Aeson                 qualified as JSON
@@ -56,6 +59,7 @@ import Data.Monoid                (Dual(..))
 import Data.Typeable
 import Data.Text                  (Text)
 import Data.Text                  qualified as T
+import Data.Yaml                  qualified as YAML
 import GHC.TypeLits
 
 import OKA.Metadata.Encoding
@@ -134,6 +138,29 @@ class Typeable a => IsMeta a where
   metadataKeySet :: Set TypeRep
 
 
+----------------------------------------------------------------
+-- Exceptions
+----------------------------------------------------------------
+
+-- | Errors in metadata processing
+data MetadataError
+  = KeyClashes [[Text]]
+  | JsonError  String
+  | YamlError  YAML.ParseException
+
+instance Show MetadataError where
+  show = \case
+    KeyClashes err -> unlines
+      $ ("[MetadataError] Key clashes when decoding metadata")
+      : [ "  - " ++ T.unpack (T.intercalate "." e)
+        | e <- err
+        ]
+    JsonError s -> s
+    YamlError e -> show e
+
+instance Exception MetadataError
+
+
 
 ----------------------------------------------------------------
 -- JSON encoding of metadata
@@ -142,17 +169,17 @@ class Typeable a => IsMeta a where
 -- | Encode dynamic dictionary. Throw exception in case there's key
 --   overlap.
 encodeMetadataDyn :: Metadata -> JSON.Value
-encodeMetadataDyn = either error id . encodeMetadataDynEither
+encodeMetadataDyn = either throw id . encodeMetadataDynEither
 
 -- | Encode dynamic dictionary. Returns @Left@ in case there's key
 --   overlap.
-encodeMetadataDynEither :: Metadata -> Either String JSON.Value
+encodeMetadataDynEither :: Metadata -> Either MetadataError JSON.Value
 encodeMetadataDynEither (Metadata m) = do
   onErr (sequenceA entries) >>= \case
     []   -> Right $ JSON.Object mempty
     s:ss -> asJSON <$> onErr (reduce s ss)
   where
-    onErr (Err err) = Left $ keyClashesMsg @Metadata err
+    onErr (Err err) = Left $ KeyClashes err
     onErr (OK  a  ) = Right a
     --
     entries = [ fmap (\e -> e.encoder a) <$> metaTree.get
@@ -170,12 +197,12 @@ encodeMetadataDynEither (Metadata m) = do
 
 -- | Encode metadata as JSON value. Will throw error in case of key clash
 encodeMetadata :: forall a. IsMeta a => a -> JSON.Value
-encodeMetadata = either error id . encodeMetadataEither
+encodeMetadata = either throw id . encodeMetadataEither
 
 -- | Encode metadata as JSON value. Returns @Left@ in case of key clash.
-encodeMetadataEither :: forall a. IsMeta a => a -> Either String JSON.Value
+encodeMetadataEither :: forall a. IsMeta a => a -> Either MetadataError JSON.Value
 encodeMetadataEither a = case metaTree.get of
-  Err err  -> Left  $ keyClashesMsg @a err
+  Err err  -> Left  $ KeyClashes err
   OK  tree -> Right $ reduce tree
   where
     reduce (Leaf Entry{..}) = encoder a
@@ -184,14 +211,14 @@ encodeMetadataEither a = case metaTree.get of
 
 -- | Decode metadata from JSON value
 decodeMetadata :: forall a. IsMeta a => JSON.Value -> a
-decodeMetadata = either error id . decodeMetadataEither
+decodeMetadata = either throw id . decodeMetadataEither
 
 -- | Decode metadata from JSON value
-decodeMetadataEither :: forall a. IsMeta a => JSON.Value -> Either String a
+decodeMetadataEither :: forall a. IsMeta a => JSON.Value -> Either MetadataError a
 decodeMetadataEither json =
   case (metaTree @a).get of
-    Err err  -> Left $ keyClashesMsg @a err
-    OK  tree -> do
+    Err err  -> Left $ KeyClashes err
+    OK  tree -> bimap JsonError id $ do
       m <- JSON.parseEither (annotate . parseTree tree) json
       case fromMetadata m of
         Just a  -> pure a

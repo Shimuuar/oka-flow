@@ -44,7 +44,7 @@ module OKA.Metadata
   , AsMeta(..)
   ) where
 
-import Control.Exception                 (throwIO)
+import Control.Exception          (throw,throwIO)
 import Control.Monad.IO.Class
 import Control.Lens
 
@@ -56,10 +56,10 @@ import OKA.Metadata.Meta
 
 
 -- | Read metadata described by given data type from file.
-readMetadataEither :: forall a m. (IsMeta a, MonadIO m) => FilePath -> m (Either String a)
+readMetadataEither :: forall a m. (IsMeta a, MonadIO m) => FilePath -> m (Either MetadataError a)
 readMetadataEither path = liftIO $ do
   YAML.decodeFileEither path <&> \case
-    Left  err  -> Left $ show err
+    Left  err  -> Left $ YamlError err
     Right json -> decodeMetadataEither json
 
 -- | Read metadata described by given data type from file.
@@ -68,5 +68,5 @@ readMetadata path = liftIO $ do
   YAML.decodeFileEither path >>= \case
     Left  err  -> throwIO err
     Right json -> case decodeMetadataEither json of
-      Left  err  -> error err
+      Left  err  -> throw err
       Right a    -> pure a
