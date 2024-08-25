@@ -30,8 +30,6 @@ module OKA.Metadata.Meta
   , encodeMetadata
   , decodeMetadataEither
   , decodeMetadata
-    -- * JSON serialization
-  , MetaEncoding(..)
     -- ** Deriving via
   , AsAeson(..)
   , AsReadShow(..)
