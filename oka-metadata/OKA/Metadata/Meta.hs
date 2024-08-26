@@ -21,7 +21,6 @@ module OKA.Metadata.Meta
   , primToMetadata
   , primFromMetadata
   , singletonMetaTree
-  , (<<>>)
   , MetaPath(..)
     -- ** Encoding & decoding
   , encodeMetadataDynEither
@@ -48,10 +47,11 @@ import Data.Aeson.KeyMap          qualified as KM
 import Data.Aeson.Key             (fromText,toText)
 import Data.Aeson.Types           qualified as JSON
 import Data.Coerce
-import Data.These
 import Data.Foldable              (toList)
 import Data.Functor.Contravariant
 import Data.Map.Strict            qualified as Map
+-- import Data.List.NonEmpty         qualified as NE
+import Data.List.NonEmpty         (NonEmpty(..))
 import Data.Map.Strict            (Map)
 import Data.Set                   (Set)
 import Data.Set                   qualified as Set
@@ -144,7 +144,7 @@ class Typeable a => IsMeta a where
 
 -- | Errors in metadata processing
 data MetadataError
-  = KeyClashes [[Text]]
+  = KeyClashes [(TypeRep, [Text])]
   | JsonError  String
   | YamlError  YAML.ParseException
 
@@ -152,11 +152,11 @@ instance Show MetadataError where
   show = \case
     KeyClashes err -> unlines
       $ ("[MetadataError] Key clashes when decoding metadata")
-      : [ "  - " ++ T.unpack (T.intercalate "." e)
-        | e <- err
+      : [ "  - " ++ T.unpack (T.intercalate "." e) ++ "["++show ty++"]"
+        | (ty,e) <- err
         ]
-    JsonError s -> s
-    YamlError e -> show e
+    JsonError s -> "[MetadataError]\n" ++ s
+    YamlError e -> "[MetadataError]\n" ++ show e
 
 instance Exception MetadataError
 
@@ -174,26 +174,14 @@ encodeMetadataDyn = either throw id . encodeMetadataDynEither
 -- | Encode dynamic dictionary. Returns @Left@ in case there's key
 --   overlap.
 encodeMetadataDynEither :: Metadata -> Either MetadataError JSON.Value
-encodeMetadataDynEither (Metadata m) = do
-  onErr (sequenceA entries) >>= \case
-    []   -> Right $ JSON.Object mempty
-    s:ss -> asJSON <$> onErr (reduce s ss)
+encodeMetadataDynEither (Metadata m) =
+  case checkForClashes $ mconcat entries of
+    Err err -> Left  $ KeyClashes [(ty, path) | ((ty,_),path) <- err]
+    OK  xs  -> Right $ encodeTreeWith snd xs
   where
-    onErr (Err err) = Left $ KeyClashes err
-    onErr (OK  a  ) = Right a
-    --
-    entries = [ fmap (\e -> e.encoder a) <$> metaTree.get
+    entries = [ (\e -> (e.tyRep, e.encoder a)) <$> metaTree.get
               | MetaEntry a <- toList m
               ]
-    --
-    reduce s0 []     = OK s0
-    reduce s0 (s:ss) = case zipSpine s0 s of
-      Err err -> Err err
-      OK  s'  -> reduce s' ss
-    --
-    asJSON (Leaf   json) = json
-    asJSON (Branch mp)   = JSON.Object $ asJSON <$> mp
-
 
 -- | Encode metadata as JSON value. Will throw error in case of key clash
 encodeMetadata :: forall a. IsMeta a => a -> JSON.Value
@@ -201,12 +189,9 @@ encodeMetadata = either throw id . encodeMetadataEither
 
 -- | Encode metadata as JSON value. Returns @Left@ in case of key clash.
 encodeMetadataEither :: forall a. IsMeta a => a -> Either MetadataError JSON.Value
-encodeMetadataEither a = case metaTree.get of
-  Err err  -> Left  $ KeyClashes err
-  OK  tree -> Right $ reduce tree
-  where
-    reduce (Leaf Entry{..}) = encoder a
-    reduce (Branch m)       = JSON.Object $ reduce <$> m
+encodeMetadataEither a = case checkForClashes metaTree.get of
+  Err err  -> Left  $ KeyClashes [(e.tyRep, path) | (e,path) <- err]
+  OK  tree -> Right $ encodeTreeWith (\e -> e.encoder a) tree
 
 
 -- | Decode metadata from JSON value
@@ -216,84 +201,98 @@ decodeMetadata = either throw id . decodeMetadataEither
 -- | Decode metadata from JSON value
 decodeMetadataEither :: forall a. IsMeta a => JSON.Value -> Either MetadataError a
 decodeMetadataEither json =
-  case (metaTree @a).get of
-    Err err  -> Left $ KeyClashes err
+  case checkForClashes (metaTree @a).get of
+    Err err  -> Left $ KeyClashes [(e.tyRep, path) | (e,path) <- err]
     OK  tree -> bimap JsonError id $ do
-      m <- JSON.parseEither (annotate . parseTree tree) json
+      m <- JSON.parseEither (annotate . decodeTree tree) json
       case fromMetadata m of
         Just a  -> pure a
         Nothing -> error "Invalid conversion. IsMeta is bugged"
   where
     annotate = JSON.prependFailure ("\nFailed to decode metadata " ++ show (typeOf (undefined :: a)) ++ "\n")
-    parseTree :: Spine (Entry a) -> JSON.Value -> JSON.Parser Metadata
-    parseTree (Leaf   leaf) js = leaf.parser js
-    parseTree (Branch kmap) js =
-      mconcat <$> sequence [ descend k (parseTree tr) js
-                           | (k,tr) <- KM.toList kmap
-                           ]
 
-descend :: KM.Key
-        -> (JSON.Value -> JSON.Parser a)
-        -> (JSON.Value -> JSON.Parser a)
-descend k parser
-  = JSON.prependFailure (" - " ++ T.unpack (toText k) ++ "\n")
-  . metaWithObject (\o -> parser =<< (o .: k))
 
 
 ----------------------------------------------------------------
 -- Bidirectional parser
 ----------------------------------------------------------------
 
+-- | Data structure which describe where in JSON tree metadata of type
+--   @a@ is placed and detects key clashes.
+newtype MetaTree a = MetaTree { get :: MTree (Entry a) }
+  deriving newtype (Semigroup,Monoid)
 
-
--- | JSON structure for data type of type @a@
-newtype MetaTree a = MetaTree { get :: Err [[Text]] (Spine (Entry a)) }
-
--- | Spine of a key tree
-data Spine a
-  = Leaf   a
-  | Branch (KM.KeyMap (Spine a))
-  deriving stock (Functor)
-
--- | Leaf corresponding to a single record in metadata tree
+-- Leaf corresponding to a single record in metadata tree
 --
---   NOTE: We can't use GADTs here since it will interfere with
---         coercions of MetaTree
+-- NOTE: We can't use GADTs here since it will interfere with
+--       coercions of MetaTree
 data Entry a = Entry
-  { encoder :: a -> JSON.Value
+  { tyRep   :: TypeRep
+  , encoder :: a -> JSON.Value
   , parser  :: JSON.Value -> JSON.Parser Metadata
   }
 
 instance Contravariant Entry where
-  contramap f e = Entry (e.encoder . f) e.parser
+  contramap f e = Entry e.tyRep (e.encoder . f) e.parser
 
 instance Contravariant MetaTree where
-  contramap f (MetaTree m) = MetaTree ((fmap . fmap) (contramap f) m)
+  contramap f (MetaTree m) = MetaTree (fmap (contramap f) m)
+
+-- JSON objects' tree which allows multiple values at nodes
+data MTree a
+  = MLeaf   (NonEmpty a)
+  | MBranch [a] (KM.KeyMap (MTree a))
+  deriving stock (Functor)
+
+instance Semigroup (MTree a) where
+  MLeaf   a   <> MLeaf   b   = MLeaf   (a <> b)
+  MLeaf   a   <> MBranch b m = MBranch (toList a <> b) m
+  MBranch a m <> MLeaf   b   = MBranch (a <> toList b) m
+  MBranch a m <> MBranch b n = MBranch (a <> b) (KM.unionWith (<>) m n)
+
+instance Monoid (MTree a) where
+  mempty = MBranch [] mempty
 
 
--- | Union of two trees. It's almost associative and may produce
---   different error but result in case of success is always same.
-(<<>>) :: MetaTree a -> MetaTree a -> MetaTree a
-MetaTree meta1 <<>> MetaTree meta2 =
-  case zipSpine <$> meta1 <*> meta2 of
-    Err e      -> MetaTree (Err e)
-    OK (Err e) -> MetaTree (Err e)
-    OK (OK  r) -> MetaTree (OK r)
+-- JSON objects' tree which doesn't contain any key clashes
+data Tree a
+  = Leaf   a
+  | Branch (KM.KeyMap (Tree a))
+  deriving stock (Functor)
 
-zipSpine :: Spine a -> Spine a -> Err [[Text]] (Spine a)
-zipSpine = go []
+
+-- Check that JSON tree doesn't have any key conflicts
+checkForClashes :: MTree a -> Err [(a,[Text])] (Tree a)
+checkForClashes = go [] where
+  go path = \case
+    MLeaf   (a :| []) -> OK (Leaf a)
+    MLeaf   as        -> Err [(a,path) | a <- toList as]
+    -- FIXME: append!!
+    MBranch [] m      -> Branch <$> KM.traverseWithKey (\k a -> go (path ++ [toText k]) a) m
+    MBranch as m      -> Err $ [(a,path) | a <- as]
+                            <> KM.foldMapWithKey (\k a -> collect (path++[toText k]) a) m
+  collect path = \case
+    MLeaf   as   -> [(a,path) | a <- toList as]
+    MBranch as m -> [(a,path) | a <- toList as]
+                 <> KM.foldMapWithKey (\k a -> collect (path++[toText k]) a) m
+
+
+encodeTreeWith :: (a -> JSON.Value) -> Tree a -> JSON.Value
+encodeTreeWith enc = go where
+  go = \case
+    Leaf   js -> enc js
+    Branch m  -> JSON.Object (go <$> m)
+
+decodeTree :: Tree (Entry a) -> JSON.Value -> JSON.Parser Metadata
+decodeTree (Leaf   leaf) js = leaf.parser js
+decodeTree (Branch kmap) js =
+  mconcat <$> sequence [ descend k (decodeTree tr) js
+                       | (k,tr) <- KM.toList kmap
+                       ]
   where
-    go path (Branch m1) (Branch m2)
-      = fmap Branch
-      $ sequenceA
-      $ KM.alignWithKey (merge path) m1 m2
-    go path _ _ = Err [reverse path]
-    --
-    merge path k = \case
-      This  a   -> OK a
-      That  b   -> OK b
-      These a b -> go (toText k : path) a b
-
+    descend k parser
+      = JSON.prependFailure (" - " ++ T.unpack (toText k) ++ "\n")
+      . metaWithObject (\o -> parser =<< (o .: k))
 
 
 ----------------------------------------------------------------
@@ -314,15 +313,15 @@ primFromMetadata (Metadata m) = do
 singletonMetaTree :: forall a. (MetaEncoding a, IsMeta a) => [KM.Key] -> MetaTree a
 singletonMetaTree path
   = MetaTree
-  $ OK
-  $ flip (foldr $ \k -> Branch . KM.singleton k) path
-  $ Leaf Entry
-    { encoder = metaToJson @a
+  $ flip (foldr $ \k -> MBranch [] . KM.singleton k) path
+  $ MLeaf (Entry
+    { tyRep   = typeOf (undefined :: a)
+    , encoder = metaToJson @a
     , parser  = \json -> do
         a <- JSON.prependFailure ("While parsing metadata " ++ typeName @a ++ "\n")
            $ parseMeta @a json
         return $ mempty & metadata .~ a
-    }
+    } :| [])
 
 -- | Derive 'IsMeta' instance with given path
 newtype AsMeta (path :: [Symbol]) a = AsMeta a
@@ -352,14 +351,14 @@ instance (KnownSymbol n, MetaPath ns) => MetaPath (n ': ns) where
 ----------------------------------------------------------------
 
 instance IsMeta () where
-  metaTree       = MetaTree $ OK $ Branch mempty
-  toMetadata   _ = Metadata mempty
+  metaTree       = mempty
+  toMetadata   _ = mempty
   fromMetadata _ = Just ()
   metadataKeySet = mempty
 
 instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
   metaTree = (fst >$< metaTree)
-        <<>> (snd >$< metaTree)
+          <> (snd >$< metaTree)
   toMetadata (a,b) = toMetadata a <> toMetadata b
   fromMetadata m = (,) <$> fromMetadata m <*> fromMetadata m
   metadataKeySet = metadataKeySet @a
@@ -368,8 +367,8 @@ instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
 
 instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
   metaTree = ((\(a,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,a,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,a) -> a) >$< metaTree)
+          <> ((\(_,a,_) -> a) >$< metaTree)
+          <> ((\(_,_,a) -> a) >$< metaTree)
   toMetadata (a,b,c) = mconcat [ toMetadata a, toMetadata b, toMetadata c]
   fromMetadata m = (,,) <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m
   metadataKeySet = metadataKeySet @a
@@ -379,9 +378,9 @@ instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
   metaTree = ((\(a,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,a,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,a,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,a) -> a) >$< metaTree)
+          <> ((\(_,a,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,a,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,a) -> a) >$< metaTree)
   toMetadata (a,b,c,d) = mconcat
     [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
     ]
@@ -394,10 +393,10 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) where
   metaTree = ((\(a,_,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,a,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,a,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,a,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,_,a) -> a) >$< metaTree)
+          <> ((\(_,a,_,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,a,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,a,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,_,a) -> a) >$< metaTree)
   toMetadata (a,b,c,d,e) = mconcat
     [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
     , toMetadata e
@@ -413,11 +412,11 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) wh
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,c,d,e,f) where
   metaTree = ((\(a,_,_,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,a,_,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,a,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,a,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,_,a,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,_,_,a) -> a) >$< metaTree)
+          <> ((\(_,a,_,_,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,a,_,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,a,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,_,a,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,_,_,a) -> a) >$< metaTree)
   toMetadata (a,b,c,d,e,f) = mconcat
     [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
     , toMetadata e, toMetadata f
@@ -434,12 +433,12 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsMeta (a,b,c,d,e,f,g) where
   metaTree = ((\(a,_,_,_,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,a,_,_,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,a,_,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,a,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,_,a,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,_,_,a,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,_,_,_,a) -> a) >$< metaTree)
+          <> ((\(_,a,_,_,_,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,a,_,_,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,a,_,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,_,a,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,_,_,a,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,_,_,_,a) -> a) >$< metaTree)
   toMetadata (a,b,c,d,e,f,g) = mconcat
     [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
     , toMetadata e, toMetadata f, toMetadata g
@@ -457,13 +456,13 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsM
 
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta h) => IsMeta (a,b,c,d,e,f,g,h) where
   metaTree = ((\(a,_,_,_,_,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,a,_,_,_,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,a,_,_,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,a,_,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,_,a,_,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,_,_,a,_,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,_,_,_,a,_) -> a) >$< metaTree)
-        <<>> ((\(_,_,_,_,_,_,_,a) -> a) >$<  metaTree)
+          <> ((\(_,a,_,_,_,_,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,a,_,_,_,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,a,_,_,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,_,a,_,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,_,_,a,_,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,_,_,_,a,_) -> a) >$< metaTree)
+          <> ((\(_,_,_,_,_,_,_,a) -> a) >$<  metaTree)
   toMetadata (a,b,c,d,e,f,g,h) = mconcat
     [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
     , toMetadata e, toMetadata f, toMetadata g, toMetadata h
@@ -484,15 +483,6 @@ instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta 
 ----------------------------------------------------------------
 -- Helpers
 ----------------------------------------------------------------
-
-keyClashesMsg :: forall a. Typeable a => [[Text]] -> String
-keyClashesMsg err
-  = unlines
-  $ ("Key clashes for data type " ++ typeName @a)
-  : [ "  - " ++ T.unpack (T.intercalate "." e)
-    | e <- err
-    ]
-
 
 -- | Either with accumulating Applicative instance
 data Err e a = Err e
