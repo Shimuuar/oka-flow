@@ -58,7 +58,7 @@ tests = testGroup "Metadata"
     , testIsMeta @(Record,Record2,Record3,Record4,Record5,Record6,Record7,Record8)
     , testIsMeta @((Record,Record2),Record3,Record4)
     -- Check clash detection
-    , testCase "Clash detected" $ case encodeMetadataEither (undefined :: (Record,Record)) of
+    , testCase "Clash detected" $ case encodeToMetadataEither (undefined :: (Record,Record)) of
         Left  _ -> pure ()
         Right _ -> assertFailure "Should detect key clash"
     ]
@@ -86,12 +86,12 @@ testIsMeta = testGroup (show (typeOf (undefined :: a)))
 testIsMetaJSON :: (IsMeta a, Eq a) => a -> Property
 testIsMetaJSON a
   = property
-  $ decodeMetadata (encodeMetadata a) == a
+  $ decodeMetadata (encodeToMetadata a) == a
 
 testEncodeIsSame :: (IsMeta a) => a -> Property
 testEncodeIsSame a
   = property
-  $ encodeMetadata a == encodeMetadataDyn (toMetadata a)
+  $ encodeToMetadata a == encodeMetadata (toMetadata a)
 
 testIsMetaMeta :: (IsMeta a, Eq a) => a -> Property
 testIsMetaMeta a

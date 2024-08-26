@@ -219,7 +219,7 @@ runExternalProcess exe meta args = do
     _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
     pure ()
   where
-    run = setStdin (byteStringInput $ JSON.encode $ encodeMetadataDyn meta)
+    run = setStdin (byteStringInput $ JSON.encode $ encodeMetadata meta)
         $ proc exe args
 
 -- | Run external process that adheres to standard calling conventions
@@ -261,7 +261,7 @@ withParametersInEnv
   -> IO a
 withParametersInEnv meta param action = do
   withSystemTempFile "oka-flow-metadata-" $ \file_meta h -> do
-    BL.hPutStr h $ JSON.encode $ encodeMetadataDyn meta
+    BL.hPutStr h $ JSON.encode $ encodeMetadata meta
     action $ ("OKA_META", file_meta)
            : [ ("OKA_ARG_" ++ show i, arg)
              | (i,arg) <- [1::Int ..] `zip` param

@@ -166,7 +166,7 @@ prepareFun ctx@FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport 
           build = out ++ "-build"                -- Temporary build directory
       createDirectoryIfMissing False (flowCtxRoot </> path.name)
       createDirectory build
-      BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadataDyn meta
+      BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
       writeFile    (build </> "deps.txt")  $ unlines paramP
       t1 <- getCurrentTime
       ctx.logger.start path

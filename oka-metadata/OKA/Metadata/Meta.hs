@@ -23,10 +23,10 @@ module OKA.Metadata.Meta
   , singletonMetaTree
   , MetaPath(..)
     -- ** Encoding & decoding
-  , encodeMetadataDynEither
-  , encodeMetadataDyn
   , encodeMetadataEither
   , encodeMetadata
+  , encodeToMetadataEither
+  , encodeToMetadata
   , decodeMetadataEither
   , decodeMetadata
     -- * Exceptions
@@ -168,13 +168,13 @@ instance Exception MetadataError
 
 -- | Encode dynamic dictionary. Throw exception in case there's key
 --   overlap.
-encodeMetadataDyn :: Metadata -> JSON.Value
-encodeMetadataDyn = either throw id . encodeMetadataDynEither
+encodeMetadata :: Metadata -> JSON.Value
+encodeMetadata = either throw id . encodeMetadataEither
 
 -- | Encode dynamic dictionary. Returns @Left@ in case there's key
 --   overlap.
-encodeMetadataDynEither :: Metadata -> Either MetadataError JSON.Value
-encodeMetadataDynEither (Metadata m) =
+encodeMetadataEither :: Metadata -> Either MetadataError JSON.Value
+encodeMetadataEither (Metadata m) =
   case checkForClashes $ mconcat entries of
     Err err -> Left  $ KeyClashes [(ty, path) | ((ty,_),path) <- err]
     OK  xs  -> Right $ encodeTreeWith snd xs
@@ -184,12 +184,12 @@ encodeMetadataDynEither (Metadata m) =
               ]
 
 -- | Encode metadata as JSON value. Will throw error in case of key clash
-encodeMetadata :: forall a. IsMeta a => a -> JSON.Value
-encodeMetadata = either throw id . encodeMetadataEither
+encodeToMetadata :: forall a. IsMeta a => a -> JSON.Value
+encodeToMetadata = either throw id . encodeToMetadataEither
 
 -- | Encode metadata as JSON value. Returns @Left@ in case of key clash.
-encodeMetadataEither :: forall a. IsMeta a => a -> Either MetadataError JSON.Value
-encodeMetadataEither a = case checkForClashes metaTree.get of
+encodeToMetadataEither :: forall a. IsMeta a => a -> Either MetadataError JSON.Value
+encodeToMetadataEither a = case checkForClashes metaTree.get of
   Err err  -> Left  $ KeyClashes [(e.tyRep, path) | (e,path) <- err]
   OK  tree -> Right $ encodeTreeWith (\e -> e.encoder a) tree
 

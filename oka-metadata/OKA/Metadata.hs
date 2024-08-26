@@ -27,10 +27,10 @@ module OKA.Metadata
   , deleteFromMetaByKeys
   , IsMeta(toMetadata, fromMetadata)
     -- ** Encoding & decoding
-  , encodeMetadataDynEither
-  , encodeMetadataDyn
   , encodeMetadataEither
   , encodeMetadata
+  , encodeToMetadataEither
+  , encodeToMetadata
   , decodeMetadataEither
   , decodeMetadata
   , readMetadataEither

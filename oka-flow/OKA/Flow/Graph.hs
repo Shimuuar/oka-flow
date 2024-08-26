@@ -163,7 +163,7 @@ hashMeta
   . SHA1.hashlazy
   . JSONB.encodingToLazyByteString
   . encodeToBuilder
-  . encodeMetadataDyn
+  . encodeMetadata
 
 encodeToBuilder :: JSON.Value -> JSONB.Encoding
 encodeToBuilder JSON.Null       = JSONB.null_
