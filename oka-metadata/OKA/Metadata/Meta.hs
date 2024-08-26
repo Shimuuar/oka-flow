@@ -244,17 +244,6 @@ descend k parser
 -- Bidirectional parser
 ----------------------------------------------------------------
 
--- | Either with accumulating Applicative instance
-data Err e a = Err e
-             | OK  a
-             deriving stock (Show,Functor)
-
-instance Monoid e => Applicative (Err e) where
-  pure = OK
-  Err e1 <*> Err e2 = Err (e1 <> e2)
-  Err e  <*> OK  _  = Err e
-  OK  _  <*> Err e  = Err e
-  OK  f  <*> OK  a  = OK (f a)
 
 
 -- | JSON structure for data type of type @a@
@@ -503,3 +492,16 @@ keyClashesMsg err
   : [ "  - " ++ T.unpack (T.intercalate "." e)
     | e <- err
     ]
+
+
+-- | Either with accumulating Applicative instance
+data Err e a = Err e
+             | OK  a
+             deriving stock (Show,Functor)
+
+instance Monoid e => Applicative (Err e) where
+  pure = OK
+  Err e1 <*> Err e2 = Err (e1 <> e2)
+  Err e  <*> OK  _  = Err e
+  OK  _  <*> Err e  = Err e
+  OK  f  <*> OK  a  = OK (f a)
