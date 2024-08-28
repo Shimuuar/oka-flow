@@ -5,6 +5,7 @@
 -- Evaluator of dataflow graph.
 module OKA.Flow.Run
   ( FlowCtx(..)
+  , FlowLogger(..)
   , runFlow
   ) where
 

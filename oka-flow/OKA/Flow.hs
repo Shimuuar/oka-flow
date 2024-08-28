@@ -42,6 +42,7 @@ module OKA.Flow
   , ResAsCounter(..)
     -- * Execution
   , FlowCtx(..)
+  , FlowLogger(..)
   , runFlow
   ) where
 
