@@ -8,7 +8,6 @@ module OKA.Flow.Run
   , runFlow
   ) where
 
-import Control.Applicative
 import Control.Concurrent.Async
 import Control.Concurrent.STM.TMVar
 import Control.Exception
@@ -47,15 +46,15 @@ data FlowLogger = FlowLogger
     -- | Called when job is started
   , done  :: StorePath -> NominalDiffTime -> IO ()
     -- | Called when job finishes execution
-  , crash :: String -> IO ()
+  , crash :: Maybe StorePath -> SomeException -> IO ()
     -- | Called when job crashes
   }
 
 instance Semigroup FlowLogger where
-  a <> b = FlowLogger { init  = (liftA2 . liftA2) (>>) a.init b.init
-                      , start = liftA2 (>>) a.start b.start
-                      , done  = liftA2 (>>) a.done  b.done
-                      , crash = liftA2 (>>) a.crash b.crash
+  a <> b = FlowLogger { init  = a.init  <> b.init
+                      , start = a.start <> b.start
+                      , done  = a.done  <> b.done
+                      , crash = a.crash <> b.crash
                       }
 
 instance Monoid FlowLogger where
@@ -175,10 +174,8 @@ prepareFun ctx@FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport 
       ctx.logger.done path (diffUTCTime t2 t1)
       renameDirectory build out
     --
-    crashReport = handle $ \(SomeException e) -> do
-      let name = case fun.output of
-            (_,Just p)  -> storePath p
-            (_,Nothing) -> "<PHONY>"
+    crashReport = handle $ \e0@(SomeException e) -> do
+      let path = snd fun.output
       if | Just AsyncCancelled <- cast e -> pure ()
-         | otherwise -> ctx.logger.crash $ "CRASHED: " ++ name ++ ": " ++ show e
+         | otherwise -> ctx.logger.crash path e0
       throwIO e
