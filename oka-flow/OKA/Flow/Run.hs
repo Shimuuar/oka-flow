@@ -5,6 +5,7 @@
 -- Evaluator of dataflow graph.
 module OKA.Flow.Run
   ( FlowCtx(..)
+  , FlowLogger(..)
   , runFlow
   ) where
 
@@ -35,6 +36,35 @@ import OKA.Flow.Types
 ----------------------------------------------------------------
 
 
+-- | Structure which carry callbacks for logging of events during
+--   execution
+data FlowLogger = FlowLogger
+  { init  :: [StorePath] -> [StorePath] -> IO ()
+    -- | Called when we evaluation of workflow starts. First
+    --   parameter is already existing output, second is one
+    --   which we need to evaluate.
+  , start :: StorePath -> IO ()
+    -- | Called when job is started
+  , done  :: StorePath -> NominalDiffTime -> IO ()
+    -- | Called when job finishes execution
+  , crash :: Maybe StorePath -> SomeException -> IO ()
+    -- | Called when job crashes
+  }
+
+instance Semigroup FlowLogger where
+  a <> b = FlowLogger { init  = a.init  <> b.init
+                      , start = a.start <> b.start
+                      , done  = a.done  <> b.done
+                      , crash = a.crash <> b.crash
+                      }
+
+instance Monoid FlowLogger where
+  mempty = FlowLogger { init  = mempty
+                      , start = mempty
+                      , done  = mempty
+                      , crash = mempty
+                      }
+
 -- | Evaluation context for dataflow program
 data FlowCtx eff = FlowCtx
   { flowCtxRoot    :: FilePath
@@ -44,14 +74,9 @@ data FlowCtx eff = FlowCtx
   , flowCtxEff     :: forall a. eff a -> IO a
     -- ^ Evaluator for effects allowed in dataflow program
   , flowCtxRes     :: ResourceSet
-    -- ^ Resources
-  , flowEvalReport :: [StorePath] -> [StorePath] -> IO ()
-    -- ^ Function to report
-  , flowLogStart   :: StorePath -> IO ()
-    -- ^ Log action for start of evaluation
-  , flowLogEnd     :: StorePath -> NominalDiffTime -> IO ()
-    -- ^ Log action for end of evaluation
-  , flowCrashReport :: String -> IO ()
+    -- ^ Resources which are available for evaluator.
+  , logger         :: FlowLogger
+    -- ^ Logger for evaluator
   }
 
 
@@ -80,7 +105,7 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
                                  ]
       paths_wanted = getStorePath targets.wanted
       paths_exist  = getStorePath targets.exists
-  flowEvalReport paths_exist paths_wanted
+  ctx.logger.init paths_exist paths_wanted
   -- Evaluator
   mapConcurrently_ id
     [ prepareFun ctx gr_exe targets (gr_exe.graph ! i) flowCtxRes
@@ -104,7 +129,7 @@ prepareFun
   -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
   -> ResourceSet
   -> IO ()
-prepareFun FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport $ do
+prepareFun ctx@FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport $ do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> when (fid `Set.notMember` exists) $
     atomically $ readTMVar (fst $ outputOf fid)
@@ -144,16 +169,14 @@ prepareFun FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport $ do
       BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadataDyn meta
       writeFile    (build </> "deps.txt")  $ unlines paramP
       t1 <- getCurrentTime
-      flowLogStart path
+      ctx.logger.start path
       _  <- action meta params build `onException` removeDirectoryRecursive build
       t2 <- getCurrentTime
-      flowLogEnd path (diffUTCTime t2 t1)
+      ctx.logger.done path (diffUTCTime t2 t1)
       renameDirectory build out
     --
-    crashReport = handle $ \(SomeException e) -> do
-      let name = case fun.output of
-            (_,Just p)  -> storePath p
-            (_,Nothing) -> "<PHONY>"
+    crashReport = handle $ \e0@(SomeException e) -> do
+      let path = snd fun.output
       if | Just AsyncCancelled <- cast e -> pure ()
-         | otherwise -> flowCrashReport $ "CRASHED: " ++ name ++ ": " ++ show e
+         | otherwise -> ctx.logger.crash path e0
       throwIO e
