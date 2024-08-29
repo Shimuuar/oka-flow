@@ -32,6 +32,8 @@ import OKA.Metadata
 import OKA.Flow.Graph
 import OKA.Flow.Resources
 import OKA.Flow.Types
+import OKA.Flow.Tools
+
 
 
 ----------------------------------------------------------------
@@ -131,7 +133,7 @@ prepareFun
   -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
   -> ResourceSet
   -> IO ()
-prepareFun ctx@FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport $ do
+prepareFun ctx@FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx fun $ do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> when (fid `Set.notMember` exists) $
     atomically $ readTMVar (fst $ outputOf fid)
@@ -142,6 +144,7 @@ prepareFun ctx@FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport 
     -- Prepare normal action. We first create output directory and
     -- write everything there. After we're done we rename it.
     Workflow (Action _ act) -> prepareNormal (act res)
+    WorkflowExe exe         -> prepareExe    exe
     -- Execute phony action. We don't need to bother with setting up output
     Phony    act            -> act res meta params
   -- Signal that we successfully completed execution
@@ -159,26 +162,39 @@ prepareFun ctx@FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport 
     --
     toPath (_,Just path) = storePath path
     toPath (_,Nothing  ) = error "INTERNAL ERROR: dependence on PHONY node"
-    --
-    prepareNormal action = do
+    -- Execution of haskell action
+    prepareNormal action = normalExecution $ \build -> do
+      BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
+      writeFile    (build </> "deps.txt")  $ unlines paramP
+      action meta params build
+    -- Execution of an extenrnal executable
+    prepareExe exe@Executable{} = normalExecution $ \build -> do
+      BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
+      writeFile    (build </> "deps.txt")  $ unlines paramP
+      exe.io res
+      runExternalProcess exe.executable meta (build:params)
+    -- Standard wrapper for execution of workflows that create outputs
+    normalExecution action = do
       let path  = case fun.output of
             (_, Just p) -> p
             _           -> error "INTERNAL ERROR: phony node treated as normal"
       let out   = flowCtxRoot </> storePath path -- Output directory
           build = out ++ "-build"                -- Temporary build directory
+      -- Create output directory
       createDirectoryIfMissing False (flowCtxRoot </> path.name)
       createDirectory build
-      BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
-      writeFile    (build </> "deps.txt")  $ unlines paramP
-      t1 <- getCurrentTime
       ctx.logger.start path
-      _  <- action meta params build `onException` removeDirectoryRecursive build
+      t1 <- getCurrentTime
+      _  <- action build `onException` removeDirectoryRecursive build
       t2 <- getCurrentTime
       ctx.logger.done path (diffUTCTime t2 t1)
+      --
       renameDirectory build out
-    --
-    crashReport = handle $ \e0@(SomeException e) -> do
-      let path = snd fun.output
-      if | Just AsyncCancelled <- cast e -> pure ()
-         | otherwise -> ctx.logger.crash path e0
-      throwIO e
+
+
+crashReport :: FlowCtx eff -> Fun i (a, Maybe StorePath) -> IO x -> IO x
+crashReport ctx fun = handle $ \e0@(SomeException e) -> do
+  let path = snd fun.output
+  if | Just AsyncCancelled <- cast e -> pure ()
+     | otherwise -> ctx.logger.crash path e0
+  throwIO e

@@ -153,6 +153,14 @@ hashFun oracle fun = fun
                      | k <- fun.param
                      ]
         in Just $ StorePath nm (Hash hash)
+      WorkflowExe exe ->
+        let hash   = SHA1.hashlazy $ BL.fromChunks [h | Hash h <- hashes]
+            hashes = hashMeta fun.metadata
+                   : Hash (T.encodeUtf8 $ T.pack exe.name)
+                   : [ case oracle k of StorePath _ h -> h
+                     | k <- fun.param
+                     ]
+        in Just $ StorePath exe.name (Hash hash)
   }
   where
 
@@ -234,6 +242,9 @@ shakeFlowGraph tgtExists (FlowGraph workflows targets)
             -- Phony targets are always executed
             Phony{}    -> pure False
             Workflow{} -> case f.output of
+              Just path -> tgtExists path
+              Nothing   -> error "INTERNAL ERROR: dependence on phony target"
+            WorkflowExe{} -> case f.output of
               Just path -> tgtExists path
               Nothing   -> error "INTERNAL ERROR: dependence on phony target"
           case exists of

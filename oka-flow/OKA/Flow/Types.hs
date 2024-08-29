@@ -10,6 +10,7 @@
 module OKA.Flow.Types
   ( -- * Workflow primitives
     Action(..)
+  , Executable(..)
   , Workflow(..)
   , isPhony
     -- * Store objects API
@@ -46,18 +47,35 @@ data Action = Action
     -- ^ Execute action on store
   }
 
+-- | Action which execute executable. It should be always used if one
+--   want to call external executable. This way executor can correctly
+--   pass metadata to it.
+data Executable = Executable
+  { name :: String
+    -- ^ Name of a workflow
+  , executable :: FilePath
+    -- ^ Executable to start
+  , io         :: ResourceSet -> IO ()
+    -- ^ IO action which could be executed to prepare program.
+  }
+
+
+
 -- | Descritpion of workflow function. It knows how to build
 data Workflow
   = Workflow Action
     -- ^ Standard workflow which executes haskell action
+  | WorkflowExe Executable
+    -- ^ Target which run executable
   | Phony    (ResourceSet -> Metadata -> [FilePath] -> IO ())
     -- ^ Phony target which always executes action
 
 
 isPhony :: Workflow -> Bool
 isPhony = \case
-  Workflow{} -> False
-  Phony{}    -> True
+  Workflow{}    -> False
+  WorkflowExe{} -> False
+  Phony{}       -> True
 
 
 
