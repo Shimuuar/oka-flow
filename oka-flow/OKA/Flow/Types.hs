@@ -52,13 +52,18 @@ import OKA.Metadata           (Metadata)
 --   action to pefgorm workflow
 data Action = Action
   { name :: String
+    -- ^ Name of a workflow
   , run  :: ResourceSet -> Metadata -> [FilePath] -> FilePath -> IO ()
+    -- ^ Execute action on store
   }
 
 -- | Descritpion of workflow function. It knows how to build
 data Workflow
   = Workflow Action
+    -- ^ Standard workflow which executes haskell action
   | Phony    (ResourceSet -> Metadata -> [FilePath] -> IO ())
+    -- ^ Phony target which always executes action
+
 
 isPhony :: Workflow -> Bool
 isPhony = \case
