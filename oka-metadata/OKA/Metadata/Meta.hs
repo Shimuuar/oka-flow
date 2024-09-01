@@ -263,19 +263,20 @@ data Tree a
 
 -- Check that JSON tree doesn't have any key conflicts
 checkForClashes :: MTree a -> Err [(a,[Text])] (Tree a)
-checkForClashes = go [] where
-  go path = \case
+checkForClashes = go id where
+  go pfx = \case
     MLeaf   (a :| []) -> OK (Leaf a)
     MLeaf   as        -> Err [(a,path) | a <- toList as]
-    -- FIXME: append!!
-    MBranch [] m      -> Branch <$> KM.traverseWithKey (\k a -> go (path ++ [toText k]) a) m
+    MBranch [] m      -> Branch <$> KM.traverseWithKey (\k a -> go (pfx . (toText k:)) a) m
     MBranch as m      -> Err $ [(a,path) | a <- as]
-                            <> KM.foldMapWithKey (\k a -> collect (path++[toText k]) a) m
-  collect path = \case
+                            <> KM.foldMapWithKey (\k a -> collect (pfx . (toText k:)) a) m
+    where path = pfx []
+  --
+  collect pfx = \case
     MLeaf   as   -> [(a,path) | a <- toList as]
     MBranch as m -> [(a,path) | a <- toList as]
-                 <> KM.foldMapWithKey (\k a -> collect (path++[toText k]) a) m
-
+                 <> KM.foldMapWithKey (\k a -> collect (pfx . (toText k:)) a) m
+    where path = pfx []
 
 encodeTreeWith :: (a -> JSON.Value) -> Tree a -> JSON.Value
 encodeTreeWith enc = go where
