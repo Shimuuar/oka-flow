@@ -1,7 +1,9 @@
-{-# LANGUAGE AllowAmbiguousTypes   #-}
-{-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE RecordWildCards       #-}
-{-# LANGUAGE UndecidableInstances  #-}
+{-# LANGUAGE AllowAmbiguousTypes  #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE PatternSynonyms      #-}
+{-# LANGUAGE RecordWildCards      #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns         #-}
 -- |
 -- Definition of dynamically typed metadata dictionary, its JSON
 -- serialization.
@@ -50,8 +52,6 @@ import Data.Coerce
 import Data.Foldable              (toList)
 import Data.Functor.Contravariant
 import Data.Map.Strict            qualified as Map
--- import Data.List.NonEmpty         qualified as NE
-import Data.List.NonEmpty         (NonEmpty(..))
 import Data.Map.Strict            (Map)
 import Data.Set                   (Set)
 import Data.Set                   qualified as Set
@@ -238,45 +238,59 @@ instance Contravariant Entry where
 instance Contravariant MetaTree where
   contramap f (MetaTree m) = MetaTree (fmap (contramap f) m)
 
--- JSON objects' tree which allows multiple values at nodes
+
+-- | JSON objects' tree which doesn't contain any key clashes
+data Tree a
+  = Leaf   a                    -- ^ Leaf containing JSON object
+  | Branch (KM.KeyMap (Tree a)) -- ^ Branch in JSON objects
+  deriving stock (Functor)
+
+-- | JSON objects' tree which allows multiple values at nodes
 data MTree a
-  = MLeaf   (NonEmpty a)
-  | MBranch [a] (KM.KeyMap (MTree a))
+  = MLeaf     a
+  | MBranch   (KM.KeyMap (MTree a))
+  | Collision [a] (KM.KeyMap (MTree a))
   deriving stock (Functor)
 
 instance Semigroup (MTree a) where
-  MLeaf   a   <> MLeaf   b   = MLeaf   (a <> b)
-  MLeaf   a   <> MBranch b m = MBranch (toList a <> b) m
-  MBranch a m <> MLeaf   b   = MBranch (a <> toList b) m
-  MBranch a m <> MBranch b n = MBranch (a <> b) (KM.unionWith (<>) m n)
+  -- We have collision already
+  MLeaf     a    <> Collision b m  = Collision (a : b)   m
+  MBranch     m1 <> Collision b m2 = Collision b        (KM.unionWith (<>) m1 m2)
+  Collision a m1 <> Collision b m2 = Collision (a<>b)   (KM.unionWith (<>) m1 m2)
+  Collision a m  <> MLeaf     b    = Collision (a<>[b])  m
+  Collision a m1 <> MBranch     m2 = Collision a        (KM.unionWith (<>) m1 m2)
+  -- Collision doesn't occur at this level
+  MLeaf     a    <> MBranch   Null = MLeaf a
+  MBranch   Null <> MLeaf     a    = MLeaf a
+  MBranch   m1   <> MBranch   m2   = MBranch (KM.unionWith (<>) m1 m2)
+  -- We've found a collision!
+  MLeaf     a    <> MLeaf     b    = Collision [a,b] mempty
+  MBranch     m  <> MLeaf     a    = Collision [a] m
+  MLeaf     a    <> MBranch     m  = Collision [a] m
 
 instance Monoid (MTree a) where
-  mempty = MBranch [] mempty
+  mempty = MBranch mempty
 
 
--- JSON objects' tree which doesn't contain any key clashes
-data Tree a
-  = Leaf   a
-  | Branch (KM.KeyMap (Tree a))
-  deriving stock (Functor)
 
 
 -- Check that JSON tree doesn't have any key conflicts
 checkForClashes :: MTree a -> Err [(a,[Text])] (Tree a)
 checkForClashes = go id where
   go pfx = \case
-    MLeaf   (a :| []) -> OK (Leaf a)
-    MLeaf   as        -> Err [(a,path) | a <- toList as]
-    MBranch [] m      -> Branch <$> KM.traverseWithKey (\k a -> go (pfx . (toText k:)) a) m
-    MBranch as m      -> Err $ [(a,path) | a <- as]
-                            <> KM.foldMapWithKey (\k a -> collect (pfx . (toText k:)) a) m
+    MLeaf   a -> OK (Leaf a)
+    MBranch m -> Branch <$> KM.traverseWithKey (\k -> go (pfx . (toText k:))) m
+    Collision as m -> Err $ [(a,path) | a <- as]
+                         <> KM.foldMapWithKey (\k -> collect (pfx . (toText k:))) m
     where path = pfx []
-  --
+  -- No need to optimize. We'll fail with error anyway
   collect pfx = \case
-    MLeaf   as   -> [(a,path) | a <- toList as]
-    MBranch as m -> [(a,path) | a <- toList as]
-                 <> KM.foldMapWithKey (\k a -> collect (pfx . (toText k:)) a) m
+    MLeaf     a    -> [errA a]
+    MBranch   m    -> errM m
+    Collision as m -> fmap errA as <> errM m
     where path = pfx []
+          errA a = (a,path)
+          errM m = KM.foldMapWithKey (\k -> collect (pfx . (toText k:))) m
 
 encodeTreeWith :: (a -> JSON.Value) -> Tree a -> JSON.Value
 encodeTreeWith enc = go where
@@ -314,15 +328,15 @@ primFromMetadata (Metadata m) = do
 singletonMetaTree :: forall a. (MetaEncoding a, IsMeta a) => [KM.Key] -> MetaTree a
 singletonMetaTree path
   = MetaTree
-  $ flip (foldr $ \k -> MBranch [] . KM.singleton k) path
-  $ MLeaf (Entry
+  $ flip (foldr $ \k -> MBranch . KM.singleton k) path
+  $ MLeaf Entry
     { tyRep   = typeOf (undefined :: a)
     , encoder = metaToJson @a
     , parser  = \json -> do
         a <- JSON.prependFailure ("While parsing metadata " ++ typeName @a ++ "\n")
            $ parseMeta @a json
         return $ mempty & metadata .~ a
-    } :| [])
+    }
 
 -- | Derive 'IsMeta' instance with given path
 newtype AsMeta (path :: [Symbol]) a = AsMeta a
@@ -496,3 +510,6 @@ instance Monoid e => Applicative (Err e) where
   Err e  <*> OK  _  = Err e
   OK  _  <*> Err e  = Err e
   OK  f  <*> OK  a  = OK (f a)
+
+pattern Null :: Foldable f => f a
+pattern Null <- (null -> True)
