@@ -1,3 +1,4 @@
+{-# LANGUAGE DerivingVia      #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs            #-}
 {-# LANGUAGE ViewPatterns     #-}
@@ -27,6 +28,10 @@ module OKA.Flow.Resources
     -- * Deriving via
   , ResAsMutex(..)
   , ResAsCounter(..)
+    -- * Standard resources
+  , LockGHC(..)
+  , LockCoreCPU(..)
+  , LockMemGB(..)
   ) where
 
 import Control.Concurrent.STM
@@ -206,3 +211,23 @@ instance (Resource a, Resource b, Resource c, Resource d) => Resource (a,b,c,d) 
     releaseResource r b
     releaseResource r c
     releaseResource r d
+
+
+----------------------------------------------------------------
+-- Standard resources
+----------------------------------------------------------------
+
+-- | We want to have one concurrent build. This data type provides mutex
+data LockGHC = LockGHC
+  deriving stock (Show,Eq)
+  deriving Resource via ResAsMutex LockGHC
+
+-- | Number of CPU cores that flow is allowed to utilize.
+newtype LockCoreCPU = LockCoreCPU Int
+  deriving stock (Show,Eq)
+  deriving Resource via ResAsCounter LockCoreCPU
+
+-- | How much memory flow is expected to use in GB
+newtype LockMemGB = LockMemGB Int
+  deriving stock (Show,Eq)
+  deriving Resource via ResAsCounter LockMemGB

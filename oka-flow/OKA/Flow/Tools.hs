@@ -22,11 +22,8 @@ module OKA.Flow.Tools
   , parseSingleArgument
   , AsFlowOutput(..)
     -- * Resources
-  , LockGHC(..)
   , compileProgramGHC
   , defGhcOpts
-  , LockCoreCPU(..)
-  , LockMemGB(..)
     -- * External process
   , runExternalProcess
   , runExternalProcessNoMeta
@@ -184,11 +181,6 @@ instance FlowInput a => FlowArgument (AsFlowOutput a) where
 -- GHC compilation
 ----------------------------------------------------------------
 
--- | We want to have one concurrent build. This data type provides mutex
-data LockGHC = LockGHC
-  deriving stock (Show,Eq)
-  deriving Resource via ResAsMutex LockGHC
-
 -- | Compile program with GHC. Uses 'LockGHC' to ensure that only one
 --   compilation runs at a time.
 compileProgramGHC
@@ -209,17 +201,6 @@ defGhcOpts = [ "-O2"
              , "-threaded"
              , "-with-rtsopts=-T -A8m"
              ]
-
--- | Number of CPU cores that flow is allowed to utilize.
-newtype LockCoreCPU = LockCoreCPU Int
-  deriving stock (Show,Eq)
-  deriving Resource via ResAsCounter LockCoreCPU
-
--- | How much memory flow is expected to use in GB
-newtype LockMemGB = LockMemGB Int
-  deriving stock (Show,Eq)
-  deriving Resource via ResAsCounter LockMemGB
-
 
 
 ----------------------------------------------------------------
