@@ -29,7 +29,9 @@ import System.Directory             (createDirectory,createDirectoryIfMissing,re
 
 import OKA.Metadata
 import OKA.Flow.Graph
+import OKA.Flow.Resources
 import OKA.Flow.Types
+
 
 ----------------------------------------------------------------
 --

@@ -62,6 +62,7 @@ Library
         OKA.Flow
         OKA.Flow.Graph
         OKA.Flow.Run
+        OKA.Flow.Resources
         OKA.Flow.Types
         OKA.Flow.Tools
         OKA.Flow.Std

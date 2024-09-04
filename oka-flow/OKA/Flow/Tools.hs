@@ -51,7 +51,7 @@ import System.Posix.Signals         (signalProcess, sigINT)
 import System.Process               (getPid)
 import OKA.Metadata
 import OKA.Flow.Types
-
+import OKA.Flow.Resources
 
 ----------------------------------------------------------------
 -- Interaction with store

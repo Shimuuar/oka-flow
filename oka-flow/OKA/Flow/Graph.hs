@@ -53,7 +53,7 @@ import Data.Vector                  qualified as V
 import OKA.Metadata
 
 import OKA.Flow.Types
-
+import OKA.Flow.Resources
 
 ----------------------------------------------------------------
 -- Dataflow graph
