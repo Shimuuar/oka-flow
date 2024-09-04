@@ -271,14 +271,14 @@ instance (Typeable a, Coercible a Int) => Resource (ResAsCounter a) where
     counter <- newTVarIO (n :: Int)
     pure $! basicAddResource @a r
       ( \(coerce -> k) -> do
-            when (k < 0) $ error $ show $
+            when (k < 0) $ error $
               "Resource[" <> show ty <> "]: negative amount requested"
-            when (k > n) $ error $ show $
+            when (k > n) $ error $
               "Resource[" <> show ty <> "]: request cannot be satisfied"
             modifyTVar' counter (subtract k)
             check . (>= 0) =<< readTVar counter
       , \(coerce -> k) -> do
-            when (k < 0) $ error $ show $
+            when (k < 0) $ error $
               "Resource[" <> show ty <> "]: negative amount requested"
             modifyTVar' counter (+ k)
       )
