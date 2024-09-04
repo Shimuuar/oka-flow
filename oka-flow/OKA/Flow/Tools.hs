@@ -4,15 +4,17 @@
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
 -- |
--- Tools for defining concrete workflows.
+-- Tools for defining concrete workflows. It contain both tools for
+-- defining workflows themselves and @Flow@ wrappers.
 module OKA.Flow.Tools
-  ( -- * Interaction with output
-    metaFromStdin
-    -- ** Output serialization
-  , FlowOutput(..)
+  ( -- * Interaction with store
+    -- $store
+    FlowOutput(..)
   , FlowInput(..)
   , AsMetaEncoded(..)
-    -- ** Command line arguments
+    -- * Standard tools
+  , metaFromStdin
+    -- * Command line arguments
   , ArgumentParser
   , FlowArgument(..)
   , runFlowArguments
@@ -50,16 +52,20 @@ import System.Process               (getPid)
 import OKA.Metadata
 import OKA.Flow.Types
 
+
 ----------------------------------------------------------------
--- Standard tools for writing executables
+-- Interaction with store
 ----------------------------------------------------------------
 
--- | Read metadata from stdin
-metaFromStdin :: IsMeta a => IO a
-metaFromStdin = do
-  (BL.getContents <&> JSON.eitherDecode) >>= \case
-    Left  e  -> error $ "Cannot read metadata: " ++ e
-    Right js -> evaluate $ decodeMetadata js
+-- $store
+--
+-- Type class 'FlowOutput' and 'FlowInput' define simple standard
+-- method of reading and writing data to store paths. If data type
+-- implements both following law should hold:
+--
+-- > do writeOutput path a
+-- >    a' <- readOutput path
+-- >    a == a'
 
 
 -- | Type class which describes how data type should be stored to
@@ -78,6 +84,7 @@ class FlowInput a where
              -> IO a
 
 
+
 -- | Save value as a JSON encoded with 'MetaEncoding' in @data.json@ file.
 newtype AsMetaEncoded a = AsMetaEncoded a
   deriving FlowArgument via AsFlowOutput (AsMetaEncoded a)
@@ -94,6 +101,20 @@ instance MetaEncoding a => FlowInput (AsMetaEncoded a) where
       Just js -> case JSON.parseEither parseMeta js of
         Left  e -> error $ "Cannot decode PErr: " ++ show e
         Right x -> pure (AsMetaEncoded x)
+
+
+
+----------------------------------------------------------------
+-- Standard tools for writing executables
+----------------------------------------------------------------
+
+-- | Read metadata from stdin
+metaFromStdin :: IsMeta a => IO a
+metaFromStdin = do
+  (BL.getContents <&> JSON.eitherDecode) >>= \case
+    Left  e  -> error $ "Cannot read metadata: " ++ e
+    Right js -> evaluate $ decodeMetadata js
+
 
 
 type role ArgumentParser representational
