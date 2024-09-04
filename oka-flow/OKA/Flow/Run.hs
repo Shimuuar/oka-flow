@@ -103,9 +103,8 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
   let getStorePath fids = concat [ gr ^.. flowGraphL . at fid . _Just . to (.output) . _Just
                                  | fid <- toList fids
                                  ]
-      paths_wanted = getStorePath targets.wanted
-      paths_exist  = getStorePath targets.exists
-  ctx.logger.init paths_exist paths_wanted
+  ctx.logger.init (getStorePath targets.exists)
+                  (getStorePath targets.wanted)
   -- Evaluator
   mapConcurrently_ id
     [ prepareFun ctx gr_exe targets (gr_exe.graph ! i) flowCtxRes
