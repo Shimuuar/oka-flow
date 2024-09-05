@@ -8,6 +8,7 @@ module OKA.Flow.Parser
   , consume
   ) where
 
+import Control.Applicative
 -- import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State.Strict
@@ -19,7 +20,7 @@ type role ListParser representational representational
 newtype ListParser s a = ListParser
   { get :: [s] -> Either String (a, [s])
   }
-  deriving (Functor, Applicative, Monad, MonadError String, MonadState [s])
+  deriving (Functor, Applicative, Alternative, Monad, MonadError String, MonadState [s])
        via StateT [s] (Either String)
 
 -- | Execute parser. It will fail if arguments are not consumed fully
