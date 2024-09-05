@@ -1,6 +1,7 @@
-{-# LANGUAGE MultiWayIf      #-}
-{-# LANGUAGE RankNTypes      #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MultiWayIf       #-}
+{-# LANGUAGE RankNTypes       #-}
+{-# LANGUAGE RecordWildCards  #-}
 -- |
 -- Evaluator of dataflow graph.
 module OKA.Flow.Run

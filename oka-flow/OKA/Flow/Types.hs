@@ -1,5 +1,8 @@
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ConstraintKinds       #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE UndecidableInstances  #-}
 -- |
 -- Basic data types used in definition of dataflow program
 module OKA.Flow.Types
@@ -8,7 +11,9 @@ module OKA.Flow.Types
   , isPhony
   , Workflow(..)
   , FunID(..)
-  , Result(..)
+  , StoreObject(..)
+  , Result
+  , ObjProduct(..)
   , ResultSet(..)
     -- * Store
   , Hash(..)
@@ -53,50 +58,62 @@ isPhony = \case
   Workflow{} -> False
   Phony{}    -> True
 
+
+
+----------------------------------------------------------------
+-- Store objects
+----------------------------------------------------------------
+
 -- | Internal identifier of dataflow function in a graph.
 newtype FunID = FunID Int
   deriving (Show,Eq,Ord)
 
+newtype StoreObject r a = StoreObject r
+  deriving stock (Show,Eq)
+
+class ObjProduct r a where
+  toResultSet :: a -> [r]
+
+
 -- | Opaque handle to result of evaluation of single dataflow
 --   function. It doesn't contain any real data and in fact is just a
 --   promise to evaluate result.
-newtype Result a = Result FunID
-  deriving stock (Show,Eq)
-
+type Result = StoreObject FunID
+  
 -- | Data types which could be used as parameters to dataflow functions
-class ResultSet a where
-  toResultSet :: a -> [FunID]
+type ResultSet = ObjProduct FunID
 
-instance ResultSet () where
+
+instance ObjProduct r () where
   toResultSet () = []
 
-instance ResultSet (Result a) where
-  toResultSet (Result i) = [i]
+instance ObjProduct r (StoreObject r a) where
+  toResultSet (StoreObject i) = [i]
 
-instance ResultSet a => ResultSet [a] where
+instance ObjProduct r a => ObjProduct r [a] where
   toResultSet = concatMap toResultSet
 
-instance (ResultSet a, ResultSet b) => ResultSet (a,b) where
+instance (ObjProduct r a, ObjProduct r b) => ObjProduct r (a,b) where
   toResultSet (a,b) = toResultSet a <> toResultSet b
 
-instance (ResultSet a, ResultSet b, ResultSet c) => ResultSet (a,b,c) where
+instance (ObjProduct r a, ObjProduct r b, ObjProduct r c) => ObjProduct r (a,b,c) where
   toResultSet (a,b,c) = toResultSet a <> toResultSet b <> toResultSet c
 
 
-instance (Generic a, GResultSet (Rep a)) => ResultSet (Generically a) where
+instance (Generic a, GObjProduct r (Rep a)) => ObjProduct r (Generically a) where
   toResultSet (Generically a) = gtoResultSet (from a)
 
-class GResultSet f where
-  gtoResultSet :: f () -> [FunID]
+class GObjProduct r f where
+  gtoResultSet :: f () -> [r]
 
-instance (GResultSet f) => GResultSet (M1 i c f) where
-  gtoResultSet = coerce (gtoResultSet @f)
+instance (GObjProduct r f) => GObjProduct r (M1 i c f) where
+  gtoResultSet = coerce (gtoResultSet @r @f)
 
-instance (GResultSet f, GResultSet g) => GResultSet (f :*: g) where
+instance (GObjProduct r f, GObjProduct r g) => GObjProduct r (f :*: g) where
   gtoResultSet (f :*: g) = gtoResultSet f <> gtoResultSet g
 
-instance (ResultSet a) => GResultSet (K1 i a) where
-  gtoResultSet = coerce (toResultSet @a)
+instance (ObjProduct r a) => GObjProduct r (K1 i a) where
+  gtoResultSet = coerce (toResultSet @r @a)
 
 
 

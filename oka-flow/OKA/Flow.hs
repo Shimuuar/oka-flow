@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE DerivingVia                #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ImportQualifiedPost        #-}
 {-# LANGUAGE OverloadedRecordDot        #-}
@@ -95,7 +96,7 @@ basicLiftWorkflow resource exe p = Flow $ do
     , releaseRes = \r -> releaseResource r resource
     , param      = res
     }
-  return $ Result fid
+  return $ StoreObject fid
 
 -- | Create new primitive workflow.
 --
