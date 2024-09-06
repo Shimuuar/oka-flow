@@ -1,4 +1,5 @@
 {-# LANGUAGE ConstraintKinds       #-}
+{-# LANGUAGE DerivingVia           #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -9,14 +10,16 @@
 module OKA.Flow.Types
   ( -- * Workflow primitives
     Action(..)
-  , isPhony
   , Workflow(..)
-  , FunID(..)
+  , isPhony
+    -- * Store objects API
   , StoreObject(..)
-  , Result
   , ObjProduct(..)
+    -- ** Dataflow graph primitives
+  , FunID(..)
+  , Result
   , ResultSet
-    -- * Store
+    -- ** Store path
   , Hash(..)
   , StorePath(..)
   , storePath
@@ -64,28 +67,20 @@ isPhony = \case
 
 
 ----------------------------------------------------------------
--- Store objects
+-- Store objects and interaction
 ----------------------------------------------------------------
 
--- | Internal identifier of dataflow function in a graph.
-newtype FunID = FunID Int
-  deriving (Show,Eq,Ord)
-
+-- | Opaque handle to store object. It's identified by value of type
+--   @r@ which could be dataflow graph node identifier 'FunID' or
+--   store path 'StorePath'.
 newtype StoreObject r a = StoreObject r
   deriving stock (Show,Eq)
 
-
+-- | This type class observe isomorphism between tuples and records
+--   containing 'StoreObject' and lists of underlying data types
 class ObjProduct r a where
-  toResultSet :: a -> [r]
+  toResultSet    :: a -> [r]
   parseResultSet :: ListParser r a
-
--- | Opaque handle to result of evaluation of single dataflow
---   function. It doesn't contain any real data and in fact is just a
---   promise to evaluate result.
-type Result = StoreObject FunID
-
--- | Data types which could be used as parameters to dataflow functions
-type ResultSet = ObjProduct FunID
 
 
 instance ObjProduct r () where
@@ -100,14 +95,16 @@ instance ObjProduct r a => ObjProduct r [a] where
   toResultSet    = concatMap toResultSet
   parseResultSet = many parseResultSet
 
-instance (ObjProduct r a, ObjProduct r b) => ObjProduct r (a,b) where
-  toResultSet (a,b) = toResultSet a <> toResultSet b
-  parseResultSet    = (,) <$> parseResultSet <*> parseResultSet
+deriving via Generically (a,b)
+    instance (ObjProduct r a, ObjProduct r b) => ObjProduct r (a,b)
+deriving via Generically (a,b,c)
+    instance (ObjProduct r a, ObjProduct r b, ObjProduct r c) => ObjProduct r (a,b,c)
+deriving via Generically (a,b,c,d)
+    instance (ObjProduct r a, ObjProduct r b, ObjProduct r c, ObjProduct r d) => ObjProduct r (a,b,c,d)
 
-instance (ObjProduct r a, ObjProduct r b, ObjProduct r c) => ObjProduct r (a,b,c) where
-  toResultSet (a,b,c) = toResultSet a <> toResultSet b <> toResultSet c
-  parseResultSet = (,,) <$> parseResultSet <*> parseResultSet <*> parseResultSet
 
+
+-- | Used for deriving using generics
 instance (Generic a, GObjProduct r (Rep a)) => ObjProduct r (Generically a) where
   toResultSet (Generically a) = gtoResultSet (from a)
   parseResultSet = Generically . to <$> gparseResultSet
@@ -126,6 +123,24 @@ instance (GObjProduct r f, GObjProduct r g) => GObjProduct r (f :*: g) where
 instance (ObjProduct r a) => GObjProduct r (K1 i a) where
   gtoResultSet    = coerce (toResultSet    @r @a)
   gparseResultSet = coerce (parseResultSet @r @a)
+
+
+
+----------------------------------------------------------------
+-- Dataflow graph
+----------------------------------------------------------------
+
+-- | Internal identifier of dataflow function in a graph.
+newtype FunID = FunID Int
+  deriving (Show,Eq,Ord)
+
+-- | Opaque handle to result of evaluation of single dataflow
+--   function. It doesn't contain any real data and in fact is just a
+--   promise to evaluate result.
+type Result = StoreObject FunID
+
+-- | Data types which could be used as parameters to dataflow functions
+type ResultSet = ObjProduct FunID
 
 
 
