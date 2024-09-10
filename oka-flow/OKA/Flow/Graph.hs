@@ -26,7 +26,6 @@ module OKA.Flow.Graph
   ) where
 
 import Control.Applicative
-import Control.Concurrent.STM       (STM)
 import Control.Lens
 import Control.Monad
 import Control.Monad.Operational    hiding (view)
@@ -66,10 +65,8 @@ data Fun k v = Fun
     --   tries to acquire resources and return actual function to run.
   , metadata :: Metadata
     -- ^ Metadata that should be supplied to the workflow
-  , requestRes :: ResourceSet -> STM ()
-    -- ^ Request resources for evaluation
-  , releaseRes :: ResourceSet -> STM ()
-    -- ^ Release resources after evaluation
+  , resources :: Lock
+    -- ^ Resources required by workflow
   , param    :: [k]
     -- ^ Parameters to workflow.
   , output   :: v

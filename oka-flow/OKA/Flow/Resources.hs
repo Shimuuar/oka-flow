@@ -19,6 +19,7 @@
 module OKA.Flow.Resources
   ( -- * Resources
     ResourceSet
+  , Lock(..)
   , Resource(..)
   , withResources
     -- ** Primitives for 'ResourceSet'
@@ -57,6 +58,19 @@ data SomeResource where
   SomeResource :: Typeable a => (a -> STM (), a -> STM ()) -> SomeResource
 
 
+-- | Data structure which provides pair of STM transaction which are
+--   used for acquiring and releasing resources.
+data Lock = Lock
+  { acquire :: ResourceSet -> STM ()
+  , release :: ResourceSet -> STM ()
+  }
+
+instance Semigroup Lock where
+  Lock l1 u1 <> Lock l2 u2 = Lock (l1 <> l2) (u1 <> u2)
+instance Monoid Lock where
+  mempty = Lock mempty mempty
+
+
 
 -- | Primitive for adding resource to set of resources
 basicAddResource
@@ -69,8 +83,8 @@ basicAddResource (ResourceSet m) fun = do
 
 -- | Primitive for requesting resource for evaluation. Should be only
 --   used for 'Resource' instances definition
-basicRequestResource :: forall a. Typeable a => ResourceSet -> a -> STM ()
-basicRequestResource (ResourceSet m) a =
+basicRequestResource :: forall a. Typeable a => a -> ResourceSet -> STM ()
+basicRequestResource a (ResourceSet m) =
   case typeOf a `Map.lookup` m of
     Nothing -> error $ "requestResource: " ++ show (typeOf a) ++ " is not available"
     Just (SomeResource (lock,_))
@@ -79,8 +93,8 @@ basicRequestResource (ResourceSet m) a =
 
 -- | Primitive for releasing resource after evaluation. Should be only
 --   used for 'Resource' instances definition
-basicReleaseResource :: forall a. Typeable a => ResourceSet -> a -> STM ()
-basicReleaseResource (ResourceSet m) a =
+basicReleaseResource :: forall a. Typeable a => a -> ResourceSet -> STM ()
+basicReleaseResource a (ResourceSet m) =
   case typeOf a `Map.lookup` m of
     Nothing -> error $ "releaseResource: " ++ show (typeOf a) ++ " is not available"
     Just (SomeResource (_,unlock))
@@ -98,9 +112,7 @@ class Typeable a => Resource a where
   --   them to set of resources
   createResource  :: a -> ResourceSet -> IO ResourceSet
   -- | Request resource for set and block if there isn't enough
-  requestResource :: ResourceSet -> a -> STM ()
-  -- | Release resource to set. Should not block
-  releaseResource :: ResourceSet -> a -> STM ()
+  resourceLock :: a -> Lock
 
 
 -- | Perform action which requires resource. It ensures that resource
@@ -112,8 +124,9 @@ withResources
   -> IO a        -- ^ Action to execute
   -> IO a
 withResources res r = bracket_ ini fini where
-  ini  = atomically $ requestResource res r
-  fini = atomically $ releaseResource res r
+  lock = resourceLock r
+  ini  = atomically $ lock.acquire res
+  fini = atomically $ lock.release res
 
 
 ----------------------------------------------------------------
@@ -131,10 +144,9 @@ instance Typeable a => Resource (ResAsMutex a) where
       ( \_ -> takeTMVar lock
       , \_ -> putTMVar  lock ()
       )
-  requestResource = coerce (basicRequestResource @a)
-  releaseResource = coerce (basicReleaseResource @a)
-
-
+  resourceLock a = Lock { acquire = basicRequestResource a
+                        , release = basicReleaseResource a
+                        }
 
 -- | Derive resource where there're N instance of resource and we
 --   can't use more than that. Flow may request more than one.
@@ -157,8 +169,9 @@ instance (Typeable a, Coercible a Int) => Resource (ResAsCounter a) where
             modifyTVar' counter (+ k)
       )
     where ty = typeOf (undefined :: a)
-  requestResource = coerce (basicRequestResource @a)
-  releaseResource = coerce (basicReleaseResource @a)
+  resourceLock a = Lock { acquire = basicRequestResource a
+                        , release = basicReleaseResource a
+                        }
 
 
 ----------------------------------------------------------------
@@ -167,33 +180,21 @@ instance (Typeable a, Coercible a Int) => Resource (ResAsCounter a) where
 
 -- | Request nothing
 instance Resource () where
-  createResource      = pure pure
-  requestResource _ _ = pure ()
-  releaseResource _ _ = pure ()
+  createResource = pure pure
+  resourceLock   = mempty
+
 
 instance (Resource a, Resource b) => Resource (a,b) where
   createResource (a,b) =  createResource b
                       <=< createResource a
-  requestResource r (a,b) = do
-    requestResource r a
-    requestResource r b
-  releaseResource r (a,b) = do
-    releaseResource r a
-    releaseResource r b
+  resourceLock (a,b) = resourceLock a <> resourceLock b
 
 instance (Resource a, Resource b, Resource c) => Resource (a,b,c) where
   createResource (a,b,c)
     =  createResource c
    <=< createResource b
    <=< createResource a
-  requestResource r (a,b,c) = do
-    requestResource r a
-    requestResource r b
-    requestResource r c
-  releaseResource r (a,b,c) = do
-    releaseResource r a
-    releaseResource r b
-    releaseResource r c
+  resourceLock (a,b,c) = resourceLock a <> resourceLock b <> resourceLock c
 
 instance (Resource a, Resource b, Resource c, Resource d) => Resource (a,b,c,d) where
   createResource (a,b,c,d)
@@ -201,16 +202,8 @@ instance (Resource a, Resource b, Resource c, Resource d) => Resource (a,b,c,d) 
    <=< createResource c
    <=< createResource b
    <=< createResource a
-  requestResource r (a,b,c,d) = do
-    requestResource r a
-    requestResource r b
-    requestResource r c
-    requestResource r d
-  releaseResource r (a,b,c,d) = do
-    releaseResource r a
-    releaseResource r b
-    releaseResource r c
-    releaseResource r d
+  resourceLock (a,b,c,d) = resourceLock a <> resourceLock b <> resourceLock c <> resourceLock d
+
 
 
 ----------------------------------------------------------------

@@ -139,7 +139,7 @@ prepareFun ctx FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx.logger f
   for_ fun.param $ \fid -> when (fid `Set.notMember` exists) $
     atomically $ readTMVar (fst $ outputOf fid)
   -- Request resources
-  atomically $ fun.requestRes res
+  atomically $ fun.resources.acquire res
   -- Run action
   case fun.workflow of
     -- Prepare normal action. We first create output directory and
@@ -151,7 +151,7 @@ prepareFun ctx FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx.logger f
   -- Signal that we successfully completed execution
   atomically $ do
     putTMVar (fst fun.output) ()
-    fun.releaseRes res
+    fun.resources.release res
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output

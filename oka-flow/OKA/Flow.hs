@@ -105,8 +105,7 @@ basicLiftWorkflow resource exe p = Flow $ do
     { workflow   = exe
     , metadata   = meta
     , output     = ()
-    , requestRes = \r -> requestResource r resource
-    , releaseRes = \r -> releaseResource r resource
+    , resources  = resourceLock resource
     , param      = res
     }
   return $ Result fid
