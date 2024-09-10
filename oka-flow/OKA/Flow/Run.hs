@@ -134,7 +134,7 @@ prepareFun
   -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
   -> ResourceSet
   -> IO ()
-prepareFun ctx FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx fun $ do
+prepareFun ctx FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx.logger fun $ do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> when (fid `Set.notMember` exists) $
     atomically $ readTMVar (fst $ outputOf fid)
@@ -191,9 +191,10 @@ prepareFun ctx FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx fun $ do
       renameDirectory build out
 
 
-crashReport :: FlowCtx eff -> Fun i (a, Maybe StorePath) -> IO x -> IO x
-crashReport ctx fun = handle $ \e0@(SomeException e) -> do
+-- Report crash in case of exception
+crashReport :: FlowLogger -> Fun i (a, Maybe StorePath) -> IO x -> IO x
+crashReport logger fun = handle $ \e0@(SomeException e) -> do
   let path = snd fun.output
   if | Just AsyncCancelled <- cast e -> pure ()
-     | otherwise -> ctx.logger.crash path e0
+     | otherwise -> logger.crash path e0
   throwIO e
