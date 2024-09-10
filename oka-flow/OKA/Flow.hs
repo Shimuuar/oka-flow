@@ -22,21 +22,22 @@
 -- programs. Latter is solved by having many small programs instead
 -- one large one. This way we can recompile only few modules at time.
 module OKA.Flow
-  ( -- * Primitives
-    Workflow(..)
-  , Action(..)
-    -- * Flow monad
-  , Flow
+  ( -- * Flow monad
+    Flow
   , appendMeta
   , scopeMeta
   , restrictMeta
   , Result
   , ResultSet(..)
   , want
+  , liftEff
+    -- * Defining workflows
+  , Workflow(..)
+  , Action(..)
+  , basicLiftWorkflow
   , liftWorkflow
   , basicLiftPhony
   , liftPhony
-  , liftEff
     -- * Resources
   , Resource(..)
   , ResAsMutex(..)
@@ -70,11 +71,23 @@ import OKA.Flow.Resources
 want :: ResultSet a => a -> Flow eff ()
 want a = Flow $ _2 . flowTgtL %= (<> Set.fromList (toResultSet a))
 
+
+-- | Lift effect
+liftEff :: eff a -> Flow eff a
+liftEff = Flow . lift . singleton
+
+
+----------------------------------------------------------------
+-- Defining effects
+----------------------------------------------------------------
+
+-- | Basic primitive for creating workflows. It doesn't offer any type
+--   safety so it's better to use other tools
 basicLiftWorkflow
   :: (ResultSet params, Resource res)
-  => res
-  -> Workflow -- ^ Executioner.
-  -> params   -- ^ Parameters
+  => res      -- ^ Resource required by workflow
+  -> Workflow -- ^ Workflow to be executed
+  -> params   -- ^ Parameters of workflow
   -> Flow eff (Result a)
 basicLiftWorkflow resource exe p = Flow $ do
   (meta,gr) <- get
@@ -109,7 +122,6 @@ liftWorkflow
   -> Flow eff (Result a)
 liftWorkflow res action p = basicLiftWorkflow res (Workflow action) p
 
-
 -- | Lift phony workflow (not checked)
 basicLiftPhony
   :: (ResultSet params, Resource res)
@@ -133,7 +145,3 @@ liftPhony
 liftPhony res exe = basicLiftPhony res $ \_ meta args -> do
   a <- runFlowArguments args
   exe meta a
-
--- | Lift effect
-liftEff :: eff a -> Flow eff a
-liftEff = Flow . lift . singleton
