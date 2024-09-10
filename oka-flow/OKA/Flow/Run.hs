@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiWayIf       #-}
+{-# LANGUAGE NamedFieldPuns   #-}
 {-# LANGUAGE RankNTypes       #-}
 {-# LANGUAGE RecordWildCards  #-}
 -- |
@@ -72,15 +73,15 @@ instance Monoid FlowLogger where
 
 -- | Evaluation context for dataflow program
 data FlowCtx eff = FlowCtx
-  { flowCtxRoot    :: FilePath
+  { root   :: FilePath
     -- ^ Root directory for cache
   , flowTgtExists  :: FilePath -> IO Bool
     -- ^ Function which is used to check whether output exists
-  , flowCtxEff     :: forall a. eff a -> IO a
+  , runEffect :: forall a. eff a -> IO a
     -- ^ Evaluator for effects allowed in dataflow program
-  , flowCtxRes     :: ResourceSet
+  , res    :: ResourceSet
     -- ^ Resources which are available for evaluator.
-  , logger         :: FlowLogger
+  , logger :: FlowLogger
     -- ^ Logger for evaluator
   }
 
@@ -96,10 +97,10 @@ runFlow
   -> Metadata    -- ^ Metadata for program
   -> Flow eff r  -- ^ Dataflow program
   -> IO ()
-runFlow ctx@FlowCtx{..} meta (Flow m) = do
+runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
   -- Evaluate dataflow graph
   gr <- fmap (deduplicateGraph . hashFlowGraph)
-      $ interpretWithMonad flowCtxEff
+      $ interpretWithMonad runEffect
       $ fmap (\(r,(_,gr)) -> addTargets r gr)
       $ runStateT m (meta, FlowGraph mempty mempty)
   -- Prepare graph for evaluation
@@ -112,12 +113,12 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
                   (getStorePath targets.wanted)
   -- Evaluator
   mapConcurrently_ id
-    [ prepareFun ctx gr_exe targets (gr_exe.graph ! i) flowCtxRes
+    [ prepareFun ctx gr_exe targets (gr_exe.graph ! i) ctx.res
     | i <- Set.toList targets.wanted
     ]
   where
     addTargets r gr = gr & flowTgtL %~ mappend (Set.fromList (toResultSet r))
-    targetExists path = flowTgtExists (flowCtxRoot </> storePath path)
+    targetExists path = ctx.flowTgtExists (ctx.root </> storePath path)
 
 
 -- Add TMVars to each node of graph. This is needed in order to
@@ -133,7 +134,7 @@ prepareFun
   -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
   -> ResourceSet
   -> IO ()
-prepareFun ctx@FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx fun $ do
+prepareFun ctx FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx fun $ do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> when (fid `Set.notMember` exists) $
     atomically $ readTMVar (fst $ outputOf fid)
@@ -158,19 +159,15 @@ prepareFun ctx@FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport 
     --
     meta   = fun.metadata                        -- Metadata
     paramP = toPath . outputOf <$> fun.param     -- Parameters relative to store
-    params = [ flowCtxRoot </> p | p <- paramP ] -- Parameters as real path
+    params = [ ctx.root </> p | p <- paramP ] -- Parameters as real path
     --
     toPath (_,Just path) = storePath path
     toPath (_,Nothing  ) = error "INTERNAL ERROR: dependence on PHONY node"
     -- Execution of haskell action
     prepareNormal action = normalExecution $ \build -> do
-      BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
-      writeFile    (build </> "deps.txt")  $ unlines paramP
       action meta params build
     -- Execution of an extenrnal executable
     prepareExe exe@Executable{} = normalExecution $ \build -> do
-      BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
-      writeFile    (build </> "deps.txt")  $ unlines paramP
       exe.io res
       runExternalProcess exe.executable meta (build:params)
     -- Standard wrapper for execution of workflows that create outputs
@@ -178,13 +175,15 @@ prepareFun ctx@FlowCtx{..} FlowGraph{graph=gr} FIDSet{..} fun res = crashReport 
       let path  = case fun.output of
             (_, Just p) -> p
             _           -> error "INTERNAL ERROR: phony node treated as normal"
-      let out   = flowCtxRoot </> storePath path -- Output directory
-          build = out ++ "-build"                -- Temporary build directory
+      let out   = ctx.root </> storePath path -- Output directory
+          build = out ++ "-build"             -- Temporary build directory
       -- Create output directory
-      createDirectoryIfMissing False (flowCtxRoot </> path.name)
+      createDirectoryIfMissing False (ctx.root </> path.name)
       createDirectory build
       ctx.logger.start path
       t1 <- getCurrentTime
+      BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
+      writeFile    (build </> "deps.txt")  $ unlines paramP
       _  <- action build `onException` removeDirectoryRecursive build
       t2 <- getCurrentTime
       ctx.logger.done path (diffUTCTime t2 t1)
