@@ -175,20 +175,16 @@ prepareFun ctx FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx.logger f
       let path  = case fun.output of
             (_, Just p) -> p
             _           -> error "INTERNAL ERROR: phony node treated as normal"
-      let out   = ctx.root </> storePath path -- Output directory
-          build = out ++ "-build"             -- Temporary build directory
-      -- Create output directory
-      createDirectoryIfMissing False (ctx.root </> path.name)
-      createDirectory build
       ctx.logger.start path
       t1 <- getCurrentTime
-      BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
-      writeFile    (build </> "deps.txt")  $ unlines paramP
-      _  <- action build `onException` removeDirectoryRecursive build
+      withBuildDirectory ctx.root path $ \build -> do
+        BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
+        writeFile    (build </> "deps.txt")  $ unlines paramP
+        () <- action build
+        pure ()
       t2 <- getCurrentTime
       ctx.logger.done path (diffUTCTime t2 t1)
-      --
-      renameDirectory build out
+
 
 
 -- Report crash in case of exception
@@ -198,3 +194,15 @@ crashReport logger fun = handle $ \e0@(SomeException e) -> do
   if | Just AsyncCancelled <- cast e -> pure ()
      | otherwise -> logger.crash path e0
   throwIO e
+
+-- Create directory with -build prefix and rename it to final name
+withBuildDirectory :: FilePath -> StorePath -> (FilePath -> IO a) -> IO a
+withBuildDirectory root path action = do
+  createDirectoryIfMissing False group
+  createDirectory build
+  a <- action build `onException` removeDirectoryRecursive build
+  a <$ renameDirectory build out
+  where
+    group = root </> path.name
+    out   = root </> storePath path
+    build = out <> "-build"
