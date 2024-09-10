@@ -13,19 +13,15 @@ module OKA.Flow.Types
   , Workflow(..)
   , isPhony
     -- * Store objects API
-  , StoreObject(..)
-  , ObjProduct(..)
-    -- ** Dataflow graph primitives
   , FunID(..)
-  , Result
-  , ResultSet
+  , Result(..)
+  , ResultSet(..)
     -- ** Store path
   , Hash(..)
   , StorePath(..)
   , storePath
   ) where
 
-import Control.Applicative
 import Data.ByteString        (ByteString)
 import Data.ByteString.Char8  qualified as BC8
 import Data.ByteString.Base16 qualified as Base16
@@ -35,7 +31,6 @@ import GHC.Generics
 
 import OKA.Metadata           (Metadata)
 import OKA.Flow.Resources
-import OKA.Flow.Parser
 
 
 ----------------------------------------------------------------
@@ -70,59 +65,49 @@ isPhony = \case
 -- Store objects and interaction
 ----------------------------------------------------------------
 
--- | Opaque handle to store object. It's identified by value of type
---   @r@ which could be dataflow graph node identifier 'FunID' or
---   store path 'StorePath'.
-newtype StoreObject r a = StoreObject r
-  deriving stock (Show,Eq)
-
 -- | This type class observe isomorphism between tuples and records
 --   containing 'StoreObject' and lists of underlying data types
-class ObjProduct r a where
-  toResultSet    :: a -> [r]
-  parseResultSet :: ListParser r a
+class ResultSet a where
+  toResultSet    :: a -> [FunID]
 
 
-instance ObjProduct r () where
+instance ResultSet () where
   toResultSet () = []
-  parseResultSet = pure ()
 
-instance ObjProduct r (StoreObject r a) where
-  toResultSet (StoreObject i) = [i]
-  parseResultSet = StoreObject <$> consume
+instance ResultSet (Result a) where
+  toResultSet (Result i) = [i]
 
-instance ObjProduct r a => ObjProduct r [a] where
+instance ResultSet a => ResultSet [a] where
   toResultSet    = concatMap toResultSet
-  parseResultSet = many parseResultSet
 
 deriving via Generically (a,b)
-    instance (ObjProduct r a, ObjProduct r b) => ObjProduct r (a,b)
+    instance (ResultSet a, ResultSet b) => ResultSet (a,b)
 deriving via Generically (a,b,c)
-    instance (ObjProduct r a, ObjProduct r b, ObjProduct r c) => ObjProduct r (a,b,c)
+    instance (ResultSet a, ResultSet b, ResultSet c) => ResultSet (a,b,c)
 deriving via Generically (a,b,c,d)
-    instance (ObjProduct r a, ObjProduct r b, ObjProduct r c, ObjProduct r d) => ObjProduct r (a,b,c,d)
+    instance (ResultSet a, ResultSet b, ResultSet c, ResultSet d) => ResultSet (a,b,c,d)
+deriving via Generically (a,b,c,d,e)
+    instance (ResultSet a, ResultSet b, ResultSet c, ResultSet d, ResultSet e) => ResultSet (a,b,c,d,e)
+deriving via Generically (a,b,c,d,e,f)
+    instance (ResultSet a, ResultSet b, ResultSet c, ResultSet d, ResultSet e, ResultSet f) => ResultSet (a,b,c,d,e,f)
 
 
 
 -- | Used for deriving using generics
-instance (Generic a, GObjProduct r (Rep a)) => ObjProduct r (Generically a) where
+instance (Generic a, GResultSet (Rep a)) => ResultSet (Generically a) where
   toResultSet (Generically a) = gtoResultSet (from a)
-  parseResultSet = Generically . to <$> gparseResultSet
 
 -- Type class for generics
-class GObjProduct r f where
-  gtoResultSet :: f () -> [r]
-  gparseResultSet :: ListParser r (f ())
+class GResultSet f where
+  gtoResultSet :: f () -> [FunID]
 
-deriving newtype instance (GObjProduct r f) => GObjProduct r (M1 i c f)
+deriving newtype instance (GResultSet f) => GResultSet (M1 i c f)
 
-instance (GObjProduct r f, GObjProduct r g) => GObjProduct r (f :*: g) where
+instance (GResultSet f, GResultSet g) => GResultSet (f :*: g) where
   gtoResultSet (f :*: g) = gtoResultSet f <> gtoResultSet g
-  gparseResultSet = (:*:) <$> gparseResultSet <*> gparseResultSet
 
-instance (ObjProduct r a) => GObjProduct r (K1 i a) where
-  gtoResultSet    = coerce (toResultSet    @r @a)
-  gparseResultSet = coerce (parseResultSet @r @a)
+instance (ResultSet a) => GResultSet (K1 i a) where
+  gtoResultSet = coerce (toResultSet @a)
 
 
 
@@ -137,10 +122,8 @@ newtype FunID = FunID Int
 -- | Opaque handle to result of evaluation of single dataflow
 --   function. It doesn't contain any real data and in fact is just a
 --   promise to evaluate result.
-type Result = StoreObject FunID
+newtype Result a = Result FunID
 
--- | Data types which could be used as parameters to dataflow functions
-type ResultSet = ObjProduct FunID
 
 
 

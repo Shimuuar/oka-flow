@@ -96,7 +96,7 @@ basicLiftWorkflow resource exe p = Flow $ do
     , releaseRes = \r -> releaseResource r resource
     , param      = res
     }
-  return $ StoreObject fid
+  return $ Result fid
 
 -- | Create new primitive workflow.
 --
