@@ -1,4 +1,7 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DerivingVia          #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE UndecidableInstances #-}
 -- |
 -- Standard workflows
 module OKA.Flow.Std
@@ -8,7 +11,6 @@ module OKA.Flow.Std
   , stdJupyter
   ) where
 
-import Control.Monad.IO.Class
 import Control.Monad.State.Strict
 import System.FilePath            ((</>))
 import System.Directory           (createFileLink,createDirectory)
@@ -18,6 +20,7 @@ import System.Environment         (getEnvironment)
 
 import OKA.Flow.Tools
 import OKA.Flow
+import OKA.Flow.Parser
 import OKA.Metadata
 
 
@@ -27,12 +30,10 @@ import OKA.Metadata
 --   as well) is used in order to allow other flows to generate
 --   compatible outputs.
 data SavedMeta a = SavedMeta a
+  deriving FlowArgument via AsFlowOutput (SavedMeta a)
 
-instance (IsMeta a) => FlowArgument (SavedMeta a) where
-  type AsRes (SavedMeta a) = Result (SavedMeta a)
-  parserFlowArguments = do
-    path <- parseSingleArgument
-    liftIO $ SavedMeta <$> readMetadata (path </> "saved.json")
+instance (IsMeta a) => FlowInput (SavedMeta a) where
+  readOutput path = SavedMeta <$> readMetadata (path </> "saved.json")
 
 -- | Save metadata value so it could be passed as parameter.
 stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
@@ -45,6 +46,7 @@ stdSaveMeta a = scopeMeta $ do
                      _  -> error "stdSaveMeta does not take any arguments"
         createFileLink "meta.json" (out </> "saved.json")
     } ()
+
 
 -- | Run jupyter notebook. Metadata and parameters are passed in
 --   environment variables.

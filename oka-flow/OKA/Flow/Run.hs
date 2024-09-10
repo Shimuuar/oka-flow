@@ -1,6 +1,7 @@
-{-# LANGUAGE MultiWayIf      #-}
-{-# LANGUAGE RankNTypes      #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MultiWayIf       #-}
+{-# LANGUAGE RankNTypes       #-}
+{-# LANGUAGE RecordWildCards  #-}
 -- |
 -- Evaluator of dataflow graph.
 module OKA.Flow.Run
@@ -29,7 +30,9 @@ import System.Directory             (createDirectory,createDirectoryIfMissing,re
 
 import OKA.Metadata
 import OKA.Flow.Graph
+import OKA.Flow.Resources
 import OKA.Flow.Types
+
 
 ----------------------------------------------------------------
 --
@@ -103,9 +106,8 @@ runFlow ctx@FlowCtx{..} meta (Flow m) = do
   let getStorePath fids = concat [ gr ^.. flowGraphL . at fid . _Just . to (.output) . _Just
                                  | fid <- toList fids
                                  ]
-      paths_wanted = getStorePath targets.wanted
-      paths_exist  = getStorePath targets.exists
-  ctx.logger.init paths_exist paths_wanted
+  ctx.logger.init (getStorePath targets.exists)
+                  (getStorePath targets.wanted)
   -- Evaluator
   mapConcurrently_ id
     [ prepareFun ctx gr_exe targets (gr_exe.graph ! i) flowCtxRes
