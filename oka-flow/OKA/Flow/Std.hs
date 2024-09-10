@@ -19,6 +19,7 @@ import System.Environment         (getEnvironment)
 
 import OKA.Flow.Tools
 import OKA.Flow
+import OKA.Flow.Parser
 import OKA.Metadata
 
 
@@ -32,7 +33,7 @@ data SavedMeta a = SavedMeta a
 instance (IsMeta a) => FlowArgument (SavedMeta a) where
   type AsRes (SavedMeta a) = Result (SavedMeta a)
   parserFlowArguments = do
-    path <- parseSingleArgument
+    path <- consume
     liftIO $ SavedMeta <$> readMetadata (path </> "saved.json")
 
 -- | Save metadata value so it could be passed as parameter.
