@@ -22,7 +22,6 @@ import Data.Map.Strict  qualified as Map
 import Data.Map.Strict  (Map)
 import System.IO.Temp   (withSystemTempDirectory)
 import System.FilePath  ((</>))
-import System.Directory (doesDirectoryExist)
 import Test.Tasty
 import Test.Tasty.HUnit
 import GHC.Generics     (Generic)
@@ -128,7 +127,6 @@ tests = testGroup "Run flow"
 withSimpleFlow :: (FlowCtx IO -> IO a) -> IO a
 withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
   action FlowCtx { root      = dir
-                 , flowTgtExists = doesDirectoryExist
                  , runEffect = id
                  , res       = mempty
                  , logger    = mempty

@@ -27,7 +27,9 @@ import Data.Set                     qualified as Set
 import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import Data.Typeable
 import System.FilePath              ((</>))
-import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive)
+import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
+                                     doesDirectoryExist
+                                    )
 
 import OKA.Metadata
 import OKA.Flow.Graph
@@ -73,15 +75,13 @@ instance Monoid FlowLogger where
 
 -- | Evaluation context for dataflow program
 data FlowCtx eff = FlowCtx
-  { root   :: FilePath
+  { root      :: FilePath
     -- ^ Root directory for cache
-  , flowTgtExists  :: FilePath -> IO Bool
-    -- ^ Function which is used to check whether output exists
   , runEffect :: forall a. eff a -> IO a
     -- ^ Evaluator for effects allowed in dataflow program
-  , res    :: ResourceSet
+  , res       :: ResourceSet
     -- ^ Resources which are available for evaluator.
-  , logger :: FlowLogger
+  , logger    :: FlowLogger
     -- ^ Logger for evaluator
   }
 
@@ -118,7 +118,7 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
     ]
   where
     addTargets r gr = gr & flowTgtL %~ mappend (Set.fromList (toResultSet r))
-    targetExists path = ctx.flowTgtExists (ctx.root </> storePath path)
+    targetExists path = doesDirectoryExist (ctx.root </> storePath path)
 
 
 -- Add TMVars to each node of graph. This is needed in order to
