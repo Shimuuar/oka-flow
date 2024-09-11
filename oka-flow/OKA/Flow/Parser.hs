@@ -1,5 +1,3 @@
-{-# LANGUAGE DerivingVia     #-}
-{-# LANGUAGE RoleAnnotations #-}
 -- |
 -- Extremely simple parser for parsing lists
 module OKA.Flow.Parser

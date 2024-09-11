@@ -1,7 +1,3 @@
-{-# LANGUAGE DerivingVia      #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GADTs            #-}
-{-# LANGUAGE ViewPatterns     #-}
 -- |
 -- Very simple resource management system. We need way to observe
 -- resource limitation when scheduling workflows. We use very simple
