@@ -9,6 +9,7 @@ module OKA.Flow.Run
 
 import Control.Concurrent.Async
 import Control.Concurrent.STM.TMVar
+import Control.Concurrent.MVar
 import Control.Exception
 import Control.Lens
 import Control.Monad
@@ -18,7 +19,9 @@ import Control.Monad.STM
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
+import Data.Traversable
 import Data.Map.Strict              ((!))
+import Data.Map.Strict              qualified as Map
 import Data.Set                     qualified as Set
 import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import Data.Typeable
@@ -98,7 +101,10 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
   gr <- fmap (deduplicateGraph . hashFlowGraph)
       $ interpretWithMonad runEffect
       $ fmap (\(r,st) -> addTargets r st.graph)
-      $ runStateT m FlowSt{meta=meta, graph=FlowGraph mempty mempty}
+      $ runStateT m FlowSt{ meta       = meta
+                          , graph      = FlowGraph mempty mempty
+                          , transforms = []
+                          }
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr
   gr_exe  <- addTMVars gr
@@ -107,9 +113,33 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
                                  ]
   ctx.logger.init (getStorePath targets.exists)
                   (getStorePath targets.wanted)
+  -- Prepare dictionary of external metadata which is loaded from
+  -- store path
+  ext_meta
+    <- fmap Map.fromList
+    $  sequence
+    [ case k `Set.member` targets.wanted of
+        True  -> do io <- once readMeta
+                    pure (k, do atomically $ readTMVar (fst $ (gr_exe.graph ! k).output)
+                                io
+                         )
+        False -> do io <- once readMeta
+                    pure (k,io)
+      --
+    | Fun{extMeta} <- toList gr_exe.graph
+    , ext          <- extMeta
+    , let k    = ext.key
+          path = case (gr_exe.graph ! k).output of
+            (_,Just p)  -> ctx.root </> storePath p </> "saved.json"
+            (_,Nothing) -> error "Dependence on PHONY target"
+          readMeta = do
+            (JSON.eitherDecode <$> BL.readFile path) >>= \case
+              Left  e  -> error e
+              Right js -> pure $ ext.load js
+    ]
   -- Evaluator
   mapConcurrently_ id
-    [ prepareFun ctx gr_exe targets (gr_exe.graph ! i) ctx.res
+    [ prepareFun ctx gr_exe targets ext_meta (gr_exe.graph ! i) ctx.res
     | i <- Set.toList targets.wanted
     ]
   where
@@ -127,21 +157,27 @@ prepareFun
   :: FlowCtx eff                           -- Evaluation context
   -> FlowGraph (TMVar (), Maybe StorePath) -- Full dataflow graph
   -> FIDSet                                -- Our target set
+  -> Map.Map FunID (IO Metadata)
   -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
   -> ResourceSet
   -> IO ()
-prepareFun ctx FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx.logger fun $ do
+prepareFun ctx FlowGraph{graph=gr} FIDSet{..} ext_meta fun res = crashReport ctx.logger fun $ do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> when (fid `Set.notMember` exists) $
     atomically $ readTMVar (fst $ outputOf fid)
+  -- Compute metadata which should be passed to the workflow by
+  -- applying data loaded from 
+  meta <- do
+    ext <- for fun.extMeta $ \ExtMeta{key} -> ext_meta ! key
+    pure $! foldr (flip (<>)) fun.metadata ext
   -- Request resources
   atomically $ fun.resources.acquire res
   -- Run action
   case fun.workflow of
     -- Prepare normal action. We first create output directory and
     -- write everything there. After we're done we rename it.
-    Workflow (Action _ act) -> prepareNormal (act res)
-    WorkflowExe exe         -> prepareExe    exe
+    Workflow (Action _ act) -> prepareNormal meta (act res)
+    WorkflowExe exe         -> prepareExe    meta exe
     -- Execute phony action. We don't need to bother with setting up output
     Phony    act            -> act res meta params
   -- Signal that we successfully completed execution
@@ -153,21 +189,20 @@ prepareFun ctx FlowGraph{graph=gr} FIDSet{..} fun res = crashReport ctx.logger f
       Just f  -> f.output
       Nothing -> error "INTERNAL ERROR: inconsistent flow graph"
     --
-    meta   = fun.metadata                        -- Metadata
-    paramP = toPath . outputOf <$> fun.param     -- Parameters relative to store
+    paramP = toPath . outputOf <$> fun.param  -- Parameters relative to store
     params = [ ctx.root </> p | p <- paramP ] -- Parameters as real path
     --
     toPath (_,Just path) = storePath path
     toPath (_,Nothing  ) = error "INTERNAL ERROR: dependence on PHONY node"
     -- Execution of haskell action
-    prepareNormal action = normalExecution $ \build -> do
+    prepareNormal meta action = normalExecution meta $ \build -> do
       action meta params build
     -- Execution of an extenrnal executable
-    prepareExe exe@Executable{} = normalExecution $ \build -> do
+    prepareExe meta exe@Executable{} = normalExecution meta $ \build -> do
       exe.io res
       runExternalProcess exe.executable meta (build:params)
     -- Standard wrapper for execution of workflows that create outputs
-    normalExecution action = do
+    normalExecution meta action = do
       let path  = case fun.output of
             (_, Just p) -> p
             _           -> error "INTERNAL ERROR: phony node treated as normal"
@@ -202,3 +237,15 @@ withBuildDirectory root path action = do
     group = root </> path.name
     out   = root </> storePath path
     build = out <> "-build"
+
+
+-- | Return action that will perform action exactly once
+once :: IO a -> IO (IO a)
+once action = do
+  cache <- newMVar Nothing
+  return $ readMVar cache >>= \case
+    Just a  -> pure a
+    Nothing -> modifyMVar cache $ \case
+      Just a  -> return (Just a, a)
+      Nothing -> do a <- action
+                    return (Just a, a)

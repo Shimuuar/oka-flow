@@ -22,6 +22,7 @@ module OKA.Flow
   , ResultSet(..)
   , want
   , liftEff
+  , externalMeta
     -- * Defining workflows
   , Workflow(..)
   , Action(..)
@@ -42,9 +43,7 @@ module OKA.Flow
 import Control.Lens
 import Control.Monad.State.Strict
 import Control.Monad.Operational
-import Data.Map.Strict            ((!))
-import Data.Map.Strict            qualified as Map
-import Data.Set                   qualified as Set
+import Data.Typeable
 
 import OKA.Metadata
 import OKA.Flow.Graph
@@ -52,77 +51,24 @@ import OKA.Flow.Types
 import OKA.Flow.Run
 import OKA.Flow.Tools
 import OKA.Flow.Resources
+import OKA.Flow.Std
 
 
 ----------------------------------------------------------------
 -- Flow monad
 ----------------------------------------------------------------
 
--- | We want given workflow evaluated
-want :: ResultSet a => a -> Flow eff ()
-want a = Flow $ stGraphL . flowTgtL %= (<> Set.fromList (toResultSet a))
-
-
 -- | Lift effect
 liftEff :: eff a -> Flow eff a
 liftEff = Flow . lift . singleton
 
-
-----------------------------------------------------------------
--- Defining effects
-----------------------------------------------------------------
-
--- | Basic primitive for creating workflows. It doesn't offer any type
---   safety so it's better to use other tools
-basicLiftWorkflow
-  :: (ResultSet params, Resource res)
-  => res      -- ^ Resource required by workflow
-  -> Workflow -- ^ Workflow to be executed
-  -> params   -- ^ Parameters of workflow
-  -> Flow eff (Result a)
-basicLiftWorkflow resource exe p = Flow $ do
-  st <- get
-  -- Allocate new ID
-  let fid = case Map.lookupMax st.graph.graph of
-              Just (FunID i, _) -> FunID (i + 1)
-              Nothing           -> FunID 0
-  -- Dependence on function without result is an error
-  let res = toResultSet p
-      phonyDep i = isPhony $ (st.graph.graph ! i).workflow
-  when (any phonyDep res) $ do
-    error "Depending on phony target"
-  -- Add workflow to graph
-  stGraphL . flowGraphL . at fid .= Just Fun
-    { workflow   = exe
-    , metadata   = st.meta
-    , output     = ()
-    , resources  = resourceLock resource
-    , param      = res
-    }
-  return $ Result fid
-
--- | Create new primitive workflow.
---
---   This function does not provide any type safety by itself!
-liftWorkflow
-  :: (ResultSet params, Resource res)
-  => res    -- ^ Resources required by workflow
-  -> Action -- ^ Action to execute
-  -> params -- ^ Parameters
-  -> Flow eff (Result a)
-liftWorkflow res action p = basicLiftWorkflow res (Workflow action) p
-
--- | Lift phony workflow (not checked)
-basicLiftPhony
-  :: (ResultSet params, Resource res)
-  => res
-     -- ^ Resources required by workflow
-  -> (ResourceSet -> Metadata -> [FilePath] -> IO ())
-     -- ^ Action to execute
-  -> params
-     -- ^ Parameters to pass to workflow
-  -> Flow eff ()
-basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony exe) p
+-- | Load contents of saved meta before execution of workflow
+externalMeta :: forall a eff. IsMeta a => Result (SavedMeta a) -> Flow eff ()
+externalMeta (Result fid) = Flow $ do
+  stTransformsL %= (ExtMeta { key = fid
+                            , tyRep = typeOf (undefined :: a)
+                            , load  = toMetadata . decodeMetadata @a
+                            }:)
 
 -- | Lift phony action using standard tools
 liftPhony

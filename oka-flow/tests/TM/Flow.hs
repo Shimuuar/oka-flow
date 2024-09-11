@@ -21,6 +21,7 @@ import GHC.TypeLits
 import OKA.Metadata
 import OKA.Flow.Graph
 import OKA.Flow.Run
+import OKA.Flow.Std
 import OKA.Flow
 
 tests :: TestTree
@@ -113,6 +114,22 @@ tests = testGroup "Run flow"
                     want =<< flowA ()
       runFlow ctx meta flow
       observe "flow" obsA [100]
+    -- External metadata works
+  , testCase "externalMeta" $ withSimpleFlow $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt @"nA"
+      let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
+          flow = do externalMeta =<< stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
+                    want =<< flowA ()
+      runFlow ctx meta flow
+      observe "flow" obsA [200]
+  , testCase "externalMeta2" $ withSimpleFlow $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt @"nA"
+      let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
+          flow = do externalMeta =<< stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
+                    externalMeta =<< stdSaveMeta (CounterMeta 300 :: CounterMeta "nA")
+                    want =<< flowA ()
+      runFlow ctx meta flow
+      observe "flow" obsA [300]
   ]
 
 withSimpleFlow :: (FlowCtx IO -> IO a) -> IO a

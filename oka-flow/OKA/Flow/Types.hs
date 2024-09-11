@@ -80,7 +80,7 @@ isPhony = \case
 -- | This type class observe isomorphism between tuples and records
 --   containing 'StoreObject' and lists of underlying data types
 class ResultSet a where
-  toResultSet    :: a -> [FunID]
+  toResultSet :: a -> [FunID]
 
 
 instance ResultSet () where
