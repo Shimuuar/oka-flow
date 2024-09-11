@@ -69,7 +69,7 @@ import OKA.Flow.Resources
 
 -- | We want given workflow evaluated
 want :: ResultSet a => a -> Flow eff ()
-want a = Flow $ _2 . flowTgtL %= (<> Set.fromList (toResultSet a))
+want a = Flow $ stGraphL . flowTgtL %= (<> Set.fromList (toResultSet a))
 
 
 -- | Lift effect
@@ -90,20 +90,20 @@ basicLiftWorkflow
   -> params   -- ^ Parameters of workflow
   -> Flow eff (Result a)
 basicLiftWorkflow resource exe p = Flow $ do
-  (meta,gr) <- get
-  -- Allocate new
-  let fid = case Map.lookupMax gr.graph of
+  st <- get
+  -- Allocate new ID
+  let fid = case Map.lookupMax st.graph.graph of
               Just (FunID i, _) -> FunID (i + 1)
               Nothing           -> FunID 0
   -- Dependence on function without result is an error
   let res = toResultSet p
-      phonyDep i = isPhony $ (gr.graph ! i).workflow
+      phonyDep i = isPhony $ (st.graph.graph ! i).workflow
   when (any phonyDep res) $ do
     error "Depending on phony target"
   -- Add workflow to graph
-  _2 . flowGraphL . at fid .= Just Fun
+  stGraphL . flowGraphL . at fid .= Just Fun
     { workflow   = exe
-    , metadata   = meta
+    , metadata   = st.meta
     , output     = ()
     , resources  = resourceLock resource
     , param      = res

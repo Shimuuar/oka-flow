@@ -101,8 +101,8 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
   -- Evaluate dataflow graph
   gr <- fmap (deduplicateGraph . hashFlowGraph)
       $ interpretWithMonad runEffect
-      $ fmap (\(r,(_,gr)) -> addTargets r gr)
-      $ runStateT m (meta, FlowGraph mempty mempty)
+      $ fmap (\(r,st) -> addTargets r st.graph)
+      $ runStateT m FlowSt{meta=meta, graph=FlowGraph mempty mempty}
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr
   gr_exe  <- addTMVars gr

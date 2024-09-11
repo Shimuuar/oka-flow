@@ -11,6 +11,7 @@ module OKA.Flow.Graph
   , FlowGraph(..)
   , FIDSet(..)
   , Flow(..)
+  , FlowSt(..)
   , appendMeta
   , scopeMeta
   , restrictMeta
@@ -23,6 +24,8 @@ module OKA.Flow.Graph
   , flowGraphL
   , fidExistsL
   , fidWantedL
+  , stMetaL
+  , stGraphL
   ) where
 
 import Control.Applicative
@@ -84,17 +87,23 @@ data FlowGraph a = FlowGraph
   deriving stock (Functor, Foldable, Traversable)
 
 
+-- | State of 'Flow' monad
+data FlowSt = FlowSt
+  { meta  :: !Metadata
+  , graph :: !(FlowGraph ())
+  }
+
 -- | Flow monad which we use to build workflow
 newtype Flow eff a = Flow
-  (StateT (Metadata, FlowGraph ()) (Program eff) a)
+  (StateT FlowSt (Program eff) a)
   deriving newtype (Functor, Applicative, Monad)
 
 instance MonadFail (Flow eff) where
   fail = error
 
 instance MonadState Metadata (Flow eff) where
-  get   = Flow $ gets fst
-  put m = Flow $ _1 .= m
+  get   = Flow $ gets (.meta)
+  put m = Flow $ stMetaL .= m
 
 instance Semigroup a => Semigroup (Flow eff a) where
   (<>) = liftA2 (<>)
@@ -269,4 +278,10 @@ flowTgtL :: Lens' (FlowGraph a) (Set FunID)
 flowTgtL = lens (.targets) (\x s -> x {targets = s})
 
 flowGraphL :: Lens (FlowGraph a) (FlowGraph b) (Map FunID (Fun FunID a)) (Map FunID (Fun FunID b))
-flowGraphL = lens (.graph) (\x s -> x {graph = s})
+flowGraphL = lens (.graph) (\FlowGraph{..} s -> FlowGraph{graph = s, ..})
+
+stMetaL :: Lens' FlowSt Metadata
+stMetaL = lens (.meta) (\FlowSt{..} x -> FlowSt{meta=x, ..})
+
+stGraphL :: Lens' FlowSt (FlowGraph ())
+stGraphL = lens (.graph) (\FlowSt{..} x -> FlowSt{graph=x, ..})
