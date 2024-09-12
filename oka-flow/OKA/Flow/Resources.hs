@@ -26,6 +26,7 @@ module OKA.Flow.Resources
   , ResAsMutex(..)
   , ResAsCounter(..)
     -- * Standard resources
+  , SomeResource(..)
   , LockGHC(..)
   , LockCoreCPU(..)
   , LockMemGB(..)
@@ -47,11 +48,11 @@ import Data.Map.Strict    qualified as Map
 --   available resources in types since it leads to complicated type
 --   signatures. Instead we opt for turning unsatisfiable resource
 --   requests into runtime errors.
-newtype ResourceSet = ResourceSet (Map.Map TypeRep SomeResource)
+newtype ResourceSet = ResourceSet (Map.Map TypeRep ResBox)
   deriving newtype (Semigroup, Monoid)
 
-data SomeResource where
-  SomeResource :: Typeable a => (a -> STM (), a -> STM ()) -> SomeResource
+data ResBox where
+  ResBox :: Typeable a => (a -> STM (), a -> STM ()) -> ResBox
 
 
 -- | Data structure which provides pair of STM transaction which are
@@ -75,7 +76,7 @@ basicAddResource
   -> (a -> STM (), a -> STM ()) -- ^ Pair of request\/release functions
   -> ResourceSet
 basicAddResource (ResourceSet m) fun = do
-  ResourceSet $ Map.insert (typeOf (undefined :: a)) (SomeResource fun) m
+  ResourceSet $ Map.insert (typeOf (undefined :: a)) (ResBox fun) m
 
 -- | Primitive for requesting resource for evaluation. Should be only
 --   used for 'Resource' instances definition
@@ -83,7 +84,7 @@ basicRequestResource :: forall a. Typeable a => a -> ResourceSet -> STM ()
 basicRequestResource a (ResourceSet m) =
   case typeOf a `Map.lookup` m of
     Nothing -> error $ "requestResource: " ++ show (typeOf a) ++ " is not available"
-    Just (SomeResource (lock,_))
+    Just (ResBox (lock,_))
       | Just lock' <- cast lock -> lock' a
       | otherwise               -> error $ "requestResource: INTERNAL ERROR"
 
@@ -93,7 +94,7 @@ basicReleaseResource :: forall a. Typeable a => a -> ResourceSet -> STM ()
 basicReleaseResource a (ResourceSet m) =
   case typeOf a `Map.lookup` m of
     Nothing -> error $ "releaseResource: " ++ show (typeOf a) ++ " is not available"
-    Just (SomeResource (_,unlock))
+    Just (ResBox (_,unlock))
       | Just unlock' <- cast unlock -> unlock' a
       | otherwise                   -> error $ "requestResource: INTERNAL ERROR"
 
@@ -205,6 +206,14 @@ instance (Resource a, Resource b, Resource c, Resource d) => Resource (a,b,c,d) 
 ----------------------------------------------------------------
 -- Standard resources
 ----------------------------------------------------------------
+
+-- | Existential wrapper for resource
+data SomeResource where
+  SomeResource :: Resource a => a -> SomeResource
+
+instance Resource SomeResource where
+  createResource (SomeResource a) = createResource a
+  resourceLock   (SomeResource a) = resourceLock   a
 
 -- | We want to have one concurrent build. This data type provides mutex
 data LockGHC = LockGHC
