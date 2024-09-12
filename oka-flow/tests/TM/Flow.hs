@@ -1,15 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE DeriveGeneric       #-}
-{-# LANGUAGE DerivingStrategies  #-}
-{-# LANGUAGE DerivingVia         #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE KindSignatures      #-}
-{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications    #-}
 -- |
 module TM.Flow (tests) where
 
@@ -22,7 +13,6 @@ import Data.Map.Strict  qualified as Map
 import Data.Map.Strict  (Map)
 import System.IO.Temp   (withSystemTempDirectory)
 import System.FilePath  ((</>))
-import System.Directory (doesDirectoryExist)
 import Test.Tasty
 import Test.Tasty.HUnit
 import GHC.Generics     (Generic)
@@ -31,6 +21,7 @@ import GHC.TypeLits
 import OKA.Metadata
 import OKA.Flow.Graph
 import OKA.Flow.Run
+import OKA.Flow.Std
 import OKA.Flow
 
 tests :: TestTree
@@ -123,15 +114,30 @@ tests = testGroup "Run flow"
                     want =<< flowA ()
       runFlow ctx meta flow
       observe "flow" obsA [100]
+    -- External metadata works
+  , testCase "externalMeta" $ withSimpleFlow $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt @"nA"
+      let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
+          flow = do e1 <- stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
+                    withExtMeta e1 $ want =<< flowA ()
+      runFlow ctx meta flow
+      observe "flow" obsA [200]
+  , testCase "externalMeta2" $ withSimpleFlow $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt @"nA"
+      let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
+          flow = do e1 <- stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
+                    e2 <- stdSaveMeta (CounterMeta 300 :: CounterMeta "nA")
+                    withExtMeta e1 $ withExtMeta e2 $ want =<< flowA ()
+      runFlow ctx meta flow
+      observe "flow" obsA [300]
   ]
 
 withSimpleFlow :: (FlowCtx IO -> IO a) -> IO a
 withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
-  action FlowCtx { flowCtxRoot   = dir
-                 , flowTgtExists = doesDirectoryExist
-                 , flowCtxEff    = id
-                 , flowCtxRes    = mempty
-                 , logger        = mempty
+  action FlowCtx { root      = dir
+                 , runEffect = id
+                 , res       = mempty
+                 , logger    = mempty
                  }
 
 

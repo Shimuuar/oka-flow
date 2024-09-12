@@ -1,6 +1,3 @@
-{-# LANGUAGE DerivingVia          #-}
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
 -- |
 -- Standard workflows
@@ -19,8 +16,9 @@ import System.IO.Temp
 import System.Environment         (getEnvironment)
 
 import OKA.Flow.Tools
-import OKA.Flow
 import OKA.Flow.Parser
+import OKA.Flow.Graph
+import OKA.Flow.Types
 import OKA.Metadata
 
 
@@ -37,7 +35,7 @@ instance (IsMeta a) => FlowInput (SavedMeta a) where
 
 -- | Save metadata value so it could be passed as parameter.
 stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
-stdSaveMeta a = scopeMeta $ do
+stdSaveMeta a = scopeMeta $ withoutExtMeta $ do
   put $ toMetadata a
   liftWorkflow () Action
     { name = "std.SavedMeta"

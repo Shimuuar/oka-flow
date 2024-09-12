@@ -13,26 +13,23 @@ Maintainer:     Aleksey Khudyakov <alexey.skladnoy@gmail.com>
 Build-Type:     Simple
 
 common extensions
-  Default-extensions: DeriveFoldable
-                    , DeriveFunctor
-                    , DeriveTraversable
-                    , DerivingStrategies
-                    , DuplicateRecordFields
-                    , GeneralizedNewtypeDeriving
-                    , ImportQualifiedPost
-                    , LambdaCase
+  Default-extensions: NoPolyKinds
+                      --
                     , NoFieldSelectors
-                    , NumericUnderscores
                     , OverloadedRecordDot
-                    , ScopedTypeVariables
-                    , TypeApplications
-                    , TypeOperators
+                    , DuplicateRecordFields
+                      --
+                    , DerivingVia
+                    , LambdaCase
                     , TupleSections
-                
+                    , ViewPatterns
+                    , MultiWayIf
+                    , NumericUnderscores
+
 Library
   import:           extensions
   Ghc-options:      -Wall -O2
-  Default-Language: Haskell2010
+  Default-Language: GHC2021
   --
   Build-Depends:    base                 >=4.12 && <5
                   , oka-metadata
@@ -71,7 +68,7 @@ Library
 executable oka-flow
   import:           extensions
   Ghc-options:      -Wall -Wno-incomplete-uni-patterns
-  Default-Language: Haskell2010
+  Default-Language: GHC2021
   --
   hs-source-dirs:   exe
   main-is:          Main.hs
@@ -87,7 +84,7 @@ executable oka-flow
 Test-suite oka-flow-tests
   import:           extensions
   type:             exitcode-stdio-1.0
-  Default-Language: Haskell2010
+  Default-Language: GHC2021
   ghc-options:      -Wall -Wno-incomplete-uni-patterns
   Build-Depends:    base
                   , oka-flow
