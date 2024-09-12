@@ -112,7 +112,7 @@ class (ResultSet (AsRes a)) => FlowArgument a where
   type AsRes a
   -- | How data types should be parsed from list of absolute path to
   --   directories.
-  parserFlowArguments :: ListParserT FilePath IO a
+  parserFlowArguments :: ListParserIO FilePath a
 
 
 
@@ -160,7 +160,7 @@ newtype AsFlowOutput a = AsFlowOutput a
 instance (FlowInput a) => FlowArgument (AsFlowOutput a) where
   type AsRes (AsFlowOutput a) = Result a
   parserFlowArguments = do
-    path <- consume
+    path <- consumeIO
     liftIO $ AsFlowOutput <$> readOutput path
 
 
@@ -178,7 +178,7 @@ metaFromStdin = do
 
 -- | Read arguments from using 'FlowArgument' type class.
 runFlowArguments :: FlowArgument a => [FilePath] -> IO a
-runFlowArguments paths = runListParserT parserFlowArguments paths >>= \case
+runFlowArguments paths = runListParserIO parserFlowArguments paths >>= \case
   Left  e -> error $ "runFlowArguments: " ++ e
   Right a -> pure a
 
