@@ -31,6 +31,7 @@ module OKA.Flow
   , liftWorkflow
   , basicLiftPhony
   , liftPhony
+  , basicLiftExe
     -- * Resources
   , Resource(..)
   , ResAsMutex(..)

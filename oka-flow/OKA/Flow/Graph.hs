@@ -32,6 +32,7 @@ module OKA.Flow.Graph
   , basicLiftWorkflow
   , liftWorkflow
   , basicLiftPhony
+  , basicLiftExe
   ) where
 
 import Control.Applicative
@@ -405,3 +406,15 @@ basicLiftPhony
      -- ^ Parameters to pass to workflow
   -> Flow eff ()
 basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony exe) p
+
+-- | Lift executable into workflow
+basicLiftExe
+  :: (ResultSet params, Resource res)
+  => res
+     -- ^ Resources required by workflow
+  -> Executable
+     -- ^ Action to execute
+  -> params
+     -- ^ Parameters to pass to workflow
+  -> Flow eff (Result a)
+basicLiftExe res exe p = basicLiftWorkflow res (WorkflowExe exe) p
