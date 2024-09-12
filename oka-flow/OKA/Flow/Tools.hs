@@ -15,6 +15,7 @@ module OKA.Flow.Tools
     -- * Standard workflow execution
   , metaFromStdin
   , runFlowArguments
+  , flowArgumentsFromCLI
   , executeStdWorkflow
   , executeStdWorkflowOut
     -- * Building GHC programs
@@ -180,6 +181,13 @@ runFlowArguments :: FlowArgument a => [FilePath] -> IO a
 runFlowArguments paths = runListParserT parserFlowArguments paths >>= \case
   Left  e -> error $ "runFlowArguments: " ++ e
   Right a -> pure a
+
+-- | Parse standard arguments passed as command line parameters
+flowArgumentsFromCLI :: FlowArgument a => IO (FilePath, a)
+flowArgumentsFromCLI = getArgs >>= \case
+    []         -> error "flowArgumentsFromCLI: No output directory provided"
+    (out:args) -> do a <- runFlowArguments args
+                     pure (out,a)
 
 
 -- | Execute workflow as a separate process using standard calling
