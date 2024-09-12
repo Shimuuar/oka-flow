@@ -118,16 +118,16 @@ tests = testGroup "Run flow"
   , testCase "externalMeta" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
       let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
-          flow = do externalMeta =<< stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
-                    want =<< flowA ()
+          flow = do e1 <- stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
+                    withExtMeta e1 $ want =<< flowA ()
       runFlow ctx meta flow
       observe "flow" obsA [200]
   , testCase "externalMeta2" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
       let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
-          flow = do externalMeta =<< stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
-                    externalMeta =<< stdSaveMeta (CounterMeta 300 :: CounterMeta "nA")
-                    want =<< flowA ()
+          flow = do e1 <- stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
+                    e2 <- stdSaveMeta (CounterMeta 300 :: CounterMeta "nA")
+                    withExtMeta e1 $ withExtMeta e2 $ want =<< flowA ()
       runFlow ctx meta flow
       observe "flow" obsA [300]
   ]

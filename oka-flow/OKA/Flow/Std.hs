@@ -8,7 +8,6 @@ module OKA.Flow.Std
   , stdJupyter
   ) where
 
-import Control.Lens
 import Control.Monad.State.Strict
 import System.FilePath            ((</>))
 import System.Directory           (createFileLink,createDirectory)
@@ -36,10 +35,8 @@ instance (IsMeta a) => FlowInput (SavedMeta a) where
 
 -- | Save metadata value so it could be passed as parameter.
 stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
-stdSaveMeta a = scopeMeta $ do
+stdSaveMeta a = scopeMeta $ withoutExtMeta $ do
   put $ toMetadata a
-  -- FIXME: We don't have public API for erasing external metadata!
-  Flow $ stTransformsL .= []
   liftWorkflow () Action
     { name = "std.SavedMeta"
     , run  = \_ _meta args out -> do

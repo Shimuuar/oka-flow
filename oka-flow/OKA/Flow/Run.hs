@@ -15,6 +15,7 @@ import Control.Lens
 import Control.Monad
 import Control.Monad.Operational
 import Control.Monad.Trans.State.Strict
+import Control.Monad.Trans.Reader
 import Control.Monad.STM
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
@@ -101,10 +102,11 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
   gr <- fmap (deduplicateGraph . hashFlowGraph)
       $ interpretWithMonad runEffect
       $ fmap (\(r,st) -> addTargets r st.graph)
-      $ runStateT m FlowSt{ meta       = meta
-                          , graph      = FlowGraph mempty mempty
-                          , transforms = []
-                          }
+      $ flip runStateT FlowSt{ meta  = meta
+                             , graph = FlowGraph mempty mempty
+                             }
+      $ flip runReaderT []
+      $ m
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr
   gr_exe  <- addTMVars gr

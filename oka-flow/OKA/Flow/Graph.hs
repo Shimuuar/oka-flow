@@ -6,15 +6,17 @@
 module OKA.Flow.Graph
   ( -- * Dataflow graph
     Fun(..)
-  , ExtMeta(..)
   , FlowGraph(..)
-  , FIDSet(..)
+  , ExtMeta(..)
+    -- * Flow monad and primitives
   , Flow(..)
   , FlowSt(..)
   , appendMeta
   , scopeMeta
   , restrictMeta
+  , withoutExtMeta
     -- * Graph operations
+  , FIDSet(..)
   , hashFlowGraph
   , deduplicateGraph
   , shakeFlowGraph
@@ -25,7 +27,6 @@ module OKA.Flow.Graph
   , fidWantedL
   , stMetaL
   , stGraphL
-  , stTransformsL
     -- * Defining workflows
   , want
   , basicLiftWorkflow
@@ -38,6 +39,7 @@ import Control.Lens
 import Control.Monad
 import Control.Monad.Operational    hiding (view)
 import Control.Monad.State.Strict
+import Control.Monad.Reader
 import Crypto.Hash.SHA1             qualified as SHA1
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Encoding          qualified as JSONB
@@ -87,6 +89,16 @@ data Fun k v = Fun
   }
   deriving stock (Functor, Foldable, Traversable)
 
+-- | Part of metadata which is read from external storage
+data ExtMeta k = ExtMeta
+  { key   :: !k
+    -- ^ Key of a
+  , tyRep :: !TypeRep
+    -- ^ Type of
+  , load  :: JSON.Value -> Metadata
+    -- ^ Function which loads metadata from bare JSON
+  }
+
 -- | Complete dataflow graph
 data FlowGraph a = FlowGraph
   { graph   :: Map FunID (Fun FunID a)
@@ -96,27 +108,21 @@ data FlowGraph a = FlowGraph
   }
   deriving stock (Functor, Foldable, Traversable)
 
--- | Part of metadata which is read from external storage
-data ExtMeta k = ExtMeta
-  { key   :: !k
-    -- ^ Key of a 
-  , tyRep :: !TypeRep
-    -- ^ Type of 
-  , load  :: JSON.Value -> Metadata
-    -- ^ Function which loads metadata from bare JSON
-  }
 
--- | State of 'Flow' monad
-data FlowSt = FlowSt
-  { meta       :: !Metadata
-  , graph      :: !(FlowGraph ())
-  , transforms :: ![ExtMeta FunID]
-  }
+----------------------------------------------------------------
+-- Flow monad and primitives
+----------------------------------------------------------------
 
 -- | Flow monad which we use to build workflow
 newtype Flow eff a = Flow
-  (StateT FlowSt (Program eff) a)
+  (ReaderT [ExtMeta FunID] (StateT FlowSt (Program eff)) a)
   deriving newtype (Functor, Applicative, Monad)
+
+-- | State of 'Flow' monad
+data FlowSt = FlowSt
+  { meta  :: !Metadata
+  , graph :: !(FlowGraph ())
+  }
 
 instance MonadFail (Flow eff) where
   fail = error
@@ -138,13 +144,9 @@ appendMeta a = metadata .= a
 -- | Scope metadata modifications. All changes to metadata done in
 --   provided callback will be discarded.
 scopeMeta :: Flow eff a -> Flow eff a
-scopeMeta (Flow action) = Flow $ do
-  meta <- use stMetaL
-  tr   <- use stTransformsL
-  a    <- action
-  stMetaL       .= meta
-  stTransformsL .= tr
-  pure a
+scopeMeta action = do
+  m <- get
+  action <* put m
 
 -- | Restrict metadata to set necessary for encoding value of given type
 restrictMeta
@@ -155,7 +157,9 @@ restrictMeta action = scopeMeta $ do
   modify (restrictMetaByType @meta)
   action
 
-
+-- | Execute workflow without loading external metadata
+withoutExtMeta :: Flow eff a -> Flow eff a
+withoutExtMeta (Flow action) = Flow $ local (\_ -> []) action
 
 ----------------------------------------------------------------
 -- Execution of the workflow
@@ -196,7 +200,7 @@ hashFun oracle fun = fun
 
 hashHashes :: [Hash] -> Hash
 hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks
-    
+
 hashFlowName :: String -> Hash
 hashFlowName = Hash . T.encodeUtf8 . T.pack
 
@@ -206,8 +210,8 @@ hashExtMeta oracle m = Hash $ SHA1.hashlazy $ BL.fromChunks
   , case oracle m.key        of StorePath _ (Hash h) -> h
   , case hashTypeRep m.tyRep of Hash h               -> h
   ]
-  
-  
+
+
 
 -- Compute hash of metadata
 hashMeta :: Metadata -> Hash
@@ -338,9 +342,6 @@ stMetaL = lens (.meta) (\FlowSt{..} x -> FlowSt{meta=x, ..})
 stGraphL :: Lens' FlowSt (FlowGraph ())
 stGraphL = lens (.graph) (\FlowSt{..} x -> FlowSt{graph=x, ..})
 
-stTransformsL :: Lens' FlowSt [ExtMeta FunID]
-stTransformsL = lens (.transforms) (\FlowSt{..} x -> FlowSt{transforms=x, ..})
-
 
 
 ----------------------------------------------------------------
@@ -360,7 +361,8 @@ basicLiftWorkflow
   -> params   -- ^ Parameters of workflow
   -> Flow eff (Result a)
 basicLiftWorkflow resource exe p = Flow $ do
-  st <- get
+  ext <- ask
+  st  <- get
   -- Allocate new ID
   let fid = case Map.lookupMax st.graph.graph of
               Just (FunID i, _) -> FunID (i + 1)
@@ -377,7 +379,7 @@ basicLiftWorkflow resource exe p = Flow $ do
     , output    = ()
     , resources = resourceLock resource
     , param     = res
-    , extMeta   = st.transforms
+    , extMeta   = ext
     }
   return $ Result fid
 
@@ -403,4 +405,3 @@ basicLiftPhony
      -- ^ Parameters to pass to workflow
   -> Flow eff ()
 basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony exe) p
-
