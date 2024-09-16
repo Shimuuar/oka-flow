@@ -41,7 +41,6 @@ import System.FilePath              ((</>))
 import System.IO.Temp
 import System.Environment           (getArgs)
 import System.Posix.Signals         (signalProcess, sigINT)
-import System.Process               (getPid)
 import OKA.Metadata
 import OKA.Flow.Types
 import OKA.Flow.Resources
@@ -279,7 +278,7 @@ runExternalProcessNoMeta exe args = do
 -- Kill process but allow it to die gracefully by sending SIGINT
 -- first. GHC install handler for it but not for SIGTERM
 softKill :: Process stdin stdout stderr -> IO ()
-softKill p = getPid (unsafeProcessHandle p) >>= \case
+softKill p = getPid p >>= \case
   Nothing  -> pure ()
   Just pid -> do
     delay <- registerDelay 1_000_000

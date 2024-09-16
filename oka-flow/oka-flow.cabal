@@ -51,7 +51,7 @@ Library
                   , text                 >=2
                   , time
                   , transformers
-                  , typed-process        >=0.2
+                  , typed-process        >=0.2.12
                   , unix
                   , unordered-containers >=0.2
                   , vector               >=0.13
