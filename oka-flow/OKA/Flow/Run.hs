@@ -14,8 +14,6 @@ import Control.Concurrent.MVar
 import Control.Exception
 import Control.Lens
 import Control.Monad
-import Control.Monad.Trans.State.Strict
-import Control.Monad.Trans.Reader
 import Control.Monad.STM
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
@@ -27,6 +25,9 @@ import Data.Set                     qualified as Set
 import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import Data.Typeable
 import Effectful
+import Effectful.Reader.Static      qualified as Eff
+import Effectful.State.Static.Local qualified as Eff
+
 import System.FilePath              ((</>))
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
                                      doesDirectoryExist
@@ -104,10 +105,10 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
       $ runEff
       $ runEffect
       $ fmap (\(r,st) -> addTargets r st.graph)
-      $ flip runStateT FlowSt{ meta  = meta
-                             , graph = FlowGraph mempty mempty
-                             }
-      $ flip runReaderT []
+      $ Eff.runState FlowSt{ meta  = meta
+                           , graph = FlowGraph mempty mempty
+                           }
+      $ Eff.runReader []
       $ m
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr

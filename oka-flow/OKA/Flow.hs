@@ -42,10 +42,9 @@ module OKA.Flow
   , runFlow
   ) where
 
-import Control.Monad.State.Strict
-import Control.Monad.Reader
 import Data.Typeable
 import Effectful
+import Effectful.Reader.Static     qualified as Eff
 
 import OKA.Metadata
 import OKA.Flow.Graph
@@ -62,15 +61,15 @@ import OKA.Flow.Std
 
 -- | Lift effect
 liftEff :: Eff eff a -> Flow eff a
-liftEff = Flow . lift . lift
+liftEff = Flow . raise . raise
 
 -- | Load contents of saved meta before execution of workflow
 withExtMeta
   :: forall a eff b. IsMeta a
   => Result (SavedMeta a) -> Flow eff b -> Flow eff b
-withExtMeta (Result fid) (Flow action) = Flow $ local (ext:) action
+withExtMeta (Result fid) (Flow action) = Flow $ Eff.local (ext:) action
   where
-    ext = ExtMeta { key = fid
+    ext = ExtMeta { key   = fid
                   , tyRep = typeOf (undefined :: a)
                   , load  = toMetadata . decodeMetadata @a
                   }
