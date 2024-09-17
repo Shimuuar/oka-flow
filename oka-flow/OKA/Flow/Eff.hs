@@ -10,14 +10,20 @@ module OKA.Flow.Eff
   , runReadMeta
   , loadMeta
   , readMeta
+    -- * PRNG
+  , PrngE
+  , PRNG(..)
+  , runPrngE
   ) where
 
 import Control.Exception
 import Control.Monad
-import Data.Yaml                  qualified as YAML
+import Data.Coerce
+import Data.Yaml                    qualified as YAML
 import Effectful
 import Effectful.Dispatch.Static
-import System.FilePath            ((</>))
+import System.FilePath              ((</>))
+import System.Random.Stateful
 
 import OKA.Flow.Graph
 import OKA.Metadata
@@ -63,3 +69,32 @@ readMeta
   => FilePath -- ^ File path relative to config root
   -> Flow es ()
 readMeta = appendMeta <=< loadMeta @a
+
+
+
+----------------------------------------------------------------
+-- PRNG
+----------------------------------------------------------------
+
+-- | Ability to use standard splitmix PRNG.
+data PrngE :: Effect
+
+type    instance DispatchOf PrngE = Static NoSideEffects
+newtype instance StaticRep  PrngE = PrngE StdGen
+
+-- | Handle for using 'StatefulGen' API
+data PRNG = PRNG
+
+-- | Handle for PRNG effect
+runPrngE
+  :: StdGen -- ^ Initial state for a PRNG
+  -> Eff (PrngE : es) a
+  -> Eff es a
+runPrngE g = evalStaticRep (PrngE g)
+
+instance (PrngE :> eff) => StatefulGen PRNG (Flow eff) where
+  uniformWord32    _ = Flow $ stateStaticRep @PrngE $ coerce (genWord32  @StdGen)
+  uniformWord64    _ = Flow $ stateStaticRep @PrngE $ coerce (genWord64  @StdGen)
+  uniformWord32R n _ = Flow $ stateStaticRep @PrngE $ coerce (genWord32R @StdGen n)
+  uniformWord64R n _ = Flow $ stateStaticRep @PrngE $ coerce (genWord64R @StdGen n)
+  uniformShortByteString n _ = Flow $ stateStaticRep @PrngE $ coerce (genShortByteString @StdGen n)
