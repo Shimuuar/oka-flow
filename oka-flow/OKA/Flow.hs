@@ -44,8 +44,8 @@ module OKA.Flow
 
 import Control.Monad.State.Strict
 import Control.Monad.Reader
-import Control.Monad.Operational
 import Data.Typeable
+import Effectful
 
 import OKA.Metadata
 import OKA.Flow.Graph
@@ -61,8 +61,8 @@ import OKA.Flow.Std
 ----------------------------------------------------------------
 
 -- | Lift effect
-liftEff :: eff a -> Flow eff a
-liftEff = Flow . lift . lift . singleton
+liftEff :: Eff eff a -> Flow eff a
+liftEff = Flow . lift . lift
 
 -- | Load contents of saved meta before execution of workflow
 withExtMeta

@@ -38,7 +38,6 @@ module OKA.Flow.Graph
 import Control.Applicative
 import Control.Lens
 import Control.Monad
-import Control.Monad.Operational    hiding (view)
 import Control.Monad.State.Strict
 import Control.Monad.Reader
 import Crypto.Hash.SHA1             qualified as SHA1
@@ -61,6 +60,7 @@ import Data.Text                    qualified as T
 import Data.Text.Encoding           qualified as T
 import Data.Typeable
 import Data.Vector                  qualified as V
+import Effectful
 
 import OKA.Metadata
 
@@ -116,7 +116,7 @@ data FlowGraph a = FlowGraph
 
 -- | Flow monad which we use to build workflow
 newtype Flow eff a = Flow
-  (ReaderT [ExtMeta FunID] (StateT FlowSt (Program eff)) a)
+  (ReaderT [ExtMeta FunID] (StateT FlowSt (Eff eff)) a)
   deriving newtype (Functor, Applicative, Monad)
 
 -- | State of 'Flow' monad
