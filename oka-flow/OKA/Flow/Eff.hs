@@ -10,6 +10,10 @@ module OKA.Flow.Eff
   , runReadMeta
   , loadMeta
   , readMeta
+    -- * Configuration
+  , ProgConfigE
+  , ProgConfig(..)
+  , askProgConfig
     -- * PRNG
   , PrngE
   , PRNG(..)
@@ -70,6 +74,30 @@ readMeta
   -> Flow es ()
 readMeta = appendMeta <=< loadMeta @a
 
+
+
+----------------------------------------------------------------
+-- Program config
+----------------------------------------------------------------
+
+-- | Workflow has access to configuration which allows to access to
+--   configuration of external tool. This is intended to allow to
+--   specify various programs which should not affect output and
+--   mostly used in phony workflows in order to inspect results etc.
+data ProgConfigE :: Effect
+
+type    instance DispatchOf ProgConfigE = Static WithSideEffects
+newtype instance StaticRep  ProgConfigE = ProgConfigE ProgConfig
+
+-- | Configuration of a workflow
+data ProgConfig = ProgConfig
+  { pdf :: FilePath -- ^ PDF reader to use
+  }
+
+askProgConfig :: ProgConfigE :> es => Flow es ProgConfig
+askProgConfig = Flow $ do
+  ProgConfigE cfg <- getStaticRep
+  pure cfg
 
 
 ----------------------------------------------------------------
