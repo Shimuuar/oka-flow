@@ -83,7 +83,11 @@ basicAddResource (ResourceSet m) fun = do
 basicRequestResource :: forall a. Typeable a => a -> ResourceSet -> STM ()
 basicRequestResource a (ResourceSet m) =
   case typeOf a `Map.lookup` m of
-    Nothing -> error $ "requestResource: " ++ show (typeOf a) ++ " is not available"
+    Nothing -> error $ unlines
+      $ ("requestResource: " ++ show (typeOf a) ++ " is not available. Present:")
+      : [ " - " ++ show k
+        | k <- Map.keys m
+        ]
     Just (ResBox (lock,_))
       | Just lock' <- cast lock -> lock' a
       | otherwise               -> error $ "requestResource: INTERNAL ERROR"
