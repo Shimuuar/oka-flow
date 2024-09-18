@@ -13,6 +13,7 @@ module OKA.Flow.Eff
     -- * Configuration
   , ProgConfigE
   , ProgConfig(..)
+  , runProgConfigE
   , askProgConfig
     -- * PRNG
   , PrngE
@@ -86,13 +87,16 @@ readMeta = appendMeta <=< loadMeta @a
 --   mostly used in phony workflows in order to inspect results etc.
 data ProgConfigE :: Effect
 
-type    instance DispatchOf ProgConfigE = Static WithSideEffects
+type    instance DispatchOf ProgConfigE = Static NoSideEffects
 newtype instance StaticRep  ProgConfigE = ProgConfigE ProgConfig
 
 -- | Configuration of a workflow
 data ProgConfig = ProgConfig
   { pdf :: FilePath -- ^ PDF reader to use
   }
+
+runProgConfigE :: ProgConfig -> Eff (ProgConfigE : es) a -> Eff es a
+runProgConfigE cfg = evalStaticRep (ProgConfigE cfg)
 
 askProgConfig :: ProgConfigE :> es => Flow es ProgConfig
 askProgConfig = Flow $ do
