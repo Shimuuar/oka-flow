@@ -9,6 +9,7 @@ module OKA.Flow.Std
   , ReportPDF
   , CollectReports(..)
   , runPdfReader
+  , stdConcatPDF
     -- * Jupyter
   , stdJupyter
   ) where
@@ -108,6 +109,15 @@ runPdfReader a = do
     (collectReports a)
 
 
+-- | Concatenate PDFs using @pdftk@ program
+stdConcatPDF :: CollectReports a => a -> Flow eff (Result ReportPDF)
+stdConcatPDF reports = restrictMeta @() $ do
+  liftWorkflow () Action
+    { name = "std.pdftk.concat"
+    , run  = \_res _meta args out -> do
+        runExternalProcessNoMeta "pdftk"
+          ([a</>"report.pdf" | a <- args] ++ ["cat", "output", out</>"report.pdf"])
+    } (collectReports reports)
 
 
 ----------------------------------------------------------------
