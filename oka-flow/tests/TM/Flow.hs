@@ -22,6 +22,7 @@ import OKA.Metadata
 import OKA.Flow.Graph
 import OKA.Flow.Run
 import OKA.Flow.Std
+import OKA.Flow.Resources
 import OKA.Flow
 
 tests :: TestTree
@@ -134,9 +135,11 @@ tests = testGroup "Run flow"
 
 withSimpleFlow :: (FlowCtx IO -> IO a) -> IO a
 withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
+  res <- createResource (LockCoreCPU 4)
+     =<< pure mempty
   action FlowCtx { root      = dir
                  , runEffect = id
-                 , res       = mempty
+                 , res       = res
                  , logger    = mempty
                  }
 
@@ -200,7 +203,7 @@ flowProduceInt
 flowProduceInt = do
   obs <- newObserve
   pure ( obs
-       , liftWorkflow () $ Action
+       , liftWorkflow (LockCoreCPU 1) $ Action
          { name = "produce-" ++ (symbolVal (Proxy @name))
          , run  = \_ meta [] out -> do
              let n = meta ^. metadata @(CounterMeta name) . to (.count)
@@ -213,7 +216,7 @@ flowSquare :: IO (Observe Int, Result Int -> Flow eff (Result Int))
 flowSquare = do
   obs <- newObserve
   pure ( obs
-       , liftWorkflow () $ Action
+       , liftWorkflow (LockCoreCPU 1) $ Action
          { name = "square"
          , run  = \_ _ [p] out -> do
              n <- read @Int <$> readFile (p </> "out.txt")
@@ -227,7 +230,7 @@ flowPhony :: IO (ObsPhony Int, Result Int -> Flow eff ())
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
-       , basicLiftPhony () $ \_ _ [p] -> do
+       , basicLiftPhony (LockCoreCPU 1) $ \_ _ [p] -> do
            n <- read @Int <$> readFile (p </> "out.txt")
            let n' = n * n
            saveObsPhony obs n'

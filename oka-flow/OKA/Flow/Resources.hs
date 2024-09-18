@@ -145,9 +145,10 @@ instance Typeable a => Resource (ResAsMutex a) where
       ( \_ -> takeTMVar lock
       , \_ -> putTMVar  lock ()
       )
-  resourceLock a = Lock { acquire = basicRequestResource a
-                        , release = basicReleaseResource a
-                        }
+  resourceLock (ResAsMutex a) = Lock
+    { acquire = basicRequestResource a
+    , release = basicReleaseResource a
+    }
 
 -- | Derive resource where there're N instance of resource and we
 --   can't use more than that. Flow may request more than one.
@@ -170,9 +171,10 @@ instance (Typeable a, Coercible a Int) => Resource (ResAsCounter a) where
             modifyTVar' counter (+ k)
       )
     where ty = typeOf (undefined :: a)
-  resourceLock a = Lock { acquire = basicRequestResource a
-                        , release = basicReleaseResource a
-                        }
+  resourceLock (ResAsCounter a) = Lock
+    { acquire = basicRequestResource a
+    , release = basicReleaseResource a
+    }
 
 
 ----------------------------------------------------------------
