@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RecordWildCards     #-}
 -- |
@@ -38,9 +39,7 @@ module OKA.Flow.Graph
 import Control.Applicative
 import Control.Lens
 import Control.Monad
-import Control.Monad.Operational    hiding (view)
 import Control.Monad.State.Strict
-import Control.Monad.Reader
 import Crypto.Hash.SHA1             qualified as SHA1
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Encoding          qualified as JSONB
@@ -61,9 +60,11 @@ import Data.Text                    qualified as T
 import Data.Text.Encoding           qualified as T
 import Data.Typeable
 import Data.Vector                  qualified as V
+import Effectful
+import Effectful.Reader.Static      qualified as Eff
+import Effectful.State.Static.Local qualified as Eff
 
 import OKA.Metadata
-
 import OKA.Flow.Types
 import OKA.Flow.Resources
 
@@ -116,7 +117,7 @@ data FlowGraph a = FlowGraph
 
 -- | Flow monad which we use to build workflow
 newtype Flow eff a = Flow
-  (ReaderT [ExtMeta FunID] (StateT FlowSt (Program eff)) a)
+  (Eff (Eff.Reader [ExtMeta FunID] : Eff.State FlowSt : eff) a)
   deriving newtype (Functor, Applicative, Monad)
 
 -- | State of 'Flow' monad
@@ -129,8 +130,8 @@ instance MonadFail (Flow eff) where
   fail = error
 
 instance MonadState Metadata (Flow eff) where
-  get   = Flow $ gets (.meta)
-  put m = Flow $ stMetaL .= m
+  get   = Flow $ Eff.gets   @FlowSt (.meta)
+  put m = Flow $ Eff.modify @FlowSt (stMetaL .~ m)
 
 instance Semigroup a => Semigroup (Flow eff a) where
   (<>) = liftA2 (<>)
@@ -160,7 +161,7 @@ restrictMeta action = scopeMeta $ do
 
 -- | Execute workflow without loading external metadata
 withoutExtMeta :: Flow eff a -> Flow eff a
-withoutExtMeta (Flow action) = Flow $ local (\_ -> []) action
+withoutExtMeta (Flow action) = Flow $ Eff.local @[ExtMeta FunID] (\_ -> []) action
 
 ----------------------------------------------------------------
 -- Execution of the workflow
@@ -351,7 +352,7 @@ stGraphL = lens (.graph) (\FlowSt{..} x -> FlowSt{graph=x, ..})
 
 -- | We want given workflow evaluated
 want :: ResultSet a => a -> Flow eff ()
-want a = Flow $ stGraphL . flowTgtL %= (<> Set.fromList (toResultSet a))
+want a = Flow $ Eff.modify $ stGraphL . flowTgtL %~ (<> Set.fromList (toResultSet a))
 
 -- | Basic primitive for creating workflows. It doesn't offer any type
 --   safety so it's better to use other tools
@@ -362,8 +363,8 @@ basicLiftWorkflow
   -> params   -- ^ Parameters of workflow
   -> Flow eff (Result a)
 basicLiftWorkflow resource exe p = Flow $ do
-  ext <- ask
-  st  <- get
+  ext <- Eff.ask
+  st  <- Eff.get @FlowSt
   -- Allocate new ID
   let fid = case Map.lookupMax st.graph.graph of
               Just (FunID i, _) -> FunID (i + 1)
@@ -374,7 +375,7 @@ basicLiftWorkflow resource exe p = Flow $ do
   when (any phonyDep res) $ do
     error "Depending on phony target"
   -- Add workflow to graph
-  stGraphL . flowGraphL . at fid .= Just Fun
+  Eff.modify $ stGraphL . flowGraphL . at fid .~ Just Fun
     { workflow  = exe
     , metadata  = st.meta
     , output    = ()

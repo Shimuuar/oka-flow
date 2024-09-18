@@ -11,6 +11,7 @@ import Data.Foldable
 import Data.List        (sort)
 import Data.Map.Strict  qualified as Map
 import Data.Map.Strict  (Map)
+import Effectful
 import System.IO.Temp   (withSystemTempDirectory)
 import System.FilePath  ((</>))
 import Test.Tasty
@@ -133,12 +134,12 @@ tests = testGroup "Run flow"
       observe "flow" obsA [300]
   ]
 
-withSimpleFlow :: (FlowCtx IO -> IO a) -> IO a
+withSimpleFlow :: (FlowCtx '[] -> IO a) -> IO a
 withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
   res <- createResource (LockCoreCPU 4)
      =<< pure mempty
   action FlowCtx { root      = dir
-                 , runEffect = id
+                 , runEffect = raise
                  , res       = res
                  , logger    = mempty
                  }

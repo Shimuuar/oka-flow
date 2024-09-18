@@ -1,4 +1,5 @@
-{-# LANGUAGE RecordWildCards  #-}
+{-# LANGUAGE DataKinds       #-}
+{-# LANGUAGE RecordWildCards #-}
 -- |
 -- Evaluator of dataflow graph.
 module OKA.Flow.Run
@@ -13,9 +14,6 @@ import Control.Concurrent.MVar
 import Control.Exception
 import Control.Lens
 import Control.Monad
-import Control.Monad.Operational
-import Control.Monad.Trans.State.Strict
-import Control.Monad.Trans.Reader
 import Control.Monad.STM
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
@@ -26,6 +24,10 @@ import Data.Map.Strict              qualified as Map
 import Data.Set                     qualified as Set
 import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import Data.Typeable
+import Effectful
+import Effectful.Reader.Static      qualified as Eff
+import Effectful.State.Static.Local qualified as Eff
+
 import System.FilePath              ((</>))
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
                                      doesDirectoryExist
@@ -77,7 +79,7 @@ instance Monoid FlowLogger where
 data FlowCtx eff = FlowCtx
   { root      :: FilePath
     -- ^ Root directory for cache
-  , runEffect :: forall a. eff a -> IO a
+  , runEffect :: forall a. Eff eff a -> Eff '[IOE] a
     -- ^ Evaluator for effects allowed in dataflow program
   , res       :: ResourceSet
     -- ^ Resources which are available for evaluator.
@@ -100,12 +102,13 @@ runFlow
 runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
   -- Evaluate dataflow graph
   gr <- fmap (deduplicateGraph . hashFlowGraph)
-      $ interpretWithMonad runEffect
+      $ runEff
+      $ runEffect
       $ fmap (\(r,st) -> addTargets r st.graph)
-      $ flip runStateT FlowSt{ meta  = meta
-                             , graph = FlowGraph mempty mempty
-                             }
-      $ flip runReaderT []
+      $ Eff.runState FlowSt{ meta  = meta
+                           , graph = FlowGraph mempty mempty
+                           }
+      $ Eff.runReader []
       $ m
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr

@@ -5,22 +5,36 @@ module OKA.Flow.Std
   ( -- * Saved metadata
     SavedMeta(..)
   , stdSaveMeta
+    -- * Reports
+  , ReportPDF
+  , CollectReports(..)
+  , runPdfReader
+  , stdConcatPDF
+    -- * Jupyter
   , stdJupyter
   ) where
 
 import Control.Monad.State.Strict
+import Data.Coerce
+import Effectful                  ((:>))
 import System.FilePath            ((</>))
 import System.Directory           (createFileLink,createDirectory)
 import System.Process.Typed
 import System.IO.Temp
 import System.Environment         (getEnvironment)
+import GHC.Generics
 
 import OKA.Flow.Tools
 import OKA.Flow.Parser
 import OKA.Flow.Graph
 import OKA.Flow.Types
+import OKA.Flow.Eff
 import OKA.Metadata
 
+
+----------------------------------------------------------------
+-- Saved metadata
+----------------------------------------------------------------
 
 -- | This data type represents metadata saved as output of a flow.
 --   Output is stored in @saved.json@ file and uses standard metadata
@@ -45,6 +59,70 @@ stdSaveMeta a = scopeMeta $ withoutExtMeta $ do
         createFileLink "meta.json" (out </> "saved.json")
     } ()
 
+
+----------------------------------------------------------------
+-- Report PDF
+----------------------------------------------------------------
+
+-- | Type tag for outputs which contains @report.pdf@
+data ReportPDF
+
+-- | Convenience type class for collecting list of reports from tuples
+--   and lists of parameters.
+class CollectReports a where
+  collectReports :: a -> [Result ReportPDF]
+
+instance CollectReports (Result ReportPDF) where
+  collectReports p = [p]
+deriving via Generically (a,b)
+    instance (CollectReports a, CollectReports b) => CollectReports (a,b)
+deriving via Generically (a,b,c)
+    instance (CollectReports a, CollectReports b, CollectReports c) => CollectReports (a,b,c)
+instance (CollectReports a) => CollectReports [a] where
+  collectReports = concatMap collectReports
+
+-- | This instance could be used to derive CollectReports instance
+--   with @DerivingVia@
+instance (Generic a, GCollectReports (Rep a)) => CollectReports (Generically a) where
+  collectReports (Generically a) = gcollectReports (from a)
+
+
+class GCollectReports f where
+  gcollectReports :: f p -> [Result ReportPDF]
+  
+deriving newtype instance GCollectReports f => GCollectReports (M1 c i f)
+
+instance (GCollectReports f, GCollectReports g) => GCollectReports (f :*: g) where
+  gcollectReports (f :*: g) = gcollectReports f <> gcollectReports g
+
+instance (CollectReports a) => GCollectReports (K1 i a) where
+  gcollectReports = coerce (collectReports @a)
+
+
+-- | Run PDF viewer as phony workflow. Reader is picked from runtime
+--   configuration.
+runPdfReader :: (CollectReports a, ProgConfigE :> eff) => a -> Flow eff ()
+runPdfReader a = do
+  ProgConfig{pdf} <- askProgConfig
+  basicLiftPhony ()
+    (\_ _ paths -> runExternalProcessNoMeta pdf [p </> "report.pdf" | p <- paths])
+    (collectReports a)
+
+
+-- | Concatenate PDFs using @pdftk@ program
+stdConcatPDF :: CollectReports a => a -> Flow eff (Result ReportPDF)
+stdConcatPDF reports = restrictMeta @() $ do
+  liftWorkflow () Action
+    { name = "std.pdftk.concat"
+    , run  = \_res _meta args out -> do
+        runExternalProcessNoMeta "pdftk"
+          ([a</>"report.pdf" | a <- args] ++ ["cat", "output", out</>"report.pdf"])
+    } (collectReports reports)
+
+
+----------------------------------------------------------------
+-- Jupyter
+----------------------------------------------------------------
 
 -- | Run jupyter notebook. Metadata and parameters are passed in
 --   environment variables.
