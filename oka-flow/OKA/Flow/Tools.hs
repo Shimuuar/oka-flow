@@ -39,6 +39,7 @@ import Data.Functor
 import System.Process.Typed
 import System.FilePath              ((</>))
 import System.IO.Temp
+import System.IO                    (hClose)
 import System.Environment           (getArgs)
 import System.Posix.Signals         (signalProcess, sigINT)
 import OKA.Metadata
@@ -301,6 +302,7 @@ withParametersInEnv
 withParametersInEnv meta param action = do
   withSystemTempFile "oka-flow-metadata-" $ \file_meta h -> do
     BL.hPutStr h $ JSON.encode $ encodeMetadata meta
+    hClose h
     action $ ("OKA_META", file_meta)
            : [ ("OKA_ARG_" ++ show i, arg)
              | (i,arg) <- [1::Int ..] `zip` param
