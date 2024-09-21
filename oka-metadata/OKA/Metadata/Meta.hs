@@ -61,6 +61,7 @@ import Data.Text                  (Text)
 import Data.Text                  qualified as T
 import Data.Yaml                  qualified as YAML
 import GHC.TypeLits
+import GHC.Generics
 
 import OKA.Metadata.Encoding
 import OKA.Metadata.Util
@@ -371,128 +372,87 @@ instance IsMeta () where
   fromMetadata _ = Just ()
   metadataKeySet = mempty
 
-instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
-  metaTree = (fst >$< metaTree)
-          <> (snd >$< metaTree)
-  toMetadata (a,b) = toMetadata a <> toMetadata b
-  fromMetadata m = (,) <$> fromMetadata m <*> fromMetadata m
-  metadataKeySet = metadataKeySet @a
-                <> metadataKeySet @b
+deriving via Generically (a,b)
+    instance (IsMeta a, IsMeta b) => IsMeta (a,b) 
+
+deriving via Generically (a,b,c)
+    instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c)
+
+deriving via Generically (a,b,c,d)
+    instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d)
+
+deriving via Generically (a,b,c,d,e)
+    instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
+             , IsMeta e
+             ) => IsMeta (a,b,c,d,e)
+
+deriving via Generically (a,b,c,d,e,f)
+    instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
+             , IsMeta e, IsMeta f
+             ) => IsMeta (a,b,c,d,e,f)
+
+deriving via Generically (a,b,c,d,e,f,g)
+    instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
+             , IsMeta e, IsMeta f, IsMeta g
+             ) => IsMeta (a,b,c,d,e,f,g)
+
+deriving via Generically (a,b,c,d,e,f,g,h)
+    instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
+             , IsMeta e, IsMeta f, IsMeta g, IsMeta h
+             ) => IsMeta (a,b,c,d,e,f,g,h)
+
+deriving via Generically (a,b,c,d,e,f,g,h,i)
+    instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
+             , IsMeta e, IsMeta f, IsMeta g, IsMeta h
+             , IsMeta i
+             ) => IsMeta (a,b,c,d,e,f,g,h,i)
+
+deriving via Generically (a,b,c,d,e,f,g,h,i,j)
+    instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
+             , IsMeta e, IsMeta f, IsMeta g, IsMeta h
+             , IsMeta i, IsMeta j
+             ) => IsMeta (a,b,c,d,e,f,g,h,i,j)
+
+deriving via Generically (a,b,c,d,e,f,g,h,i,j,k)
+    instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
+             , IsMeta e, IsMeta f, IsMeta g, IsMeta h
+             , IsMeta i, IsMeta j, IsMeta k
+             ) => IsMeta (a,b,c,d,e,f,g,h,i,j,k)
+
+deriving via Generically (a,b,c,d,e,f,g,h,i,j,k,l)
+    instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
+             , IsMeta e, IsMeta f, IsMeta g, IsMeta h
+             , IsMeta i, IsMeta j, IsMeta k, IsMeta l
+             ) => IsMeta (a,b,c,d,e,f,g,h,i,j,k,l)
 
 
-instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
-  metaTree = ((\(a,_,_) -> a) >$< metaTree)
-          <> ((\(_,a,_) -> a) >$< metaTree)
-          <> ((\(_,_,a) -> a) >$< metaTree)
-  toMetadata (a,b,c) = mconcat [ toMetadata a, toMetadata b, toMetadata c]
-  fromMetadata m = (,,) <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-  metadataKeySet = metadataKeySet @a
-                <> metadataKeySet @b
-                <> metadataKeySet @c
+instance (Typeable a, Generic a, GIsMetaProd (Rep a)) => IsMeta (Generically a) where
+  metaTree       = (\(Generically a) -> GHC.Generics.from a) >$< gmetaTree @(Rep a) @()
+  toMetadata     = gtoMetadata . GHC.Generics.from . (\(Generically a) -> a)
+  fromMetadata   = fmap (Generically . GHC.Generics.to) . gfromMetadata
+  metadataKeySet = gmetadataKeySet @(Rep a)
+    
+-- Type class which exists solely for deriving of IsMeta for tuples
+class GIsMetaProd f where
+  gmetaTree :: MetaTree (f p)
+  gtoMetadata :: f p -> Metadata
+  gfromMetadata :: Metadata -> Maybe (f p)
+  gmetadataKeySet :: Set TypeRep
 
+deriving newtype instance GIsMetaProd f => GIsMetaProd (M1 i c f) 
 
-instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
-  metaTree = ((\(a,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,a,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,a,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,a) -> a) >$< metaTree)
-  toMetadata (a,b,c,d) = mconcat
-    [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
-    ]
-  fromMetadata m = (,,,) <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
+instance (GIsMetaProd f, GIsMetaProd g) => GIsMetaProd (f :*: g) where
+  gmetaTree = ((\(f :*: _) -> f) >$< gmetaTree)
+           <> ((\(_ :*: g) -> g) >$< gmetaTree)
+  gtoMetadata (f :*: g) = gtoMetadata f <> gtoMetadata g
+  gfromMetadata m = (:*:) <$> gfromMetadata m <*> gfromMetadata m
+  gmetadataKeySet = gmetadataKeySet @f <> gmetadataKeySet @g
 
-  metadataKeySet = metadataKeySet @a
-                <> metadataKeySet @b
-                <> metadataKeySet @c
-                <> metadataKeySet @d
-
-instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e) => IsMeta (a,b,c,d,e) where
-  metaTree = ((\(a,_,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,a,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,a,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,a,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,_,a) -> a) >$< metaTree)
-  toMetadata (a,b,c,d,e) = mconcat
-    [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
-    , toMetadata e
-    ]
-  fromMetadata m = (,,,,)
-                <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-                <*> fromMetadata m
-  metadataKeySet = metadataKeySet @a
-                <> metadataKeySet @b
-                <> metadataKeySet @c
-                <> metadataKeySet @d
-                <> metadataKeySet @e
-
-instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f) => IsMeta (a,b,c,d,e,f) where
-  metaTree = ((\(a,_,_,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,a,_,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,a,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,a,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,_,a,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,_,_,a) -> a) >$< metaTree)
-  toMetadata (a,b,c,d,e,f) = mconcat
-    [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
-    , toMetadata e, toMetadata f
-    ]
-  fromMetadata m = (,,,,,)
-                <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-                <*> fromMetadata m <*> fromMetadata m
-  metadataKeySet = metadataKeySet @a
-                <> metadataKeySet @b
-                <> metadataKeySet @c
-                <> metadataKeySet @d
-                <> metadataKeySet @e
-                <> metadataKeySet @f
-
-instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g) => IsMeta (a,b,c,d,e,f,g) where
-  metaTree = ((\(a,_,_,_,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,a,_,_,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,a,_,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,a,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,_,a,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,_,_,a,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,_,_,_,a) -> a) >$< metaTree)
-  toMetadata (a,b,c,d,e,f,g) = mconcat
-    [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
-    , toMetadata e, toMetadata f, toMetadata g
-    ]
-  fromMetadata m = (,,,,,,)
-                <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-                <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-  metadataKeySet = metadataKeySet @a
-                <> metadataKeySet @b
-                <> metadataKeySet @c
-                <> metadataKeySet @d
-                <> metadataKeySet @e
-                <> metadataKeySet @f
-                <> metadataKeySet @g
-
-instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d,IsMeta e,IsMeta f,IsMeta g,IsMeta h) => IsMeta (a,b,c,d,e,f,g,h) where
-  metaTree = ((\(a,_,_,_,_,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,a,_,_,_,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,a,_,_,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,a,_,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,_,a,_,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,_,_,a,_,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,_,_,_,a,_) -> a) >$< metaTree)
-          <> ((\(_,_,_,_,_,_,_,a) -> a) >$<  metaTree)
-  toMetadata (a,b,c,d,e,f,g,h) = mconcat
-    [ toMetadata a, toMetadata b, toMetadata c, toMetadata d
-    , toMetadata e, toMetadata f, toMetadata g, toMetadata h
-    ]
-  fromMetadata m = (,,,,,,,)
-                <$> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-                <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m <*> fromMetadata m
-  metadataKeySet = metadataKeySet @a
-                <> metadataKeySet @b
-                <> metadataKeySet @c
-                <> metadataKeySet @d
-                <> metadataKeySet @e
-                <> metadataKeySet @f
-                <> metadataKeySet @g
-                <> metadataKeySet @h
+instance (IsMeta a) => GIsMetaProd (K1 i a) where
+  gmetaTree       = coerce (metaTree       @a)
+  gtoMetadata     = coerce (toMetadata     @a)
+  gfromMetadata   = coerce (fromMetadata   @a)
+  gmetadataKeySet = coerce (metadataKeySet @a)
 
 
 ----------------------------------------------------------------
