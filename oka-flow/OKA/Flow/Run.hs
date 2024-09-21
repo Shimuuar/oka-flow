@@ -227,7 +227,11 @@ prepareFun ctx FlowGraph{graph=gr} FIDSet{..} ext_meta fun res = crashReport ctx
 crashReport :: FlowLogger -> Fun i (a, Maybe StorePath) -> IO x -> IO x
 crashReport logger fun = handle $ \e0@(SomeException e) -> do
   let path = snd fun.output
-  if | Just AsyncCancelled <- cast e -> pure ()
+  if | Just AsyncCancelled <- cast e
+       -> pure ()
+     | Just (SomeAsyncException e') <- cast e
+     , Just AsyncCancelled          <- cast e'
+       -> pure ()
      | otherwise -> logger.crash path e0
   throwIO e
 
