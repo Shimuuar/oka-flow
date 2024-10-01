@@ -76,13 +76,13 @@ import OKA.Metadata.Util
 --   tuples).
 --
 --   Semigroup instance is right biased.
-newtype Metadata = Metadata (Map TypeRep MetaEntry)
-  deriving Semigroup via Dual (Map TypeRep MetaEntry)
+newtype Metadata = Metadata (Map TypeRep (MetaEntry Identity))
+  deriving Semigroup via Dual (Map TypeRep (MetaEntry Identity))
   deriving newtype Monoid
 
 -- Helper existential wrapper for metadata
-data MetaEntry where
-  MetaEntry :: (IsMeta a) => a -> MetaEntry
+data MetaEntry f where
+  MetaEntry :: (IsMeta a) => f a -> MetaEntry f
 
 -- | Lens for accessing dictionary from dynamic 'Metadata'. Will fail if
 --   dictionary is not part of bundle
@@ -178,10 +178,10 @@ encodeMetadataEither :: Metadata -> Either MetadataError JSON.Value
 encodeMetadataEither (Metadata m) =
   case checkForClashes $ mconcat entries of
     Err err -> Left  $ KeyClashes [(ty, path) | ((ty,_),path) <- err]
-    OK  xs  -> Right $ encodeTreeWith snd xs
+    OK  xs  -> Right $ encodeTreeWith (runIdentity . snd) xs
   where
-    entries = [ (\e -> (e.tyRep, e.encoder a)) <$> metaTree.get
-              | MetaEntry a <- toList m
+    entries = [ (\e -> (e.tyRep, Identity (e.encoder a))) <$> metaTree.get
+              | MetaEntry (Identity a) <- toList m
               ]
 
 -- | Encode metadata as JSON value. Will throw error in case of key clash
@@ -317,7 +317,7 @@ decodeTree (Branch kmap) js =
 
 -- | Implementation of 'toMetadata' for primitive entry
 primToMetadata :: (IsMeta a) => a -> Metadata
-primToMetadata a = Metadata $ Map.singleton (typeOf a) (MetaEntry a)
+primToMetadata a = Metadata $ Map.singleton (typeOf a) (MetaEntry (Identity a))
 
 -- | Implementation of 'fromMetadata' for primitive entry
 primFromMetadata :: forall a. (IsMeta a) => Metadata -> Maybe a
