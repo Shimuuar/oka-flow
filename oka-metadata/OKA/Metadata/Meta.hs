@@ -21,6 +21,7 @@ module OKA.Metadata.Meta
   , MetadataF
     -- * 'IsMeta' type class
   , IsMeta(..)
+  , toMetadata
   , MetaTree
   , primToMetadata
   , primFromMetadata
@@ -139,11 +140,14 @@ class Typeable a => IsMeta a where
   --   both encoding and decoding.
   metaTree :: MetaTree a
   -- | Convert data type to dynamic dictionary
-  toMetadata :: a -> Metadata
+  toHkdMetadata :: (forall x. x -> f x) -> a -> MetadataF f
   -- | Look up type in dictionary
   fromMetadata :: Metadata -> Maybe a
   -- | Set of keys for the type corresponding to the metadata
   metadataKeySet :: Set TypeRep
+
+toMetadata :: IsMeta a => a -> Metadata
+toMetadata = toHkdMetadata Identity
 
 
 ----------------------------------------------------------------
@@ -323,8 +327,8 @@ decodeTree (Branch kmap) js =
 ----------------------------------------------------------------
 
 -- | Implementation of 'toMetadata' for primitive entry
-primToMetadata :: (IsMeta a) => a -> Metadata
-primToMetadata a = Metadata $ Map.singleton (typeOf a) (MetaEntry (Identity a))
+primToMetadata :: (IsMeta a) => (forall x. x -> f x) -> a -> MetadataF f
+primToMetadata f a = Metadata $ Map.singleton (typeOf a) (MetaEntry (f a))
 
 -- | Implementation of 'fromMetadata' for primitive entry
 primFromMetadata :: forall a. (IsMeta a) => Metadata -> Maybe a
@@ -350,10 +354,10 @@ singletonMetaTree path
 newtype AsMeta (path :: [Symbol]) a = AsMeta a
 
 instance (Typeable path, MetaEncoding a, IsMeta a, MetaPath path) => IsMeta (AsMeta path a) where
-  metaTree       = coerce (singletonMetaTree @a (getMetaPath @path))
-  toMetadata     = coerce (primToMetadata    @a)
-  fromMetadata   = coerce (primFromMetadata  @a)
-  metadataKeySet = Set.singleton (typeOf (undefined :: a))
+  metaTree        = coerce (singletonMetaTree @a (getMetaPath @path))
+  toHkdMetadata f = coerce (primToMetadata    @a f)
+  fromMetadata    = coerce (primFromMetadata  @a)
+  metadataKeySet  = Set.singleton (typeOf (undefined :: a))
 
 
 
@@ -374,10 +378,10 @@ instance (KnownSymbol n, MetaPath ns) => MetaPath (n ': ns) where
 ----------------------------------------------------------------
 
 instance IsMeta () where
-  metaTree       = mempty
-  toMetadata   _ = mempty
-  fromMetadata _ = Just ()
-  metadataKeySet = mempty
+  metaTree        = mempty
+  toHkdMetadata _ = mempty
+  fromMetadata  _ = Just ()
+  metadataKeySet  = mempty
 
 deriving via Generically (a,b)
     instance (IsMeta a, IsMeta b) => IsMeta (a,b)
@@ -434,15 +438,15 @@ deriving via Generically (a,b,c,d,e,f,g,h,i,j,k,l)
 
 
 instance (Typeable a, Generic a, GIsMetaProd (Rep a)) => IsMeta (Generically a) where
-  metaTree       = (\(Generically a) -> GHC.Generics.from a) >$< gmetaTree @(Rep a) @()
-  toMetadata     = gtoMetadata . GHC.Generics.from . (\(Generically a) -> a)
-  fromMetadata   = fmap (Generically . GHC.Generics.to) . gfromMetadata
-  metadataKeySet = gmetadataKeySet @(Rep a)
+  metaTree        = (\(Generically a) -> GHC.Generics.from a) >$< gmetaTree @(Rep a) @()
+  toHkdMetadata f = gtoHkdMetadata f . GHC.Generics.from . (\(Generically a) -> a)
+  fromMetadata    = fmap (Generically . GHC.Generics.to) . gfromMetadata
+  metadataKeySet  = gmetadataKeySet @(Rep a)
 
 -- Type class which exists solely for deriving of IsMeta for tuples
 class GIsMetaProd f where
   gmetaTree :: MetaTree (f p)
-  gtoMetadata :: f p -> Metadata
+  gtoHkdMetadata :: (forall x. x -> q x) -> f p -> MetadataF q
   gfromMetadata :: Metadata -> Maybe (f p)
   gmetadataKeySet :: Set TypeRep
 
@@ -451,15 +455,15 @@ deriving newtype instance GIsMetaProd f => GIsMetaProd (M1 i c f)
 instance (GIsMetaProd f, GIsMetaProd g) => GIsMetaProd (f :*: g) where
   gmetaTree = ((\(f :*: _) -> f) >$< gmetaTree)
            <> ((\(_ :*: g) -> g) >$< gmetaTree)
-  gtoMetadata (f :*: g) = gtoMetadata f <> gtoMetadata g
+  gtoHkdMetadata fun (f :*: g) = gtoHkdMetadata fun f <> gtoHkdMetadata fun g
   gfromMetadata m = (:*:) <$> gfromMetadata m <*> gfromMetadata m
   gmetadataKeySet = gmetadataKeySet @f <> gmetadataKeySet @g
 
 instance (IsMeta a) => GIsMetaProd (K1 i a) where
-  gmetaTree       = coerce (metaTree       @a)
-  gtoMetadata     = coerce (toMetadata     @a)
-  gfromMetadata   = coerce (fromMetadata   @a)
-  gmetadataKeySet = coerce (metadataKeySet @a)
+  gmetaTree        = coerce (metaTree       @a)
+  gtoHkdMetadata f = coerce (toHkdMetadata  @a f)
+  gfromMetadata    = coerce (fromMetadata   @a)
+  gmetadataKeySet  = coerce (metadataKeySet @a)
 
 
 ----------------------------------------------------------------
