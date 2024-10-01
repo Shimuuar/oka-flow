@@ -17,6 +17,8 @@ module OKA.Metadata.Meta
   , restrictMetaByKeys
   , deleteFromMetaByType
   , deleteFromMetaByKeys
+    -- * HKD metadata
+  , MetadataF
     -- * 'IsMeta' type class
   , IsMeta(..)
   , MetaTree
@@ -70,15 +72,19 @@ import OKA.Metadata.Util
 -- Metadata representation
 ----------------------------------------------------------------
 
+newtype MetadataF f = Metadata (Map TypeRep (MetaEntry f))
+  deriving Semigroup via Dual (Map TypeRep (MetaEntry f))
+  deriving newtype Monoid
+
+
 -- | Dynamically typed collection of values which could be looked up
 --   by their type and serialized into JSON. API supports both
 --   operations with single types and products of several types (as
 --   tuples).
 --
 --   Semigroup instance is right biased.
-newtype Metadata = Metadata (Map TypeRep (MetaEntry Identity))
-  deriving Semigroup via Dual (Map TypeRep (MetaEntry Identity))
-  deriving newtype Monoid
+type Metadata = MetadataF Identity
+
 
 -- Helper existential wrapper for metadata
 data MetaEntry f where
@@ -103,20 +109,21 @@ metadataMay = lens fromMetadata (\m -> \case
                                     Nothing -> deleteFromMetaByType @a m
                                 )
 
+
 -- | Only keep keys which corresponds to a type
-restrictMetaByType :: forall a. IsMeta a => Metadata -> Metadata
+restrictMetaByType :: forall a f. IsMeta a => MetadataF f -> MetadataF f
 restrictMetaByType = restrictMetaByKeys (metadataKeySet @a)
 
 -- | Only keep keys that are in the set of keys
-restrictMetaByKeys :: Set TypeRep -> Metadata -> Metadata
+restrictMetaByKeys :: Set TypeRep -> MetadataF f -> MetadataF f
 restrictMetaByKeys keys (Metadata m) = Metadata $ Map.restrictKeys m keys
 
 -- | Delete dictionaries corresponding to this data type from metadata
-deleteFromMetaByType :: forall a. IsMeta a => Metadata -> Metadata
+deleteFromMetaByType :: forall a f. IsMeta a => MetadataF f -> MetadataF f
 deleteFromMetaByType = deleteFromMetaByKeys (metadataKeySet @a)
 
 -- | Delete dictionaries corresponding to this data type from metadata
-deleteFromMetaByKeys :: Set TypeRep -> Metadata -> Metadata
+deleteFromMetaByKeys :: Set TypeRep -> MetadataF f -> MetadataF f
 deleteFromMetaByKeys k (Metadata m) = Metadata $ Map.withoutKeys m k
 
 -- | Type class for data types for types that represent metadata and
