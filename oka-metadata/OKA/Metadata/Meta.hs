@@ -373,7 +373,7 @@ instance IsMeta () where
   metadataKeySet = mempty
 
 deriving via Generically (a,b)
-    instance (IsMeta a, IsMeta b) => IsMeta (a,b) 
+    instance (IsMeta a, IsMeta b) => IsMeta (a,b)
 
 deriving via Generically (a,b,c)
     instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c)
@@ -431,7 +431,7 @@ instance (Typeable a, Generic a, GIsMetaProd (Rep a)) => IsMeta (Generically a) 
   toMetadata     = gtoMetadata . GHC.Generics.from . (\(Generically a) -> a)
   fromMetadata   = fmap (Generically . GHC.Generics.to) . gfromMetadata
   metadataKeySet = gmetadataKeySet @(Rep a)
-    
+
 -- Type class which exists solely for deriving of IsMeta for tuples
 class GIsMetaProd f where
   gmetaTree :: MetaTree (f p)
@@ -439,7 +439,7 @@ class GIsMetaProd f where
   gfromMetadata :: Metadata -> Maybe (f p)
   gmetadataKeySet :: Set TypeRep
 
-deriving newtype instance GIsMetaProd f => GIsMetaProd (M1 i c f) 
+deriving newtype instance GIsMetaProd f => GIsMetaProd (M1 i c f)
 
 instance (GIsMetaProd f, GIsMetaProd g) => GIsMetaProd (f :*: g) where
   gmetaTree = ((\(f :*: _) -> f) >$< gmetaTree)
