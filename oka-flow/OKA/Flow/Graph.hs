@@ -181,24 +181,18 @@ hashFun :: (k -> StorePath) -> Fun k a -> Fun k (Maybe StorePath)
 hashFun oracle fun = fun
   { output = case fun.workflow of
       Phony{}                -> Nothing
-      Workflow (Action nm _) ->
-        let hash = hashHashes
-                 $ hashMeta fun.metadata
-                 : hashFlowName nm
-                 : [ case oracle k of StorePath _ h -> h
-                   | k <- fun.param
-                   ] ++ (hashExtMeta oracle <$> fun.extMeta)
-        in Just $ StorePath nm hash
-      WorkflowExe exe ->
-        let hash = hashHashes
-                 $ hashMeta fun.metadata
-                 : hashFlowName exe.name
-                 : [ case oracle k of StorePath _ h -> h
-                   | k <- fun.param
-                   ] ++ (hashExtMeta oracle <$> fun.extMeta)
-        in Just $ StorePath exe.name hash
+      Workflow (Action nm _) -> Just $ mkStorePath nm
+      WorkflowExe exe        -> Just $ mkStorePath exe.name
   }
   where
+    mkStorePath name
+      = StorePath name
+      $ hashHashes
+      $ hashMeta fun.metadata
+      : hashFlowName name
+      : [ case oracle k of StorePath _ h -> h
+        | k <- fun.param
+        ] ++ (hashExtMeta oracle <$> fun.extMeta)
 
 hashHashes :: [Hash] -> Hash
 hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks
