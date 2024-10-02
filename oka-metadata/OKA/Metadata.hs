@@ -19,7 +19,6 @@ module OKA.Metadata
   ( -- * Metadata
     Metadata
   , metadata
-  , metadataF
   , metadataMay
   , restrictMetaByType
   , restrictMetaByKeys

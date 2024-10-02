@@ -14,7 +14,6 @@ module OKA.Metadata.Meta
     -- $metadata
     Metadata
   , metadata
-  , metadataF
   , metadataMay
   , restrictMetaByType
   , restrictMetaByKeys
@@ -124,10 +123,6 @@ metadata = metadataMay . lens unpack (const Just)
   where
     unpack (Just a) = a
     unpack Nothing  = error $ "Metadata doesn't have data type: " ++ typeName @a
-
--- | Fold for accessing dictionary from dynamic 'Metadata'.
-metadataF :: forall a. IsMeta a => Fold Metadata a
-metadataF = metadataMay . _Just
 
 -- | Lens for accessing dictionary from dynamic 'Metadata'.
 metadataMay :: forall a. IsMeta a => Lens' Metadata (Maybe a)
