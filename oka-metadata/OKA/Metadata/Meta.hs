@@ -121,17 +121,11 @@ data MetaEntry f where
 -- | Lens for accessing dictionary from dynamic 'Metadata'. Will fail if
 --   dictionary is not part of bundle
 metadata :: forall a. IsMeta a => Lens' Metadata a
-metadata = metadataMay . lens unpack (const Just)
-  where
-    unpack (Just a) = a
-    unpack Nothing  = error $ "Metadata doesn't have data type: " ++ typeName @a
+metadata = hkdMetadata . coerced @(Identity a) @_ @a @_
 
 -- | Lens for accessing dictionary from dynamic 'Metadata'.
 metadataMay :: forall a. IsMeta a => Lens' Metadata (Maybe a)
-metadataMay = lens fromMetadata (\m -> \case
-                                    Just a  -> m <> toMetadata a
-                                    Nothing -> deleteFromMetaByType @a m
-                                )
+metadataMay = hkdMetadataMay . coerced @(Maybe (Identity a)) @_ @(Maybe a) @_
 
 -- | Lens for accessing dictionary from dynamic 'Metadata'.
 hkdMetadataMay :: forall a f. (IsMeta a, Applicative f) => Lens' (MetadataF f) (Maybe (f a))
