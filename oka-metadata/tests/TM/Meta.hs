@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes  #-}
 {-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE DeriveAnyClass       #-}
 {-# LANGUAGE DeriveGeneric        #-}
 {-# LANGUAGE DerivingStrategies   #-}
 {-# LANGUAGE DerivingVia          #-}
@@ -115,7 +116,8 @@ data Record = Record
   }
   deriving stock (Show,Read,Eq,Generic)
   deriving MetaEncoding via AsRecord Record
-  deriving IsMeta       via AsMeta '["rec1"] Record
+  deriving IsMetaPrim   via AsMeta '["rec1"] Record
+  deriving anyclass (IsMeta)
   deriving Arbitrary    via GenericArbitrary Record
 
 data Record2 = Record2
@@ -124,43 +126,50 @@ data Record2 = Record2
   }
   deriving stock (Show,Read,Eq,Generic)
   deriving MetaEncoding via AsRecord             Record2
-  deriving IsMeta       via AsMeta ["rec2","xx"] Record2
+  deriving IsMetaPrim   via AsMeta ["rec2","xx"] Record2
+  deriving anyclass (IsMeta)
   deriving Arbitrary    via GenericArbitrary     Record2
 
 data Record3 = Record3 { foo3 :: Int }
   deriving stock (Show,Read,Eq,Generic)
   deriving MetaEncoding via AsRecord          Record3
-  deriving IsMeta       via AsMeta '["rec3"]  Record3
+  deriving IsMetaPrim   via AsMeta '["rec3"]  Record3
+  deriving anyclass (IsMeta)
   deriving Arbitrary    via GenericArbitrary  Record3
 
 data Record4 = Record4 { foo4 :: Int }
   deriving stock (Show,Read,Eq,Generic)
   deriving MetaEncoding via AsRecord          Record4
-  deriving IsMeta       via AsMeta '["rec4"]  Record4
+  deriving IsMetaPrim   via AsMeta '["rec4"]  Record4
+  deriving anyclass (IsMeta)
   deriving Arbitrary    via GenericArbitrary  Record4
 
 data Record5 = Record5 { foo5 :: Int }
   deriving stock (Show,Read,Eq,Generic)
   deriving MetaEncoding via AsRecord          Record5
-  deriving IsMeta       via AsMeta '["rec5"]  Record5
+  deriving IsMetaPrim   via AsMeta '["rec5"]  Record5
+  deriving anyclass (IsMeta)
   deriving Arbitrary    via GenericArbitrary  Record5
 
 data Record6 = Record6 { foo6 :: Int }
   deriving stock (Show,Read,Eq,Generic)
   deriving MetaEncoding via AsRecord          Record6
-  deriving IsMeta       via AsMeta '["rec6"]  Record6
+  deriving IsMetaPrim   via AsMeta '["rec6"]  Record6
+  deriving anyclass (IsMeta)
   deriving Arbitrary    via GenericArbitrary  Record6
 
 data Record7 = Record7 { foo7 :: Int }
   deriving stock (Show,Read,Eq,Generic)
   deriving MetaEncoding via AsRecord          Record7
-  deriving IsMeta       via AsMeta '["rec7"]  Record7
+  deriving IsMetaPrim   via AsMeta '["rec7"]  Record7
+  deriving anyclass (IsMeta)
   deriving Arbitrary    via GenericArbitrary  Record7
 
 data Record8 = Record8 { foo8 :: Int }
   deriving stock (Show,Read,Eq,Generic)
   deriving MetaEncoding via AsRecord          Record8
-  deriving IsMeta       via AsMeta '["rec8"]  Record8
+  deriving IsMetaPrim   via AsMeta '["rec8"]  Record8
+  deriving anyclass (IsMeta)
   deriving Arbitrary    via GenericArbitrary  Record8
 
 ----------------------------------------------------------------

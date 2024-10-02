@@ -25,6 +25,7 @@ module OKA.Metadata
   , deleteFromMetaByType
   , deleteFromMetaByKeys
   , IsMeta
+  , IsMetaPrim
   , toMetadata
   , fromMetadata
     -- ** Encoding & decoding

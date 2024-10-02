@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE OverloadedStrings   #-}
 -- |
 module TM.Flow (tests) where
@@ -155,8 +156,8 @@ data CounterMeta (a :: Symbol) = CounterMeta
   }
   deriving stock Generic
   deriving MetaEncoding via AsRecord    (CounterMeta a)
-  deriving IsMeta       via AsMeta '[a] (CounterMeta a)
-
+  deriving IsMetaPrim   via AsMeta '[a] (CounterMeta a)
+  deriving anyclass IsMeta
 
 -- Tool for observation of execution of normal flows
 newtype Observe a = Observe (IORef (Map FilePath a))
