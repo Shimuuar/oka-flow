@@ -21,6 +21,8 @@ module OKA.Metadata.Meta
   , deleteFromMetaByKeys
     -- * HKD metadata
   , MetadataF
+  , hkdMetadata
+  , hkdMetadataMay
     -- * 'IsMeta' type class
   , IsMetaPrim(..)
   , IsMeta(..)
@@ -131,6 +133,21 @@ metadataMay = lens fromMetadata (\m -> \case
                                     Nothing -> deleteFromMetaByType @a m
                                 )
 
+-- | Lens for accessing dictionary from dynamic 'Metadata'.
+hkdMetadataMay :: forall a f. (IsMeta a, Applicative f) => Lens' (MetadataF f) (Maybe (f a))
+hkdMetadataMay = lens fromHkdMetadata
+  (\m -> \case
+      Just a  -> m <> toHkdMetadata a
+      Nothing -> deleteFromMetaByType @a m
+  )
+
+-- | Lens for accessing dictionary from dynamic 'Metadata'.
+hkdMetadata :: forall a f. (IsMeta a, Applicative f) => Lens' (MetadataF f) (f a)
+hkdMetadata = hkdMetadataMay . lens unpack (const Just)
+  where
+    unpack (Just a) = a
+    unpack Nothing  = error $ "Metadata doesn't have data type: " ++ typeName @a
+
 
 
 -- | Only keep keys which corresponds to a type
@@ -168,8 +185,8 @@ class Typeable a => IsMeta a where
   default metaTree :: IsMetaPrim a => MetaTree a
   metaTree = singletonMetaTree
   -- | Convert data type to dynamic dictionary
-  toHkdMetadata :: Applicative f => a -> MetadataF f
-  default toHkdMetadata :: (IsMetaPrim a, Applicative f) => a -> MetadataF f
+  toHkdMetadata :: Applicative f => f a -> MetadataF f
+  default toHkdMetadata :: (IsMetaPrim a, Applicative f) => f a -> MetadataF f
   toHkdMetadata = primToMetadata
   -- | Look up type in dictionary
   fromHkdMetadata :: (Applicative f) => MetadataF f -> Maybe (f a)
@@ -182,7 +199,7 @@ class Typeable a => IsMeta a where
 
 -- | Convert data type to dynamic dictionary
 toMetadata :: IsMeta a => a -> Metadata
-toMetadata = toHkdMetadata
+toMetadata = toHkdMetadata . Identity
 
 -- | Look up type in dictionary
 fromMetadata :: IsMeta a => Metadata -> Maybe a
@@ -366,8 +383,8 @@ decodeTree (Branch kmap) js =
 ----------------------------------------------------------------
 
 -- | Implementation of 'toMetadata' for primitive entry
-primToMetadata :: (IsMetaPrim a, Applicative f) => a -> MetadataF f
-primToMetadata a = Metadata $ Map.singleton (typeOf a) (MetaEntry (pure a))
+primToMetadata :: (IsMetaPrim a) => f a -> MetadataF f
+primToMetadata fa = Metadata $ Map.singleton (typeRep fa) (MetaEntry fa)
 
 -- | Implementation of 'fromMetadata' for primitive entry
 primFromMetadata :: forall a f. (IsMetaPrim a) => MetadataF f -> Maybe (f a)
@@ -386,7 +403,7 @@ singletonMetaTree
     , parser  = \json -> do
         a <- JSON.prependFailure ("While parsing metadata " ++ typeName @a ++ "\n")
            $ parseMeta @a json 
-        return $! primToMetadata a
+        return $! primToMetadata (pure a)
     }
 
 -- | Derive 'IsMeta' instance with given path
@@ -512,8 +529,8 @@ genericMetaTree :: (Generic a, GIsMetaProd (Rep a))
 genericMetaTree = GHC.Generics.from >$< gmetaTree
 
 genericToHkdMetadata :: (Generic a, GIsMetaProd (Rep a), Applicative f)
-                     => a -> MetadataF f
-genericToHkdMetadata = gtoHkdMetadata . GHC.Generics.from
+                     => f a -> MetadataF f
+genericToHkdMetadata = gtoHkdMetadata . fmap GHC.Generics.from
 
 genericFromHkdMetadata :: (Generic a, GIsMetaProd (Rep a), Applicative f)
                        => MetadataF f -> Maybe (f a)
@@ -525,26 +542,27 @@ genericMetadataKeySet _ = gmetadataKeySet (proxy# @(Rep a))
 -- Type class which exists solely for deriving of IsMeta for tuples
 class GIsMetaProd f where
   gmetaTree        :: MetaTree (f p)
-  gtoHkdMetadata   :: Applicative q => f p -> MetadataF q
+  gtoHkdMetadata   :: Applicative q => q (f p) -> MetadataF q
   gfromHkdMetadata :: (Applicative q) => MetadataF q -> Maybe (q (f p))
   gmetadataKeySet  :: Proxy# f -> Set TypeRep
 
 instance GIsMetaProd f => GIsMetaProd (M1 i c f) where
   gmetaTree        = (coerce `asTypeOf` contramap unM1) $ gmetaTree      @f
-  gtoHkdMetadata   = (coerce `asTypeOf` (. unM1))       $ gtoHkdMetadata @f
-  gfromHkdMetadata = (fmap . fmap) M1 . gfromHkdMetadata @f
+  gtoHkdMetadata   = gtoHkdMetadata   . fmap unM1
+  gfromHkdMetadata = (fmap . fmap) M1 . gfromHkdMetadata
   gmetadataKeySet  = coerce (gmetadataKeySet @f)
 
 instance (GIsMetaProd f, GIsMetaProd g) => GIsMetaProd (f :*: g) where
   gmetaTree = ((\(f :*: _) -> f) >$< gmetaTree)
            <> ((\(_ :*: g) -> g) >$< gmetaTree)
-  gtoHkdMetadata (f :*: g) = gtoHkdMetadata f <> gtoHkdMetadata g
+  gtoHkdMetadata   m = gtoHkdMetadata ((\(f :*: _) -> f) <$> m)
+                    <> gtoHkdMetadata ((\(_ :*: g) -> g) <$> m)
   gfromHkdMetadata m = (liftA2 . liftA2) (:*:) (gfromHkdMetadata m) (gfromHkdMetadata m)
   gmetadataKeySet  _ = gmetadataKeySet (proxy# @f) <> gmetadataKeySet (proxy# @g)
 
 instance (IsMeta a) => GIsMetaProd (K1 i a) where
   gmetaTree         = coerce (metaTree @a)
-  gtoHkdMetadata    = (coerce `asTypeOf` (. unK1)) (toHkdMetadata @a)
+  gtoHkdMetadata    = toHkdMetadata . fmap unK1
   gfromHkdMetadata  = (fmap . fmap) K1 . fromHkdMetadata
   gmetadataKeySet _ = metadataKeySet (proxy# @a)
 
