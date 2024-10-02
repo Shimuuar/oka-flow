@@ -40,6 +40,7 @@ module OKA.Metadata.Meta
   , primToMetadata
   , primFromMetadata
   , singletonMetaTree
+  , decodeMetadataPrimEither
   , MetaPath(..)
     -- ** Encoding & decoding
   , encodeMetadataEither
@@ -348,6 +349,16 @@ decodeMetadataEither json =
         Nothing -> error "Invalid conversion. IsMeta is bugged"
   where
     annotate = JSON.prependFailure ("\nFailed to decode metadata " ++ show (typeOf (undefined :: a)) ++ "\n")
+
+-- | Decode metadata from JSON value
+decodeMetadataPrimEither :: forall a. IsMetaPrim a => JSON.Value -> Either MetadataError a
+decodeMetadataPrimEither json
+  = bimap JsonError id
+  $ JSON.parseEither (foldr descend parseMeta (metaLocation @a)) json
+  where
+    descend k parser
+      = JSON.prependFailure (" - " ++ T.unpack (toText k) ++ "\n")
+      . metaWithObject (\o -> parser =<< (o .: k))
 
 
 
