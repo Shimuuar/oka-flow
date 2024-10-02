@@ -9,6 +9,7 @@ module OKA.Flow.Graph
     Fun(..)
   , FlowGraph(..)
   , MetaStore(..)
+  , typeMetaStore
     -- * Flow monad and primitives
   , Flow(..)
   , FlowSt(..)
@@ -88,6 +89,8 @@ instance UnPure (MetaStore k) where
   unPure (Pure a) = Just a
   unPure _        = Nothing
 
+typeMetaStore :: Typeable a => MetaStore k a -> TypeRep
+typeMetaStore = typeRep
 
 
 -- | Single workflow bound in dataflow graph.
@@ -215,7 +218,7 @@ hashExtMeta oracle meta
   : [ h
     | (ty,StorePath _ h0) <- sortOn fst $ metadataFToList
         (\m -> case m of
-            Load k -> Just (typeRep m, oracle k)
+            Load k -> Just (typeMetaStore m, oracle k)
             _      -> Nothing
         ) meta
     , h <- [hashTypeRep ty, h0]

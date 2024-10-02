@@ -233,7 +233,7 @@ lookupExtCache :: Typeable a => ExtMetaCache -> MetaStore FunID a -> IO (Identit
 lookupExtCache (ExtMetaCache cache) m = case m of
   Pure a   -> pure $ Identity a
   FidClash -> error "INTERNAL ERROR: FidClash in metadata"
-  Load fid -> case Map.lookup (typeRep m, fid) cache of
+  Load fid -> case Map.lookup (typeMetaStore m, fid) cache of
     Nothing -> error "INTERNAL ERROR: missing entry in cache"
     Just (SomeExtMeta io) -> do
       a <- io
@@ -260,7 +260,7 @@ prepareExtMetaCache ctx gr targets = do
       Pure{}   -> Nothing
       FidClash -> error "INTERNAL ERROR: FidClash in metadata"
       Load fid -> Just
-        ( (typeRep m, fid)
+        ( (typeMetaStore m, fid)
         , if | fid `Set.member` targets.wanted ->
                  do atomically $ readTMVar (fst $ (gr.graph ! fid).output)
                     readMeta path
