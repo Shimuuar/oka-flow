@@ -24,6 +24,13 @@ module OKA.Metadata.Meta
   , MetadataF
   , hkdMetadata
   , hkdMetadataMay
+  , mapMetadataF
+  , mapMaybeMetadataF
+  , traverseMetadataF
+  , foldMetadataF
+  , foldrMetadataF
+  , foldMMetadataF
+  , metadataFToList
     -- * 'IsMeta' type class
   , IsMetaPrim(..)
   , IsMeta(..)
@@ -52,6 +59,7 @@ module OKA.Metadata.Meta
 
 import Control.Applicative
 import Control.Lens
+import Control.Monad
 import Control.Exception
 
 import Data.Aeson                 ((.:))
@@ -176,6 +184,57 @@ deleteFromMetaByType = deleteFromMetaByKeys (metadataKeySet (proxy# @a))
 -- | Delete dictionaries corresponding to this data type from metadata
 deleteFromMetaByKeys :: Set TypeRep -> MetadataF f -> MetadataF f
 deleteFromMetaByKeys k (Metadata m) = Metadata $ Map.withoutKeys m k
+
+
+mapMetadataF :: (forall x. IsMetaPrim x => f x -> g x) -> MetadataF f -> MetadataF g
+mapMetadataF fun (Metadata m)
+  = Metadata
+  $ (\(MetaEntry a) -> MetaEntry (fun a)) <$> m
+
+mapMaybeMetadataF :: (forall x. IsMetaPrim x => f x -> Maybe (g x)) -> MetadataF f -> MetadataF g
+mapMaybeMetadataF fun (Metadata m)
+  = Metadata
+  $ Map.mapMaybe (\(MetaEntry a) -> MetaEntry <$> fun a) m
+
+traverseMetadataF
+  :: Applicative m
+  => (forall x. IsMetaPrim x => f x -> m (g x))
+  -> MetadataF f
+  -> m (MetadataF g)
+traverseMetadataF fun (Metadata m)
+  = Metadata <$> traverse (\(MetaEntry a) -> MetaEntry <$> fun a) m
+
+foldMetadataF
+  :: (Monoid m)
+  => (forall x. IsMetaPrim x => f x -> m)
+  -> MetadataF f
+  -> m
+foldMetadataF fun (Metadata m) = foldMap (\(MetaEntry a) -> fun a) m
+
+foldrMetadataF
+  :: (forall x. IsMetaPrim x => f x -> b -> b)
+  -> b
+  -> MetadataF f
+  -> b
+foldrMetadataF fun b0 (Metadata m) = foldr (\(MetaEntry a) b -> fun a b) b0 m
+
+foldMMetadataF
+  :: Monad m
+  => (forall x. IsMetaPrim x => a -> f x -> m a)
+  -> a -> MetadataF f -> m a
+foldMMetadataF fun a0 (Metadata m)
+  = foldM (\a (MetaEntry x) -> fun a x) a0 m
+
+metadataFToList
+  :: (forall x. IsMetaPrim x => f x -> Maybe a)
+  -> MetadataF f
+  -> [a]
+metadataFToList fun = foldrMetadataF
+  (\m -> case fun m of
+           Just a -> (a:)
+           _      -> id
+  ) []
+
 
 
 -- | Type class for metadata entries. It encodes data type's location
