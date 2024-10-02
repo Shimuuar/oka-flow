@@ -18,14 +18,12 @@ import Control.Monad.STM
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
-import Data.Traversable
-import Data.Map.Strict              ((!))
+import Data.Map.Strict              (Map,(!))
 import Data.Map.Strict              qualified as Map
 import Data.Set                     qualified as Set
 import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import Data.Typeable
 import Effectful
-import Effectful.Reader.Static      qualified as Eff
 import Effectful.State.Static.Local qualified as Eff
 
 import System.FilePath              ((</>))
@@ -34,6 +32,7 @@ import System.Directory             (createDirectory,createDirectoryIfMissing,re
                                     )
 
 import OKA.Metadata
+import OKA.Metadata.Meta
 import OKA.Flow.Graph
 import OKA.Flow.Resources
 import OKA.Flow.Types
@@ -105,10 +104,9 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
       $ runEff
       $ runEffect
       $ fmap (\(r,st) -> addTargets r st.graph)
-      $ Eff.runState FlowSt{ meta  = meta
+      $ Eff.runState FlowSt{ meta  = mapMetadataF (\(Identity a) -> Pure a) meta
                            , graph = FlowGraph mempty mempty
                            }
-      $ Eff.runReader []
       $ m
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr
@@ -120,28 +118,7 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
                   (getStorePath targets.wanted)
   -- Prepare dictionary of external metadata which is loaded from
   -- store path
-  ext_meta
-    <- fmap Map.fromList
-    $  sequence
-    [ case k `Set.member` targets.wanted of
-        True  -> do io <- once readMeta
-                    pure (k, do atomically $ readTMVar (fst $ (gr_exe.graph ! k).output)
-                                io
-                         )
-        False -> do io <- once readMeta
-                    pure (k,io)
-      --
-    | Fun{extMeta} <- toList gr_exe.graph
-    , ext          <- extMeta
-    , let k    = ext.key
-          path = case (gr_exe.graph ! k).output of
-            (_,Just p)  -> ctx.root </> storePath p </> "saved.json"
-            (_,Nothing) -> error "Dependence on PHONY target"
-          readMeta = do
-            (JSON.eitherDecode <$> BL.readFile path) >>= \case
-              Left  e  -> error e
-              Right js -> pure $ ext.load js
-    ]
+  ext_meta <- prepareExtMetaCache ctx gr_exe targets
   -- Evaluator
   mapConcurrently_ id
     [ prepareFun ctx gr_exe targets ext_meta (gr_exe.graph ! i) ctx.res
@@ -162,7 +139,7 @@ prepareFun
   :: FlowCtx eff                           -- Evaluation context
   -> FlowGraph (TMVar (), Maybe StorePath) -- Full dataflow graph
   -> FIDSet                                -- Our target set
-  -> Map.Map FunID (IO Metadata)
+  -> ExtMetaCache                          -- External metadata
   -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
   -> ResourceSet
   -> IO ()
@@ -172,9 +149,7 @@ prepareFun ctx FlowGraph{graph=gr} FIDSet{..} ext_meta fun res = crashReport ctx
     atomically $ readTMVar (fst $ outputOf fid)
   -- Compute metadata which should be passed to the workflow by
   -- applying data loaded from 
-  meta <- do
-    ext <- for fun.extMeta $ \ExtMeta{key} -> ext_meta ! key
-    pure $! foldr (flip (<>)) fun.metadata ext
+  meta <- traverseMetadataF (lookupExtCache ext_meta) fun.metadata
   -- Request resources
   atomically $ fun.resources.acquire res
   -- Run action
@@ -247,6 +222,63 @@ withBuildDirectory root path action = do
     out   = root </> storePath path
     build = out <> "-build"
 
+
+-- Cache for external metadata. We only want to load data once
+newtype ExtMetaCache = ExtMetaCache (Map (TypeRep, FunID) SomeExtMeta)
+
+data SomeExtMeta where
+  SomeExtMeta :: IsMetaPrim a => IO a -> SomeExtMeta
+
+lookupExtCache :: Typeable a => ExtMetaCache -> MetaStore FunID a -> IO (Identity a)
+lookupExtCache (ExtMetaCache cache) m = case m of
+  Pure a   -> pure $ Identity a
+  FidClash -> error "INTERNAL ERROR: FidClash in metadata"
+  Load fid -> case Map.lookup (typeRep m, fid) cache of
+    Nothing -> error "INTERNAL ERROR: missing entry in cache"
+    Just (SomeExtMeta io) -> do
+      a <- io
+      case cast a of
+        Nothing -> error "INTERNAL ERROR: corrupted ext_meta cache"
+        Just a' -> pure $ Identity a'
+
+prepareExtMetaCache
+  :: FlowCtx eff
+  -> FlowGraph (TMVar (), Maybe StorePath)
+  -> FIDSet
+  -> IO ExtMetaCache
+prepareExtMetaCache ctx gr targets = do
+  cache <- traverse (\(SomeExtMeta io) -> SomeExtMeta <$> once io)
+         $ Map.fromList
+         [ r
+         | fun <- toList gr.graph
+         , r   <- metadataFToList ((_Just . _2 %~ SomeExtMeta) . toCache) fun.metadata
+         ]
+  pure $ ExtMetaCache cache
+  where
+    toCache :: IsMetaPrim a => MetaStore FunID a -> Maybe ((TypeRep, FunID), IO a)
+    toCache m = case m of
+      Pure{}   -> Nothing
+      FidClash -> error "INTERNAL ERROR: FidClash in metadata"
+      Load fid -> Just
+        ( (typeRep m, fid)
+        , if | fid `Set.member` targets.wanted ->
+                 do atomically $ readTMVar (fst $ (gr.graph ! fid).output)
+                    readMeta path
+             | otherwise ->
+                 do readMeta path
+        )
+        where
+          path = case (gr.graph ! fid).output of
+            (_,Just p)  -> ctx.root </> storePath p </> "saved.json"
+            (_,Nothing) -> error "Dependence on PHONY target"
+    --
+    readMeta :: IsMetaPrim a => FilePath -> IO a
+    readMeta path = do
+      (JSON.eitherDecode <$> BL.readFile path) >>= \case
+        Left  e  -> error e
+        Right js -> case decodeMetadataPrimEither js of
+          Left  e -> throw e
+          Right a -> pure a
 
 -- | Return action that will perform action exactly once
 once :: IO a -> IO (IO a)

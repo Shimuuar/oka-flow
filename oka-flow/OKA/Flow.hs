@@ -22,8 +22,7 @@ module OKA.Flow
   , ResultSet(..)
   , want
   , liftEff
-  , withExtMeta
-  , withoutExtMeta
+  , addExtMeta
     -- * Defining workflows
   , Workflow(..)
   , Action(..)
@@ -42,11 +41,12 @@ module OKA.Flow
   , runFlow
   ) where
 
-import Data.Typeable
+import Control.Lens
 import Effectful
-import Effectful.Reader.Static     qualified as Eff
+import Effectful.State.Static.Local qualified as Eff
 
 import OKA.Metadata
+import OKA.Metadata.Meta
 import OKA.Flow.Graph
 import OKA.Flow.Types
 import OKA.Flow.Run
@@ -61,18 +61,15 @@ import OKA.Flow.Std
 
 -- | Lift effect
 liftEff :: Eff eff a -> Flow eff a
-liftEff = Flow . raise . raise
+liftEff = Flow . raise
 
 -- | Load contents of saved meta before execution of workflow
-withExtMeta
-  :: forall a eff b. IsMeta a
-  => Result (SavedMeta a) -> Flow eff b -> Flow eff b
-withExtMeta (Result fid) (Flow action) = Flow $ Eff.local (ext:) action
-  where
-    ext = ExtMeta { key   = fid
-                  , tyRep = typeOf (undefined :: a)
-                  , load  = toMetadata . decodeMetadata @a
-                  }
+addExtMeta
+  :: forall a eff. IsMeta a
+  => Result (SavedMeta a) -> Flow eff ()
+addExtMeta (Result fid) = Flow $ do
+  Eff.modify $ stMetaL . hkdMetadata .~ Load @_ @a fid 
+
 
 -- | Lift phony action using standard tools
 liftPhony

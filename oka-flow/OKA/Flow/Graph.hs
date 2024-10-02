@@ -8,14 +8,13 @@ module OKA.Flow.Graph
   ( -- * Dataflow graph
     Fun(..)
   , FlowGraph(..)
-  , ExtMeta(..)
+  , MetaStore(..)
     -- * Flow monad and primitives
   , Flow(..)
   , FlowSt(..)
   , appendMeta
   , scopeMeta
   , restrictMeta
-  , withoutExtMeta
     -- * Graph operations
   , FIDSet(..)
   , hashFlowGraph
@@ -61,10 +60,10 @@ import Data.Text.Encoding           qualified as T
 import Data.Typeable
 import Data.Vector                  qualified as V
 import Effectful
-import Effectful.Reader.Static      qualified as Eff
 import Effectful.State.Static.Local qualified as Eff
 
 import OKA.Metadata
+import OKA.Metadata.Meta
 import OKA.Flow.Types
 import OKA.Flow.Resources
 
@@ -72,12 +71,31 @@ import OKA.Flow.Resources
 -- Dataflow graph
 ----------------------------------------------------------------
 
+data MetaStore k a
+  = Pure !a
+  | Load !k
+  | FidClash
+  deriving stock Functor
+
+instance Applicative (MetaStore k) where
+  pure  = Pure
+  Pure f <*> Pure a = Pure (f a)
+  Pure _ <*> Load i = Load i
+  Load i <*> Pure _ = Load i
+  _      <*> _      = FidClash
+
+instance UnPure (MetaStore k) where
+  unPure (Pure a) = Just a
+  unPure _        = Nothing
+
+
+
 -- | Single workflow bound in dataflow graph.
 data Fun k v = Fun
   { workflow  :: Workflow
     -- ^ Execute workflow. It takes resource handle as parameter and
     --   tries to acquire resources and return actual function to run.
-  , metadata  :: Metadata
+  , metadata  :: MetadataF (MetaStore k)
     -- ^ Metadata that should be supplied to the workflow
   , resources :: Lock
     -- ^ Resources required by workflow
@@ -85,21 +103,9 @@ data Fun k v = Fun
     -- ^ Parameters to workflow.
   , output    :: v
     -- ^ Output of workflow
-  , extMeta   :: [ExtMeta k]
-    -- ^ All parts of metadata which should be read from output of
-    --   some other workflow
   }
   deriving stock (Functor, Foldable, Traversable)
 
--- | Part of metadata which is read from external storage
-data ExtMeta k = ExtMeta
-  { key   :: !k
-    -- ^ Key of a
-  , tyRep :: !TypeRep
-    -- ^ Type of
-  , load  :: JSON.Value -> Metadata
-    -- ^ Function which loads metadata from bare JSON
-  }
 
 -- | Complete dataflow graph
 data FlowGraph a = FlowGraph
@@ -117,19 +123,19 @@ data FlowGraph a = FlowGraph
 
 -- | Flow monad which we use to build workflow
 newtype Flow eff a = Flow
-  (Eff (Eff.Reader [ExtMeta FunID] : Eff.State FlowSt : eff) a)
+  (Eff (Eff.State FlowSt : eff) a)
   deriving newtype (Functor, Applicative, Monad)
 
 -- | State of 'Flow' monad
 data FlowSt = FlowSt
-  { meta  :: !Metadata
+  { meta  :: !(MetadataF (MetaStore FunID))
   , graph :: !(FlowGraph ())
   }
 
 instance MonadFail (Flow eff) where
   fail = error
 
-instance MonadState Metadata (Flow eff) where
+instance MonadState (MetadataF (MetaStore FunID)) (Flow eff) where
   get   = Flow $ Eff.gets   @FlowSt (.meta)
   put m = Flow $ Eff.modify @FlowSt (stMetaL .~ m)
 
@@ -159,9 +165,7 @@ restrictMeta action = scopeMeta $ do
   modify (restrictMetaByType @meta)
   action
 
--- | Execute workflow without loading external metadata
-withoutExtMeta :: Flow eff a -> Flow eff a
-withoutExtMeta (Flow action) = Flow $ Eff.local @[ExtMeta FunID] (\_ -> []) action
+
 
 ----------------------------------------------------------------
 -- Execution of the workflow
@@ -185,14 +189,18 @@ hashFun oracle fun = fun
       WorkflowExe exe        -> Just $ mkStorePath exe.name
   }
   where
+    -- Partition 
     mkStorePath name
       = StorePath name
       $ hashHashes
-      $ hashMeta fun.metadata
+      $ hashMeta (mapMaybeMetadataF (\case
+                                        Pure a -> Just (Identity a)
+                                        _      -> Nothing
+                                    ) fun.metadata)
       : hashFlowName name
       : [ case oracle k of StorePath _ h -> h
-        | k <- fun.param
-        ] ++ (hashExtMeta oracle <$> fun.extMeta)
+        | k <- fun.param        
+        ] ++ hashExtMeta oracle fun.metadata
 
 hashHashes :: [Hash] -> Hash
 hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks
@@ -200,13 +208,18 @@ hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks
 hashFlowName :: String -> Hash
 hashFlowName = Hash . T.encodeUtf8 . T.pack
 
-hashExtMeta :: (k -> StorePath) -> ExtMeta k -> Hash
-hashExtMeta oracle m = Hash $ SHA1.hashlazy $ BL.fromChunks
-  [ "?EXT_META?"
-  , case oracle m.key        of StorePath _ (Hash h) -> h
-  , case hashTypeRep m.tyRep of Hash h               -> h
-  ]
 
+hashExtMeta :: (k -> StorePath) -> MetadataF (MetaStore k) -> [Hash]
+hashExtMeta oracle meta
+  = Hash "?EXT_META?"  
+  : [ h
+    | (ty,StorePath _ h0) <- sortOn fst $ metadataFToList
+        (\m -> case m of
+            Load k -> Just (typeRep m, oracle k)
+            _      -> Nothing
+        ) meta
+    , h <- [hashTypeRep ty, h0]
+    ]
 
 
 -- Compute hash of metadata
@@ -259,9 +272,16 @@ deduplicateGraph gr
   where
     clean = fmap replaceKey
           . flip Map.withoutKeys dupes
-    replaceKey f = f { param   = replace <$> f.param
-                     , extMeta = [ ExtMeta{key=replace key, ..} | ExtMeta{..} <- f.extMeta]
+    replaceKey f = f { param    = replace <$> f.param
+                     , metadata = mapMetadataF replaceKeyMeta f.metadata
                      }
+    --
+    replaceKeyMeta :: MetaStore FunID x -> MetaStore FunID x
+    replaceKeyMeta FidClash            = FidClash
+    replaceKeyMeta m@(Load k)
+      | Just k' <- replacement ^. at k = Load k'
+      | otherwise                      = m
+    replaceKeyMeta m@Pure{}            = m
     -- FIDs of duplicate
     dupes       = Set.fromList [ fid | _ :| fids <- toList fid_mapping
                                      , fid       <- fids
@@ -306,14 +326,18 @@ shakeFlowGraph tgtExists (FlowGraph workflows targets)
           case exists of
             True  -> pure $ fids & fidExistsL %~ Set.insert fid
             False -> do
-              fids'' <- foldM addFID fids' f.param
-              foldM addFID fids'' ((.key) <$> f.extMeta)
+              fids'' <- foldM addFID fids'  f.param
+              foldMMetadataF (\fs -> \case
+                                 Load k   -> addFID fs k
+                                 Pure _   -> pure fs
+                                 FidClash -> error "INTERNAL ERROR: FID clashed in metadata"
+                             ) fids'' f.metadata
       where
         f     = workflows ! fid
         fids' = fids & fidWantedL %~ Set.insert fid
 
 data FIDSet = FIDSet
-  { exists :: !(Set FunID)    -- ^ Workflow already computed
+  { exists :: !(Set FunID) -- ^ Workflow already computed
   , wanted :: !(Set FunID) -- ^ We need to compute these workflows
   }
   deriving (Show)
@@ -332,7 +356,7 @@ flowTgtL = lens (.targets) (\x s -> x {targets = s})
 flowGraphL :: Lens (FlowGraph a) (FlowGraph b) (Map FunID (Fun FunID a)) (Map FunID (Fun FunID b))
 flowGraphL = lens (.graph) (\FlowGraph{..} s -> FlowGraph{graph = s, ..})
 
-stMetaL :: Lens' FlowSt Metadata
+stMetaL :: Lens' FlowSt (MetadataF (MetaStore FunID))
 stMetaL = lens (.meta) (\FlowSt{..} x -> FlowSt{meta=x, ..})
 
 stGraphL :: Lens' FlowSt (FlowGraph ())
@@ -357,7 +381,6 @@ basicLiftWorkflow
   -> params   -- ^ Parameters of workflow
   -> Flow eff (Result a)
 basicLiftWorkflow resource exe p = Flow $ do
-  ext <- Eff.ask
   st  <- Eff.get @FlowSt
   -- Allocate new ID
   let fid = case Map.lookupMax st.graph.graph of
@@ -375,7 +398,6 @@ basicLiftWorkflow resource exe p = Flow $ do
     , output    = ()
     , resources = resourceLock resource
     , param     = res
-    , extMeta   = ext
     }
   return $ Result fid
 

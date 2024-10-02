@@ -16,6 +16,7 @@ module OKA.Flow.Std
 
 import Control.Monad.State.Strict
 import Data.Coerce
+import Data.Functor.Identity
 import Effectful                  ((:>))
 import System.FilePath            ((</>))
 import System.Directory           (createFileLink,createDirectory)
@@ -30,7 +31,7 @@ import OKA.Flow.Graph
 import OKA.Flow.Types
 import OKA.Flow.Eff
 import OKA.Metadata
-
+import OKA.Metadata.Meta
 
 ----------------------------------------------------------------
 -- Saved metadata
@@ -49,8 +50,8 @@ instance (IsMeta a) => FlowInput (SavedMeta a) where
 
 -- | Save metadata value so it could be passed as parameter.
 stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
-stdSaveMeta a = scopeMeta $ withoutExtMeta $ do
-  put $ toMetadata a
+stdSaveMeta a = scopeMeta $ do
+  put $ mapMetadataF (\(Identity x) -> Pure x) $ toMetadata a
   liftWorkflow () Action
     { name = "std.SavedMeta"
     , run  = \_ _meta args out -> do
