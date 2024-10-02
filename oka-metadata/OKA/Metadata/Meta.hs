@@ -20,6 +20,7 @@ module OKA.Metadata.Meta
   , deleteFromMetaByType
   , deleteFromMetaByKeys
     -- * HKD metadata
+  , UnPure(..)
   , MetadataF
   , hkdMetadata
   , hkdMetadataMay
@@ -117,15 +118,31 @@ data MetaEntry f where
   MetaEntry :: (IsMetaPrim a) => f a -> MetaEntry f
 
 
+-- | Applicatives for which exists partial inverse of pure.
+class Applicative f => UnPure f where
+  unPure :: f a -> Maybe a
+
+instance UnPure Identity where
+  unPure = Just . runIdentity
 
 -- | Lens for accessing dictionary from dynamic 'Metadata'. Will fail if
 --   dictionary is not part of bundle
-metadata :: forall a. IsMeta a => Lens' Metadata a
-metadata = hkdMetadata . coerced @(Identity a) @_ @a @_
+metadata :: forall a f. (IsMeta a, UnPure f) => Lens' (MetadataF f) a
+metadata = hkdMetadata . lens unpack (\_ -> pure)
+  where
+    unpack f = case unPure f of
+      Just a -> a
+      Nothing -> error $ "metadata: cannot unwrap value of type: " ++ typeName @a
 
 -- | Lens for accessing dictionary from dynamic 'Metadata'.
-metadataMay :: forall a. IsMeta a => Lens' Metadata (Maybe a)
-metadataMay = hkdMetadataMay . coerced @(Maybe (Identity a)) @_ @(Maybe a) @_
+metadataMay :: forall a f. (IsMeta a, UnPure f) => Lens' (MetadataF f) (Maybe a)
+metadataMay = hkdMetadataMay . lens unpack (\_ -> fmap pure)
+  where
+    unpack Nothing = Nothing
+    unpack (Just f) = case unPure f of
+      Just a  -> Just a
+      Nothing -> error $ "metadataMay: cannot unwrap value of type: " ++ typeName @a
+
 
 -- | Lens for accessing dictionary from dynamic 'Metadata'.
 hkdMetadataMay :: forall a f. (IsMeta a, Applicative f) => Lens' (MetadataF f) (Maybe (f a))
@@ -396,7 +413,7 @@ singletonMetaTree
     , encoder = metaToJson @a
     , parser  = \json -> do
         a <- JSON.prependFailure ("While parsing metadata " ++ typeName @a ++ "\n")
-           $ parseMeta @a json 
+           $ parseMeta @a json
         return $! primToMetadata (pure a)
     }
 
