@@ -256,7 +256,7 @@ class Typeable a => IsMeta a where
   metaTree = singletonMetaTree
   -- | Convert data type to dynamic dictionary
   toHkdMetadata :: Applicative f => f a -> MetadataF f
-  default toHkdMetadata :: (IsMetaPrim a, Applicative f) => f a -> MetadataF f
+  default toHkdMetadata :: (IsMetaPrim a) => f a -> MetadataF f
   toHkdMetadata = primToMetadata
   -- | Look up type in dictionary
   fromHkdMetadata :: (Applicative f) => MetadataF f -> Maybe (f a)
