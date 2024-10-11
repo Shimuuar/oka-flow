@@ -63,7 +63,7 @@ import Control.Lens
 import Control.Monad
 import Control.Exception
 
-import Data.Aeson                 ((.:))
+import Data.Aeson                 ((.:?))
 import Data.Aeson                 qualified as JSON
 import Data.Aeson.KeyMap          qualified as KM
 import Data.Aeson.Key             (fromText,toText)
@@ -355,10 +355,19 @@ decodeMetadataPrimEither :: forall a. IsMetaPrim a => JSON.Value -> Either Metad
 decodeMetadataPrimEither json
   = bimap JsonError id
   $ JSON.parseEither (foldr descend parseMeta (metaLocation @a)) json
-  where
-    descend k parser
-      = JSON.prependFailure (" - " ++ T.unpack (toText k) ++ "\n")
-      . metaWithObject (\o -> parser =<< (o .: k))
+
+descend
+  :: JSON.Key
+  -> (JSON.Value -> JSON.Parser a)
+  -> (JSON.Value -> JSON.Parser a)
+descend k parser
+  = JSON.prependFailure (" - " ++ T.unpack (toText k) ++ "\n")
+  . \case
+       JSON.Null     -> parser JSON.Null
+       JSON.Object o -> (o .:? k) >>= \case
+         Nothing -> parser JSON.Null
+         Just js -> parser js
+       o -> fail $ "Expected object but got " ++ constrName o
 
 
 
@@ -382,10 +391,13 @@ data Entry a = Entry
   }
 
 instance Contravariant Entry where
-  contramap f e = Entry e.tyRep (e.encoder . f) e.parser
+  contramap f e = Entry { tyRep   = e.tyRep
+                        , encoder = e.encoder . f
+                        , parser  = e.parser
+                        }
 
 instance Contravariant MetaTree where
-  contramap f (MetaTree m) = MetaTree (fmap (contramap f) m)
+  contramap f (MetaTree m) = MetaTree (contramap f <$> m)
 
 
 -- | JSON objects' tree which doesn't contain any key clashes
@@ -453,10 +465,6 @@ decodeTree (Branch kmap) js =
   mconcat <$> sequence [ descend k (decodeTree tr) js
                        | (k,tr) <- KM.toList kmap
                        ]
-  where
-    descend k parser
-      = JSON.prependFailure (" - " ++ T.unpack (toText k) ++ "\n")
-      . metaWithObject (\o -> parser =<< (o .: k))
 
 
 ----------------------------------------------------------------
