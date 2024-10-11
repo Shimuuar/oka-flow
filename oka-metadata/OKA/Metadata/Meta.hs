@@ -42,6 +42,7 @@ module OKA.Metadata.Meta
   , singletonMetaTree
   , decodeMetadataPrimEither
   , MetaPath(..)
+  , Optional(..)
     -- ** Encoding & decoding
   , encodeMetadataEither
   , encodeMetadata
@@ -494,6 +495,21 @@ singletonMetaTree
            $ parseMeta @a json
         return $! primToMetadata (pure a)
     }
+
+-- | Newtype wrapper for existing metadata which turns its presence
+--   optional. Missing entry will be decoded as
+newtype Optional a = Optional { get :: Maybe a }
+
+instance MetaEncoding a => MetaEncoding (Optional a) where
+  metaToJson (Optional (Just a)) = metaToJson a
+  metaToJson (Optional Nothing ) = JSON.Null
+  parseMeta = \case
+    JSON.Null -> pure (Optional Nothing)
+    js        -> Optional . Just <$> parseMeta js
+
+instance IsMetaPrim a => IsMetaPrim (Optional a) where
+  metaLocation = metaLocation @a
+
 
 -- | Derive 'IsMeta' instance with given path
 newtype AsMeta (path :: [Symbol]) a = AsMeta a
