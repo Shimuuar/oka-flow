@@ -242,7 +242,9 @@ metadataFToList fun = foldrMetadataF
 -- | Type class for metadata entries. It encodes data type's location
 --   in JSON dictionary for encoded metadata.
 class (MetaEncoding a, Typeable a) => IsMetaPrim a where
+  -- | Path to place of metadata in the JSON dictionary.
   metaLocation :: [JSON.Key]
+
 
 -- | Type class for data types for types that represent metadata and
 --   collections of metadata (tuples).
