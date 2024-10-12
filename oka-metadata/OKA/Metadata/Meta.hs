@@ -33,6 +33,7 @@ module OKA.Metadata.Meta
   , metadataFToList
     -- * 'IsMeta' type class
   , IsMetaPrim(..)
+  , IsFromMeta(..)
   , IsMeta(..)
   , toMetadata
   , fromMetadata
@@ -172,7 +173,7 @@ hkdMetadata = hkdMetadataMay . lens unpack (const Just)
 
 
 -- | Only keep keys which corresponds to a type
-restrictMetaByType :: forall a f. IsMeta a => MetadataF f -> MetadataF f
+restrictMetaByType :: forall a f. IsFromMeta a => MetadataF f -> MetadataF f
 restrictMetaByType = restrictMetaByKeys (metadataKeySet (proxy# @a))
 
 -- | Only keep keys that are in the set of keys
@@ -180,7 +181,7 @@ restrictMetaByKeys :: Set TypeRep -> MetadataF f -> MetadataF f
 restrictMetaByKeys keys (Metadata m) = Metadata $ Map.restrictKeys m keys
 
 -- | Delete dictionaries corresponding to this data type from metadata
-deleteFromMetaByType :: forall a f. IsMeta a => MetadataF f -> MetadataF f
+deleteFromMetaByType :: forall a f. IsFromMeta a => MetadataF f -> MetadataF f
 deleteFromMetaByType = deleteFromMetaByKeys (metadataKeySet (proxy# @a))
 
 -- | Delete dictionaries corresponding to this data type from metadata
@@ -246,22 +247,18 @@ class (MetaEncoding a, Typeable a) => IsMetaPrim a where
   metaLocation :: [JSON.Key]
 
 
--- | Type class for data types for types that represent metadata and
---   collections of metadata (tuples).
---   access them in dynamic product 'Metadata'.
+-- | Convenience type class for interacting with 'Metadata' it allows
+--   to decode from JSON and lookup from metadata arbitrary products
+--   of instance of 'IsMetaPrim'.
 --
 --   Default implementation is in terms of 'IsMetaPrim'.
-class Typeable a => IsMeta a where
+class Typeable a => IsFromMeta a where
   -- | Description on how to serialize metadata into JSON tree. This
   --   bidirectional parser allows to detect key collisions during
   --   both encoding and decoding.
   metaTree :: MetaTree a
   default metaTree :: IsMetaPrim a => MetaTree a
   metaTree = singletonMetaTree
-  -- | Convert data type to dynamic dictionary
-  toHkdMetadata :: Applicative f => f a -> MetadataF f
-  default toHkdMetadata :: (IsMetaPrim a) => f a -> MetadataF f
-  toHkdMetadata = primToMetadata
   -- | Look up type in dictionary
   fromHkdMetadata :: (Applicative f) => MetadataF f -> Maybe (f a)
   default fromHkdMetadata :: (IsMetaPrim a) => MetadataF f -> Maybe (f a)
@@ -271,12 +268,23 @@ class Typeable a => IsMeta a where
   default metadataKeySet :: Proxy# a -> Set TypeRep
   metadataKeySet _ = Set.singleton (typeOf (undefined :: a))
 
+
+-- | Convenience type class which allows to store arbitrary products
+--   to the metadata.
+--
+--   Default implementation is in terms of 'IsMetaPrim'.
+class IsFromMeta a => IsMeta a where
+  -- | Convert data type to dynamic dictionary
+  toHkdMetadata :: Applicative f => f a -> MetadataF f
+  default toHkdMetadata :: (IsMetaPrim a) => f a -> MetadataF f
+  toHkdMetadata = primToMetadata
+
 -- | Convert data type to dynamic dictionary
 toMetadata :: IsMeta a => a -> Metadata
 toMetadata = toHkdMetadata . Identity
 
 -- | Look up type in dictionary
-fromMetadata :: IsMeta a => Metadata -> Maybe a
+fromMetadata :: IsFromMeta a => Metadata -> Maybe a
 fromMetadata = fmap runIdentity . fromHkdMetadata
 
 
@@ -326,22 +334,22 @@ encodeMetadataEither (Metadata m) =
               ]
 
 -- | Encode metadata as JSON value. Will throw error in case of key clash
-encodeToMetadata :: forall a. IsMeta a => a -> JSON.Value
+encodeToMetadata :: forall a. IsFromMeta a => a -> JSON.Value
 encodeToMetadata = either throw id . encodeToMetadataEither
 
 -- | Encode metadata as JSON value. Returns @Left@ in case of key clash.
-encodeToMetadataEither :: forall a. IsMeta a => a -> Either MetadataError JSON.Value
+encodeToMetadataEither :: forall a. IsFromMeta a => a -> Either MetadataError JSON.Value
 encodeToMetadataEither a = case checkForClashes metaTree.get of
   Err err  -> Left  $ KeyClashes [(e.tyRep, path) | (e,path) <- err]
   OK  tree -> Right $ encodeTreeWith (\e -> e.encoder a) tree
 
 
 -- | Decode metadata from JSON value
-decodeMetadata :: forall a. IsMeta a => JSON.Value -> a
+decodeMetadata :: forall a. IsFromMeta a => JSON.Value -> a
 decodeMetadata = either throw id . decodeMetadataEither
 
 -- | Decode metadata from JSON value
-decodeMetadataEither :: forall a. IsMeta a => JSON.Value -> Either MetadataError a
+decodeMetadataEither :: forall a. IsFromMeta a => JSON.Value -> Either MetadataError a
 decodeMetadataEither json =
   case checkForClashes (metaTree @a).get of
     Err err  -> Left $ KeyClashes [(e.tyRep, path) | (e,path) <- err]
@@ -349,7 +357,7 @@ decodeMetadataEither json =
       m <- JSON.parseEither (annotate . decodeTree tree) json
       case fromMetadata m of
         Just a  -> pure a
-        Nothing -> error "Invalid conversion. IsMeta is bugged"
+        Nothing -> error "Invalid conversion. IsFromMeta is bugged"
   where
     annotate = JSON.prependFailure ("\nFailed to decode metadata " ++ show (typeOf (undefined :: a)) ++ "\n")
 
@@ -538,100 +546,133 @@ instance (KnownSymbol n, MetaPath ns) => MetaPath (n ': ns) where
 -- Instances
 ----------------------------------------------------------------
 
-instance IsMeta () where
+instance IsFromMeta () where
   metaTree          = mempty
-  toHkdMetadata     = mempty
   fromHkdMetadata _ = Just (pure ())
   metadataKeySet  _ = mempty
+instance IsMeta () where
+  toHkdMetadata     = mempty
 
+instance (IsFromMeta a, IsFromMeta b) => IsFromMeta (a,b) where
+  metaTree        = genericMetaTree
+  fromHkdMetadata = genericFromHkdMetadata
+  metadataKeySet  = genericMetadataKeySet
 instance (IsMeta a, IsMeta b) => IsMeta (a,b) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
+
+instance (IsFromMeta a, IsFromMeta b, IsFromMeta c) => IsFromMeta (a,b,c) where
+  metaTree        = genericMetaTree
   fromHkdMetadata = genericFromHkdMetadata
   metadataKeySet  = genericMetadataKeySet
-
 instance (IsMeta a, IsMeta b, IsMeta c) => IsMeta (a,b,c) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
+
+instance (IsFromMeta a,IsFromMeta b,IsFromMeta c,IsFromMeta d) => IsFromMeta (a,b,c,d) where
+  metaTree        = genericMetaTree
   fromHkdMetadata = genericFromHkdMetadata
   metadataKeySet  = genericMetadataKeySet
-
 instance (IsMeta a,IsMeta b,IsMeta c,IsMeta d) => IsMeta (a,b,c,d) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
+
+instance ( IsFromMeta a, IsFromMeta b, IsFromMeta c, IsFromMeta d
+         , IsFromMeta e
+         ) => IsFromMeta (a,b,c,d,e) where
+  metaTree        = genericMetaTree
   fromHkdMetadata = genericFromHkdMetadata
   metadataKeySet  = genericMetadataKeySet
-
 instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
          , IsMeta e
          ) => IsMeta (a,b,c,d,e) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
+
+instance ( IsFromMeta a, IsFromMeta b, IsFromMeta c, IsFromMeta d
+         , IsFromMeta e, IsFromMeta f
+         ) => IsFromMeta (a,b,c,d,e,f) where
+  metaTree        = genericMetaTree
   fromHkdMetadata = genericFromHkdMetadata
   metadataKeySet  = genericMetadataKeySet
-
 instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
          , IsMeta e, IsMeta f
          ) => IsMeta (a,b,c,d,e,f) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
+
+instance ( IsFromMeta a, IsFromMeta b, IsFromMeta c, IsFromMeta d
+         , IsFromMeta e, IsFromMeta f, IsFromMeta g
+         ) => IsFromMeta (a,b,c,d,e,f,g) where
+  metaTree        = genericMetaTree
   fromHkdMetadata = genericFromHkdMetadata
   metadataKeySet  = genericMetadataKeySet
-
 instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
          , IsMeta e, IsMeta f, IsMeta g
          ) => IsMeta (a,b,c,d,e,f,g) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
+
+instance ( IsFromMeta a, IsFromMeta b, IsFromMeta c, IsFromMeta d
+         , IsFromMeta e, IsFromMeta f, IsFromMeta g, IsFromMeta h
+         ) => IsFromMeta (a,b,c,d,e,f,g,h) where
+  metaTree        = genericMetaTree
   fromHkdMetadata = genericFromHkdMetadata
   metadataKeySet  = genericMetadataKeySet
-
 instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
          , IsMeta e, IsMeta f, IsMeta g, IsMeta h
          ) => IsMeta (a,b,c,d,e,f,g,h) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
+
+instance ( IsFromMeta a, IsFromMeta b, IsFromMeta c, IsFromMeta d
+         , IsFromMeta e, IsFromMeta f, IsFromMeta g, IsFromMeta h
+         , IsFromMeta i
+         ) => IsFromMeta (a,b,c,d,e,f,g,h,i) where
+  metaTree        = genericMetaTree
   fromHkdMetadata = genericFromHkdMetadata
   metadataKeySet  = genericMetadataKeySet
-
 instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
          , IsMeta e, IsMeta f, IsMeta g, IsMeta h
          , IsMeta i
          ) => IsMeta (a,b,c,d,e,f,g,h,i) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
+
+instance ( IsFromMeta a, IsFromMeta b, IsFromMeta c, IsFromMeta d
+         , IsFromMeta e, IsFromMeta f, IsFromMeta g, IsFromMeta h
+         , IsFromMeta i, IsFromMeta j
+         ) => IsFromMeta (a,b,c,d,e,f,g,h,i,j) where
+  metaTree        = genericMetaTree
   fromHkdMetadata = genericFromHkdMetadata
   metadataKeySet  = genericMetadataKeySet
-
 instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
          , IsMeta e, IsMeta f, IsMeta g, IsMeta h
          , IsMeta i, IsMeta j
          ) => IsMeta (a,b,c,d,e,f,g,h,i,j) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
+
+instance ( IsFromMeta a, IsFromMeta b, IsFromMeta c, IsFromMeta d
+         , IsFromMeta e, IsFromMeta f, IsFromMeta g, IsFromMeta h
+         , IsFromMeta i, IsFromMeta j, IsFromMeta k
+         ) => IsFromMeta (a,b,c,d,e,f,g,h,i,j,k) where
+  metaTree        = genericMetaTree
   fromHkdMetadata = genericFromHkdMetadata
   metadataKeySet  = genericMetadataKeySet
-
 instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
          , IsMeta e, IsMeta f, IsMeta g, IsMeta h
          , IsMeta i, IsMeta j, IsMeta k
          ) => IsMeta (a,b,c,d,e,f,g,h,i,j,k) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
+
+instance ( IsFromMeta a, IsFromMeta b, IsFromMeta c, IsFromMeta d
+         , IsFromMeta e, IsFromMeta f, IsFromMeta g, IsFromMeta h
+         , IsFromMeta i, IsFromMeta j, IsFromMeta k, IsFromMeta l
+         ) => IsFromMeta (a,b,c,d,e,f,g,h,i,j,k,l) where
+  metaTree        = genericMetaTree
   fromHkdMetadata = genericFromHkdMetadata
   metadataKeySet  = genericMetadataKeySet
-
 instance ( IsMeta a, IsMeta b, IsMeta c, IsMeta d
          , IsMeta e, IsMeta f, IsMeta g, IsMeta h
          , IsMeta i, IsMeta j, IsMeta k, IsMeta l
          ) => IsMeta (a,b,c,d,e,f,g,h,i,j,k,l) where
-  metaTree        = genericMetaTree
   toHkdMetadata   = genericToHkdMetadata
-  fromHkdMetadata = genericFromHkdMetadata
-  metadataKeySet  = genericMetadataKeySet
 
 
-genericMetaTree :: (Generic a, GIsMetaProd (Rep a))
+
+genericMetaTree :: (Generic a, GIsFromMeta (Rep a))
                 => MetaTree a
 genericMetaTree = GHC.Generics.from >$< gmetaTree
 
@@ -639,39 +680,44 @@ genericToHkdMetadata :: (Generic a, GIsMetaProd (Rep a), Applicative f)
                      => f a -> MetadataF f
 genericToHkdMetadata = gtoHkdMetadata . fmap GHC.Generics.from
 
-genericFromHkdMetadata :: (Generic a, GIsMetaProd (Rep a), Applicative f)
+genericFromHkdMetadata :: (Generic a, GIsFromMeta (Rep a), Applicative f)
                        => MetadataF f -> Maybe (f a)
 genericFromHkdMetadata = (fmap . fmap) GHC.Generics.to . gfromHkdMetadata
 
-genericMetadataKeySet :: forall a. (GIsMetaProd (Rep a)) => Proxy# a -> Set TypeRep
+genericMetadataKeySet :: forall a. (GIsFromMeta (Rep a)) => Proxy# a -> Set TypeRep
 genericMetadataKeySet _ = gmetadataKeySet (proxy# @(Rep a))
 
--- Type class which exists solely for deriving of IsMeta for tuples
-class GIsMetaProd f where
+-- Type class which exists solely for deriving of IsFromMeta for tuples
+class GIsFromMeta f where
   gmetaTree        :: MetaTree (f p)
-  gtoHkdMetadata   :: Applicative q => q (f p) -> MetadataF q
   gfromHkdMetadata :: (Applicative q) => MetadataF q -> Maybe (q (f p))
   gmetadataKeySet  :: Proxy# f -> Set TypeRep
+class GIsMetaProd f where
+  gtoHkdMetadata   :: Applicative q => q (f p) -> MetadataF q
 
-instance GIsMetaProd f => GIsMetaProd (M1 i c f) where
-  gmetaTree        = (coerce `asTypeOf` contramap unM1) $ gmetaTree      @f
-  gtoHkdMetadata   = gtoHkdMetadata   . fmap unM1
+instance GIsFromMeta f => GIsFromMeta (M1 i c f) where
+  gmetaTree        = (coerce `asTypeOf` contramap unM1) $ gmetaTree @f
   gfromHkdMetadata = (fmap . fmap) M1 . gfromHkdMetadata
   gmetadataKeySet  = coerce (gmetadataKeySet @f)
+instance GIsMetaProd f => GIsMetaProd (M1 i c f) where
+  gtoHkdMetadata   = gtoHkdMetadata   . fmap unM1
 
-instance (GIsMetaProd f, GIsMetaProd g) => GIsMetaProd (f :*: g) where
+instance (GIsFromMeta f, GIsFromMeta g) => GIsFromMeta (f :*: g) where
   gmetaTree = ((\(f :*: _) -> f) >$< gmetaTree)
            <> ((\(_ :*: g) -> g) >$< gmetaTree)
-  gtoHkdMetadata   m = gtoHkdMetadata ((\(f :*: _) -> f) <$> m)
-                    <> gtoHkdMetadata ((\(_ :*: g) -> g) <$> m)
   gfromHkdMetadata m = (liftA2 . liftA2) (:*:) (gfromHkdMetadata m) (gfromHkdMetadata m)
   gmetadataKeySet  _ = gmetadataKeySet (proxy# @f) <> gmetadataKeySet (proxy# @g)
+instance (GIsMetaProd f, GIsMetaProd g) => GIsMetaProd (f :*: g) where
+  gtoHkdMetadata   m = gtoHkdMetadata ((\(f :*: _) -> f) <$> m)
+                    <> gtoHkdMetadata ((\(_ :*: g) -> g) <$> m)
 
-instance (IsMeta a) => GIsMetaProd (K1 i a) where
+instance (IsFromMeta a) => GIsFromMeta (K1 i a) where
   gmetaTree         = coerce (metaTree @a)
-  gtoHkdMetadata    = toHkdMetadata . fmap unK1
   gfromHkdMetadata  = (fmap . fmap) K1 . fromHkdMetadata
   gmetadataKeySet _ = metadataKeySet (proxy# @a)
+instance (IsMeta a) => GIsMetaProd (K1 i a) where
+  gtoHkdMetadata    = toHkdMetadata . fmap unK1
+
 
 
 ----------------------------------------------------------------
