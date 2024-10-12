@@ -184,7 +184,7 @@ data CounterMeta (a :: Symbol) = CounterMeta
   deriving stock Generic
   deriving MetaEncoding via AsRecord    (CounterMeta a)
   deriving IsMetaPrim   via AsMeta '[a] (CounterMeta a)
-  deriving anyclass IsMeta
+  deriving anyclass (IsMeta,IsFromMeta)
 
 -- Tool for observation of execution of normal flows
 newtype Observe a = Observe (IORef (Map FilePath a))
