@@ -11,18 +11,23 @@ Maintainer:     Aleksey Khudyakov <alexey.skladnoy@gmail.com>
 Category:       Data
 Build-Type:     Simple
 
-Library
-  Ghc-options:        -Wall -O2
-  Default-Language:   GHC2021
-  Default-Extensions: NoPolyKinds
+common extensions
+  Default-extensions: NoPolyKinds
+                      --
+                      NoFieldSelectors
+                      OverloadedRecordDot
+                      DuplicateRecordFields
+                      --
                       DataKinds
                       DerivingStrategies
                       DerivingVia
                       LambdaCase
                       ViewPatterns
-                      NoFieldSelectors
-                      DuplicateRecordFields
-                      OverloadedRecordDot
+
+Library
+  import:             extensions
+  Ghc-options:        -Wall -O2
+  Default-Language:   GHC2021
   --
   Build-Depends:    base                >=4.12 && <5
                   , aeson               >=2
@@ -44,8 +49,9 @@ Library
 
 
 Test-suite oka-metadata-tests
+   import:           extensions
+   Default-Language: GHC2021
    type:             exitcode-stdio-1.0
-   Default-Language: Haskell2010
    ghc-options:      -Wall
    Build-Depends:    base
                    , oka-metadata

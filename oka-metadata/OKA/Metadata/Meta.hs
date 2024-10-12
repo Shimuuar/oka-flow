@@ -509,6 +509,7 @@ singletonMetaTree
 -- | Newtype wrapper for existing metadata which turns its presence
 --   optional. Missing entry will be decoded as
 newtype Optional a = Optional { get :: Maybe a }
+  deriving stock (Show,Eq,Ord)
 
 instance IsFromMeta a => IsFromMeta (Optional a) where
   metaTree = case metaTree @a of
