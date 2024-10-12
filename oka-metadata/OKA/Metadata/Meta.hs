@@ -510,15 +510,22 @@ singletonMetaTree
 --   optional. Missing entry will be decoded as
 newtype Optional a = Optional { get :: Maybe a }
 
-instance MetaEncoding a => MetaEncoding (Optional a) where
-  metaToJson (Optional (Just a)) = metaToJson a
-  metaToJson (Optional Nothing ) = JSON.Null
-  parseMeta = \case
-    JSON.Null -> pure (Optional Nothing)
-    js        -> Optional . Just <$> parseMeta js
-
-instance IsMetaPrim a => IsMetaPrim (Optional a) where
-  metaLocation = metaLocation @a
+instance IsFromMeta a => IsFromMeta (Optional a) where
+  metaTree = case metaTree @a of
+    MetaTree mtree -> MetaTree (toOpt <$> mtree)
+    where
+      toOpt e = Entry { tyRep   = e.tyRep
+                      , encoder = \case
+                          Optional Nothing  -> JSON.Null
+                          Optional (Just a) -> e.encoder a
+                      , parser  = \case
+                          JSON.Null -> pure mempty
+                          js        -> e.parser js
+                      }
+  fromHkdMetadata m = case fromHkdMetadata m of
+    Nothing -> Just (pure (Optional Nothing))
+    Just fa -> Just (Optional . Just <$> fa)
+  metadataKeySet _ = metadataKeySet (proxy# @a)
 
 
 -- | Derive 'IsMeta' instance with given path
