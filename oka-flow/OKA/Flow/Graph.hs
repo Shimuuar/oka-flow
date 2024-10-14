@@ -219,18 +219,18 @@ hashFlowName = Hash . T.encodeUtf8 . T.pack
 
 
 hashExtMeta :: (k -> StorePath) -> MetadataF (MetaStore k) -> [Hash]
-hashExtMeta oracle meta
-  = concat
-    [ [ Hash "?EXT_META?"
-      , h
-      ]
-    | (ty,StorePath _ h0) <- sortOn fst $ metadataFToList
-        (\m -> case m of
-            Load k -> Just (typeMetaStore m, oracle k)
-            _      -> Nothing
-        ) meta
-    , h <- [hashTypeRep ty, h0]
-    ]
+hashExtMeta oracle meta = case extra of
+  [] -> []
+  hs -> Hash "?EXT_META?" : hs
+  where
+    extra = [ h
+            | (ty,StorePath _ h0) <- sortOn fst $ metadataFToList
+                (\m -> case m of
+                    Load k -> Just (typeMetaStore m, oracle k)
+                    _      -> Nothing
+                ) meta
+            , h <- [hashTypeRep ty, h0]
+            ]
 
 
 -- Compute hash of metadata
