@@ -19,13 +19,17 @@ module OKA.Metadata
   ( -- * Metadata
     Metadata
   , metadata
-  , metadataF
   , metadataMay
   , restrictMetaByType
   , restrictMetaByKeys
   , deleteFromMetaByType
   , deleteFromMetaByKeys
-  , IsMeta(toMetadata, fromMetadata)
+  , IsMeta
+  , IsFromMeta
+  , IsMetaPrim
+  , toMetadata
+  , fromMetadata
+  , Optional(..)
     -- ** Encoding & decoding
   , encodeMetadataEither
   , encodeMetadata

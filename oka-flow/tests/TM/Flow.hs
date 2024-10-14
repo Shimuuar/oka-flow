@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE OverloadedStrings   #-}
 -- |
 module TM.Flow (tests) where
@@ -142,17 +143,44 @@ tests = testGroup "Run flow"
       (obsA, flowA) <- flowProduceInt @"nA"
       let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
           flow = do e1 <- stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
-                    withExtMeta e1 $ want =<< flowA ()
+                    addExtMeta e1
+                    want =<< flowA ()
       runFlow ctx meta flow
       observe "flow" obsA [200]
+    -- Overwrite by another external meta works
   , testCase "externalMeta2" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
       let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
           flow = do e1 <- stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
                     e2 <- stdSaveMeta (CounterMeta 300 :: CounterMeta "nA")
-                    withExtMeta e1 $ withExtMeta e2 $ want =<< flowA ()
+                    addExtMeta e1
+                    addExtMeta e2
+                    want =<< flowA ()
       runFlow ctx meta flow
       observe "flow" obsA [300]
+    -- Overwrite by normal value works
+  , testCase "externalMeta3" $ withSimpleFlow $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt @"nA"
+      let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
+          flow = do e1 <- stdSaveMeta (CounterMeta 200 :: CounterMeta "nA")
+                    addExtMeta e1
+                    appendMeta (CounterMeta 300 :: CounterMeta "nA")
+                    want =<< flowA ()
+      runFlow ctx meta flow
+      observe "flow" obsA [300]
+    -- Saving tuple of metadata works
+  , testCase "externalMeta-pair" $ withSimpleFlow $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt @"nA"
+      (obsB, flowB) <- flowProduceInt @"nB"
+      let flow = do e <- stdSaveMeta ( CounterMeta 100 :: CounterMeta "nA"
+                                     , CounterMeta 200 :: CounterMeta "nB"
+                                     )
+                    addExtMeta e
+                    want =<< flowA ()
+                    want =<< flowB ()
+      runFlow ctx mempty flow
+      observe "flowA" obsA [100]
+      observe "flowB" obsB [200]
   ]
 
 withSimpleFlow :: (FlowCtx '[] -> IO a) -> IO a
@@ -176,8 +204,8 @@ data CounterMeta (a :: Symbol) = CounterMeta
   }
   deriving stock Generic
   deriving MetaEncoding via AsRecord    (CounterMeta a)
-  deriving IsMeta       via AsMeta '[a] (CounterMeta a)
-
+  deriving IsMetaPrim   via AsMeta '[a] (CounterMeta a)
+  deriving anyclass (IsMeta,IsFromMeta)
 
 -- Tool for observation of execution of normal flows
 newtype Observe a = Observe (IORef (Map FilePath a))
