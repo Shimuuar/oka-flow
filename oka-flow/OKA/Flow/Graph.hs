@@ -220,8 +220,10 @@ hashFlowName = Hash . T.encodeUtf8 . T.pack
 
 hashExtMeta :: (k -> StorePath) -> MetadataF (MetaStore k) -> [Hash]
 hashExtMeta oracle meta
-  = Hash "?EXT_META?"  
-  : [ h
+  = concat
+    [ [ Hash "?EXT_META?"
+      , h
+      ]
     | (ty,StorePath _ h0) <- sortOn fst $ metadataFToList
         (\m -> case m of
             Load k -> Just (typeMetaStore m, oracle k)
