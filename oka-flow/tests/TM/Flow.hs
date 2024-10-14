@@ -6,6 +6,7 @@
 module TM.Flow (tests) where
 
 import Control.Lens
+import Control.Monad
 import Data.IORef
 import Data.Proxy
 import Data.Foldable
@@ -14,7 +15,7 @@ import Data.Map.Strict  qualified as Map
 import Data.Map.Strict  (Map)
 import Effectful
 import System.IO.Temp   (withSystemTempDirectory)
-import System.FilePath  ((</>))
+import System.FilePath  ((</>), splitPath)
 import Test.Tasty
 import Test.Tasty.HUnit
 import GHC.Generics     (Generic)
@@ -62,6 +63,26 @@ tests = testGroup "Run flow"
       observe "flow A" obsA [100]
       observe "flow B" obsB [200]
       observe "flow S" obsS [100_00, 400_00]
+    -- Hashes are computed in the same way
+  , testCase "Hash stability" $ withSimpleFlow $ \ctx -> do
+      (_, flowA) <- flowProduceInt @"nA"
+      (_, flowB) <- flowProduceInt @"nB"
+      (_, flowS) <- flowSquare
+      obs <- newIORef []
+      let meta = toMetadata ( CounterMeta 100 :: CounterMeta "nA"
+                            , CounterMeta 200 :: CounterMeta "nB")
+          flow = do a  <- flowA ()
+                    b  <- flowB ()
+                    rA <- flowS a
+                    rB <- flowS b
+                    observeOutput obs "2ce8145a17fa081de5a64ed24aad309e3427d6ec" a
+                    observeOutput obs "b9f4743bd0b54831ed1f47d1b76d4e0ae2fdbfe5" b
+                    observeOutput obs "c7ee03f8064e3ee578d7e8a429015ebfe90045f0" rA
+                    observeOutput obs "893a77f6800b6514e83965630ef2bb7ea44a006e" rB
+      runFlow ctx meta flow
+      readIORef obs >>= \case
+        [] -> pure ()
+        e  -> error $ unlines e
     -- Unused workflow is not executed
   , testCase "Dead workflow" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
@@ -264,3 +285,15 @@ flowPhony = do
            let n' = n * n
            saveObsPhony obs n'
        )
+
+observeOutput :: IORef [String] -> FilePath -> Result a -> Flow eff ()
+observeOutput out expected = basicLiftPhony () $ \_ _ [arg] -> do
+  let hash = last (splitPath arg)
+  when (hash /= expected) $
+    atomicModifyIORef' out $ \e ->
+      ( [ "Hash mismatch:"
+        , "  Expected: " ++ expected
+        , "  Got:      " ++ hash
+        ] ++ e
+      , ())
+
