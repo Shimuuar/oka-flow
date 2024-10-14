@@ -280,8 +280,8 @@ class IsFromMeta a => IsMeta a where
   toHkdMetadata = primToMetadata
 
 -- | Convert data type to dynamic dictionary
-toMetadata :: IsMeta a => a -> Metadata
-toMetadata = toHkdMetadata . Identity
+toMetadata :: (IsMeta a, Applicative f) => a -> MetadataF f
+toMetadata = toHkdMetadata . pure
 
 -- | Look up type in dictionary
 fromMetadata :: IsFromMeta a => Metadata -> Maybe a
