@@ -9,6 +9,7 @@ module OKA.Flow.Graph
     Fun(..)
   , FlowGraph(..)
   , MetaStore(..)
+  , MetadataFlow
   , typeMetaStore
     -- * Flow monad and primitives
   , Flow(..)
@@ -92,6 +93,11 @@ instance UnPure (MetaStore k) where
 typeMetaStore :: Typeable a => MetaStore k a -> TypeRep
 typeMetaStore = typeRep
 
+-- | Metadata which is used in @Flow@. It contains both immediate
+--   values and promises which are loaded from outputs at execution
+--   time.
+type MetadataFlow = MetadataF (MetaStore FunID)
+
 
 -- | Single workflow bound in dataflow graph.
 data Fun k v = Fun
@@ -131,14 +137,14 @@ newtype Flow eff a = Flow
 
 -- | State of 'Flow' monad
 data FlowSt = FlowSt
-  { meta  :: !(MetadataF (MetaStore FunID))
+  { meta  :: !MetadataFlow
   , graph :: !(FlowGraph ())
   }
 
 instance MonadFail (Flow eff) where
   fail = error
 
-instance MonadState (MetadataF (MetaStore FunID)) (Flow eff) where
+instance MonadState MetadataFlow (Flow eff) where
   get   = Flow $ Eff.gets   @FlowSt (.meta)
   put m = Flow $ Eff.modify @FlowSt (stMetaL .~ m)
 
@@ -359,7 +365,7 @@ flowTgtL = lens (.targets) (\x s -> x {targets = s})
 flowGraphL :: Lens (FlowGraph a) (FlowGraph b) (Map FunID (Fun FunID a)) (Map FunID (Fun FunID b))
 flowGraphL = lens (.graph) (\FlowGraph{..} s -> FlowGraph{graph = s, ..})
 
-stMetaL :: Lens' FlowSt (MetadataF (MetaStore FunID))
+stMetaL :: Lens' FlowSt MetadataFlow
 stMetaL = lens (.meta) (\FlowSt{..} x -> FlowSt{meta=x, ..})
 
 stGraphL :: Lens' FlowSt (FlowGraph ())

@@ -15,6 +15,7 @@
 module OKA.Flow
   ( -- * Flow monad
     Flow
+  , MetadataFlow
   , appendMeta
   , scopeMeta
   , restrictMeta
