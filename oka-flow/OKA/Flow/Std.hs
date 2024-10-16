@@ -79,6 +79,27 @@ deriving via Generically (a,b)
     instance (CollectReports a, CollectReports b) => CollectReports (a,b)
 deriving via Generically (a,b,c)
     instance (CollectReports a, CollectReports b, CollectReports c) => CollectReports (a,b,c)
+deriving via Generically (a,b,c,d)
+    instance (CollectReports a, CollectReports b, CollectReports c, CollectReports d
+             ) => CollectReports (a,b,c,d)
+deriving via Generically (a,b,c,d,e)
+    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
+             , CollectReports e
+             ) => CollectReports (a,b,c,d,e)
+deriving via Generically (a,b,c,d,e,f)
+    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
+             , CollectReports e, CollectReports f
+             ) => CollectReports (a,b,c,d,e,f)
+deriving via Generically (a,b,c,d,e,f,g)
+    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
+             , CollectReports e, CollectReports f, CollectReports g
+             ) => CollectReports (a,b,c,d,e,f,g)
+deriving via Generically (a,b,c,d,e,f,g,h)
+    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
+             , CollectReports e, CollectReports f, CollectReports g, CollectReports h
+             ) => CollectReports (a,b,c,d,e,f,g,h)
+
+
 instance (CollectReports a) => CollectReports [a] where
   collectReports = concatMap collectReports
 
