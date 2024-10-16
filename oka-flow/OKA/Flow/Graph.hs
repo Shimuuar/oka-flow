@@ -16,6 +16,7 @@ module OKA.Flow.Graph
   , FlowSt(..)
   , appendMeta
   , scopeMeta
+  , withEmptyMeta
   , restrictMeta
     -- * Graph operations
   , FIDSet(..)
@@ -164,6 +165,12 @@ scopeMeta :: Flow eff a -> Flow eff a
 scopeMeta action = do
   m <- get
   action <* put m
+
+-- | Execute workflow with empty metadata
+withEmptyMeta :: Flow eff a -> Flow eff a
+withEmptyMeta action = scopeMeta $ do
+  put mempty
+  action
 
 -- | Restrict metadata to set necessary for encoding value of given type
 restrictMeta

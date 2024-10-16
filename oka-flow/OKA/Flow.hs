@@ -1,3 +1,4 @@
+
 -- |
 -- Simple framework for dataflow programming for data
 -- analysis. Primary target is OKA experiment.
@@ -18,6 +19,7 @@ module OKA.Flow
   , MetadataFlow
   , appendMeta
   , scopeMeta
+  , withEmptyMeta
   , restrictMeta
   , Result
   , ResultSet(..)
