@@ -120,7 +120,7 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
   ext_meta <- prepareExtMetaCache ctx gr_exe targets
   -- Evaluator
   mapConcurrently_ id
-    [ prepareFun ctx gr_exe ext_meta (gr_exe.graph ! i) ctx.res
+    [ prepareFun ctx gr_exe ext_meta (gr_exe.graph ! i)
     | i <- Set.toList targets.wanted
     ]
   where
@@ -144,28 +144,27 @@ prepareFun
   -> FlowGraph (TMVar (), Maybe StorePath) -- Full dataflow graph
   -> ExtMetaCache                          -- External metadata
   -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
-  -> ResourceSet
   -> IO ()
-prepareFun ctx FlowGraph{graph=gr} ext_meta fun res = crashReport ctx.logger fun $ do
+prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> atomically $ readTMVar (fst $ outputOf fid)
   -- Compute metadata which should be passed to the workflow by
   -- applying data loaded from 
   meta <- traverseMetadataF (lookupExtCache ext_meta) fun.metadata
   -- Request resources
-  atomically $ fun.resources.acquire res
+  atomically $ fun.resources.acquire ctx.res
   -- Run action
   case fun.workflow of
     -- Prepare normal action. We first create output directory and
     -- write everything there. After we're done we rename it.
-    Workflow (Action _ act) -> prepareNormal meta (act res)
+    Workflow (Action _ act) -> prepareNormal meta (act ctx.res)
     WorkflowExe exe         -> prepareExe    meta exe
     -- Execute phony action. We don't need to bother with setting up output
-    Phony    act            -> act.run res meta params
+    Phony    act            -> act.run ctx.res meta params
   -- Signal that we successfully completed execution
   atomically $ do
     putTMVar (fst fun.output) ()
-    fun.resources.release res
+    fun.resources.release ctx.res
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output
@@ -181,7 +180,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun res = crashReport ctx.logger fun
       action meta params build
     -- Execution of an extenrnal executable
     prepareExe meta exe@Executable{} = normalExecution meta $ \build -> do
-      exe.io res
+      exe.io ctx.res
       runExternalProcess exe.executable meta (build:params)
     -- Standard wrapper for execution of workflows that create outputs
     normalExecution meta action = do
