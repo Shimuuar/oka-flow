@@ -13,7 +13,6 @@ import Control.Concurrent.STM.TMVar
 import Control.Concurrent.MVar
 import Control.Exception
 import Control.Lens
-import Control.Monad
 import Control.Monad.STM
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
@@ -110,7 +109,7 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
       $ m
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr
-  gr_exe  <- addTMVars gr
+  gr_exe  <- addTMVars targets gr
   let getStorePath fids = concat [ gr ^.. flowGraphL . at fid . _Just . to (.output) . _Just
                                  | fid <- toList fids
                                  ]
@@ -121,7 +120,7 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
   ext_meta <- prepareExtMetaCache ctx gr_exe targets
   -- Evaluator
   mapConcurrently_ id
-    [ prepareFun ctx gr_exe targets ext_meta (gr_exe.graph ! i) ctx.res
+    [ prepareFun ctx gr_exe ext_meta (gr_exe.graph ! i) ctx.res
     | i <- Set.toList targets.wanted
     ]
   where
@@ -129,24 +128,27 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
     targetExists path = doesDirectoryExist (ctx.root </> storePath path)
 
 
--- Add TMVars to each node of graph. This is needed in order to
-addTMVars :: FlowGraph a -> IO (FlowGraph (TMVar (), a))
-addTMVars = traverse $ \f -> do v <- newEmptyTMVarIO
-                                pure (v,f)
+-- Add TMVars to each node of graph. They are used to block evaluator
+-- until all dependencies are ready
+addTMVars :: FIDSet -> FlowGraph a -> IO (FlowGraph (TMVar (), a))
+addTMVars FIDSet{exists}
+  = traverseOf flowGraphL
+  $ Map.traverseWithKey $ \fid fun -> do
+      v <- if | fid `Set.member` exists -> newTMVarIO ()
+              | otherwise               -> newEmptyTMVarIO
+      pure ((v,) <$> fun)
 
 -- Prepare function for evaluation
 prepareFun
   :: FlowCtx eff                           -- Evaluation context
   -> FlowGraph (TMVar (), Maybe StorePath) -- Full dataflow graph
-  -> FIDSet                                -- Our target set
   -> ExtMetaCache                          -- External metadata
   -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
   -> ResourceSet
   -> IO ()
-prepareFun ctx FlowGraph{graph=gr} FIDSet{..} ext_meta fun res = crashReport ctx.logger fun $ do
+prepareFun ctx FlowGraph{graph=gr} ext_meta fun res = crashReport ctx.logger fun $ do
   -- Check that all function parameters are already evaluated:
-  for_ fun.param $ \fid -> when (fid `Set.notMember` exists) $
-    atomically $ readTMVar (fst $ outputOf fid)
+  for_ fun.param $ \fid -> atomically $ readTMVar (fst $ outputOf fid)
   -- Compute metadata which should be passed to the workflow by
   -- applying data loaded from 
   meta <- traverseMetadataF (lookupExtCache ext_meta) fun.metadata
