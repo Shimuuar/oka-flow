@@ -123,7 +123,7 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
     | i <- Set.toList targets.wanted
     ]
   where
-    addTargets r gr = gr & flowTgtL %~ mappend (Set.fromList (toResultSet r))
+    addTargets r = flowTgtL %~ mappend (Set.fromList (toResultSet r))
     targetExists path = doesDirectoryExist (ctx.root </> storePath path)
 
 
@@ -176,7 +176,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
     -- Execution of haskell action
     prepareNormal meta action = normalExecution meta $ \build -> do
       action meta params build
-    -- Execution of an extenrnal executable
+    -- Execution of an external executable
     prepareExe meta exe@Executable{} = normalExecution meta $ \build -> do
       exe.io ctx.res
       runExternalProcess exe.executable meta (build:params)
@@ -222,7 +222,12 @@ withBuildDirectory root path action = do
     build = out <> "-build"
 
 
+
+----------------------------------------------------------------
 -- Cache for external metadata. We only want to load data once
+----------------------------------------------------------------
+
+
 newtype ExtMetaCache = ExtMetaCache (Map (TypeRep, FunID) SomeExtMeta)
 
 data SomeExtMeta where
