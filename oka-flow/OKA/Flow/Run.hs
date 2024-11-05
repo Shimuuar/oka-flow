@@ -9,7 +9,6 @@ module OKA.Flow.Run
   ) where
 
 import Control.Concurrent.Async
-import Control.Concurrent.STM.TMVar
 import Control.Concurrent.MVar
 import Control.Exception
 import Control.Lens
@@ -109,7 +108,7 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
       $ m
   -- Prepare graph for evaluation
   targets <- shakeFlowGraph targetExists gr
-  gr_exe  <- addTMVars targets gr
+  gr_exe  <- addMVars targets gr
   let getStorePath fids = concat [ gr ^.. flowGraphL . at fid . _Just . to (.output) . _Just
                                  | fid <- toList fids
                                  ]
@@ -128,26 +127,26 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
     targetExists path = doesDirectoryExist (ctx.root </> storePath path)
 
 
--- Add TMVars to each node of graph. They are used to block evaluator
+-- Add MVars to each node of graph. They are used to block evaluator
 -- until all dependencies are ready
-addTMVars :: FIDSet -> FlowGraph a -> IO (FlowGraph (TMVar (), a))
-addTMVars FIDSet{exists}
+addMVars :: FIDSet -> FlowGraph a -> IO (FlowGraph (MVar (), a))
+addMVars FIDSet{exists}
   = traverseOf flowGraphL
   $ Map.traverseWithKey $ \fid fun -> do
-      v <- if | fid `Set.member` exists -> newTMVarIO ()
-              | otherwise               -> newEmptyTMVarIO
+      v <- if | fid `Set.member` exists -> newMVar ()
+              | otherwise               -> newEmptyMVar
       pure ((v,) <$> fun)
 
--- Prepare function for evaluation
+-- Prepare functixon for evaluation
 prepareFun
-  :: FlowCtx eff                           -- Evaluation context
-  -> FlowGraph (TMVar (), Maybe StorePath) -- Full dataflow graph
-  -> ExtMetaCache                          -- External metadata
-  -> Fun FunID (TMVar (), Maybe StorePath) -- Function to evaluate
+  :: FlowCtx eff                          -- Evaluation context
+  -> FlowGraph (MVar (), Maybe StorePath) -- Full dataflow graph
+  -> ExtMetaCache                         -- External metadata
+  -> Fun FunID (MVar (), Maybe StorePath) -- Function to evaluate
   -> IO ()
 prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ do
   -- Check that all function parameters are already evaluated:
-  for_ fun.param $ \fid -> atomically $ readTMVar (fst $ outputOf fid)
+  for_ fun.param $ \fid -> readMVar (fst $ outputOf fid)
   -- Compute metadata which should be passed to the workflow by
   -- applying data loaded from 
   meta <- traverseMetadataF (lookupExtCache ext_meta) fun.metadata
@@ -162,7 +161,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
     -- Execute phony action. We don't need to bother with setting up output
     Phony    act            -> act.run ctx.res meta params
   -- Signal that we successfully completed execution
-  atomically $ putTMVar (fst fun.output) ()
+  putMVar (fst fun.output) ()
   atomically $ fun.resources.release ctx.res
   where
     outputOf k = case gr ^. at k of
@@ -243,7 +242,7 @@ lookupExtCache (ExtMetaCache cache) m = case m of
 
 prepareExtMetaCache
   :: FlowCtx eff
-  -> FlowGraph (TMVar (), Maybe StorePath)
+  -> FlowGraph (MVar (), Maybe StorePath)
   -> FIDSet
   -> IO ExtMetaCache
 prepareExtMetaCache ctx gr targets = do
@@ -262,7 +261,7 @@ prepareExtMetaCache ctx gr targets = do
       Load fid -> Just
         ( (typeMetaStore m, fid)
         , if | fid `Set.member` targets.wanted ->
-                 do atomically $ readTMVar (fst $ (gr.graph ! fid).output)
+                 do readMVar (fst $ (gr.graph ! fid).output)
                     readMeta path
              | otherwise ->
                  do readMeta path
