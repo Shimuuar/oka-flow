@@ -4,6 +4,7 @@
 module OKA.Flow.Types
   ( -- * Workflow primitives
     Action(..)
+  , PhonyAction(..)
   , Executable(..)
   , Workflow(..)
   , isPhony
@@ -41,6 +42,11 @@ data Action = Action
     -- ^ Execute action on store
   }
 
+-- | Phony action which is executed always and doesn't produce any output
+newtype PhonyAction = PhonyAction
+  { run :: ResourceSet -> Metadata -> [FilePath] -> IO ()
+  }
+
 -- | Action which execute executable. It should be always used if one
 --   want to call external executable. This way executor can correctly
 --   pass metadata to it.
@@ -61,7 +67,7 @@ data Workflow
     -- ^ Standard workflow which executes haskell action
   | WorkflowExe Executable
     -- ^ Target which run executable
-  | Phony    (ResourceSet -> Metadata -> [FilePath] -> IO ())
+  | Phony    PhonyAction
     -- ^ Phony target which always executes action
 
 

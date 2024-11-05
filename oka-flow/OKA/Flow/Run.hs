@@ -159,7 +159,7 @@ prepareFun ctx FlowGraph{graph=gr} FIDSet{..} ext_meta fun res = crashReport ctx
     Workflow (Action _ act) -> prepareNormal meta (act res)
     WorkflowExe exe         -> prepareExe    meta exe
     -- Execute phony action. We don't need to bother with setting up output
-    Phony    act            -> act res meta params
+    Phony    act            -> act.run res meta params
   -- Signal that we successfully completed execution
   atomically $ do
     putTMVar (fst fun.output) ()
