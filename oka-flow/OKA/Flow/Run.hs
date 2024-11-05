@@ -162,9 +162,8 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
     -- Execute phony action. We don't need to bother with setting up output
     Phony    act            -> act.run ctx.res meta params
   -- Signal that we successfully completed execution
-  atomically $ do
-    putTMVar (fst fun.output) ()
-    fun.resources.release ctx.res
+  atomically $ putTMVar (fst fun.output) ()
+  atomically $ fun.resources.release ctx.res
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output
