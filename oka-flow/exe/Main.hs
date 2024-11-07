@@ -7,6 +7,7 @@ import Control.Exception
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Writer.CPS
 import Data.Traversable
+import Data.Maybe       (mapMaybe)
 import Data.Foldable
 import Data.Map.Strict  qualified as Map
 import Data.Map.Strict  (Map)
@@ -14,6 +15,7 @@ import Data.Set         qualified as Set
 import Options.Applicative
 import System.Directory
 import System.FilePath
+import System.IO
 
 main :: IO ()
 main
@@ -44,6 +46,8 @@ parser = do
   pure $ act store
   where
     cmd name fun hlp = command name ((helper <*> fun) `info` header hlp)
+
+
 ----------------------------------------------------------------
 -- Command implementations
 ----------------------------------------------------------------
@@ -59,15 +63,28 @@ cmdFsck store = do
   forM_ paths_dep $ \case
     Left  e -> putStrLn (pprError e)
     Right _ -> pure ()
+  -- Check that dependency exists
+  let depExists p = case p `Map.lookup` paths_dep of
+        Nothing      -> Just $ "Missing dependency: " ++ pprPath p
+        Just Left{}  -> Just $ "Broken dependency:  " ++ pprPath p
+        Just Right{} -> Nothing
+  forM_ (Map.toList paths_dep) $ \case
+    (_, Left _)     -> pure ()
+    (p, Right deps) -> case mapMaybe depExists deps of
+      []  -> pure ()
+      bad -> do
+        putStrLn $ "Bad dependencies for " ++ pprPath p
+        for_ bad $ \e -> putStrLn ("  - " ++ e)
+
 
 -- | Compute closure (all dependencies)
 cmdClosure :: Parser (FilePath -> IO ())
 cmdClosure = do
   path <- argument (maybeReader pathToPath) (help "Store path" <> metavar "DIR")
   pure $ \store -> do
-    -- FIXME: Correctly handle errors
-    (paths0,_) <- runWriterT $ readStoreEntries store
-    paths1     <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
+    (paths0, err) <- runWriterT $ readStoreEntries store
+    paths1 <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
+    for_ err (hPutStrLn stderr . pprError)
     case paths1 of
       Left  e     -> error $ show e
       Right paths -> forM_ (computeClosure paths path) (putStrLn . pprPath)
@@ -76,9 +93,9 @@ cmdRevdeps :: Parser (FilePath -> IO ())
 cmdRevdeps = do
   path <- argument (maybeReader pathToPath) (help "Store path" <> metavar "DIR")
   pure $ \store -> do
-    -- FIXME: Correctly handle errors
-    (paths0,_) <- runWriterT $ readStoreEntries store
-    paths1     <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
+    (paths0, err) <- runWriterT $ readStoreEntries store
+    paths1 <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
+    for_ err (hPutStrLn stderr . pprError)
     case paths1 of
       Left  e     -> error $ show e
       Right paths -> forM_ (computeClosure (invertMap paths) path) (putStrLn . pprPath)
@@ -191,20 +208,3 @@ pathToPath = \case
                 _     -> Nothing
            . map (filter (/='/'))
            . splitPath
-
-
--- readMetadata :: FilePath -> Path -> WriterT 
-
---   = fmap concat
---   $ for (liftIO $ listDirectory store) $ \nm -> do
---       let
---       liftIO (doesDirectoryExist path_nm) >>= \case
---         -- False -> mempty <$ tell [FileInStore nm]
---         True  -> undefined
--- -- -- | Check store for 
--- -- fsck :: 
-
-
-----------------------------------------------------------------
--- Lifted
-----------------------------------------------------------------
