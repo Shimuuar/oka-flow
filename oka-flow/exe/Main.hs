@@ -7,6 +7,7 @@ import Control.Exception
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Writer.CPS
 import Data.Traversable
+import Data.Maybe       (mapMaybe)
 import Data.Foldable
 import Data.Map.Strict  qualified as Map
 import Data.Map.Strict  (Map)
@@ -62,6 +63,19 @@ cmdFsck store = do
   forM_ paths_dep $ \case
     Left  e -> putStrLn (pprError e)
     Right _ -> pure ()
+  -- Check that dependency exists
+  let depExists p = case p `Map.lookup` paths_dep of
+        Nothing      -> Just $ "Missing dependency: " ++ pprPath p
+        Just Left{}  -> Just $ "Broken dependency:  " ++ pprPath p
+        Just Right{} -> Nothing
+  forM_ (Map.toList paths_dep) $ \case
+    (_, Left _)     -> pure ()
+    (p, Right deps) -> case mapMaybe depExists deps of
+      []  -> pure ()
+      bad -> do
+        putStrLn $ "Bad dependencies for " ++ pprPath p
+        for_ bad $ \e -> putStrLn ("  - " ++ e)
+
 
 -- | Compute closure (all dependencies)
 cmdClosure :: Parser (FilePath -> IO ())
