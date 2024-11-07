@@ -14,6 +14,7 @@ import Data.Set         qualified as Set
 import Options.Applicative
 import System.Directory
 import System.FilePath
+import System.IO
 
 main :: IO ()
 main
@@ -44,6 +45,8 @@ parser = do
   pure $ act store
   where
     cmd name fun hlp = command name ((helper <*> fun) `info` header hlp)
+
+
 ----------------------------------------------------------------
 -- Command implementations
 ----------------------------------------------------------------
@@ -65,9 +68,9 @@ cmdClosure :: Parser (FilePath -> IO ())
 cmdClosure = do
   path <- argument (maybeReader pathToPath) (help "Store path" <> metavar "DIR")
   pure $ \store -> do
-    -- FIXME: Correctly handle errors
-    (paths0,_) <- runWriterT $ readStoreEntries store
-    paths1     <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
+    (paths0, err) <- runWriterT $ readStoreEntries store
+    paths1 <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
+    for_ err (hPutStrLn stderr . pprError)
     case paths1 of
       Left  e     -> error $ show e
       Right paths -> forM_ (computeClosure paths path) (putStrLn . pprPath)
@@ -76,9 +79,9 @@ cmdRevdeps :: Parser (FilePath -> IO ())
 cmdRevdeps = do
   path <- argument (maybeReader pathToPath) (help "Store path" <> metavar "DIR")
   pure $ \store -> do
-    -- FIXME: Correctly handle errors
-    (paths0,_) <- runWriterT $ readStoreEntries store
-    paths1     <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
+    (paths0, err) <- runWriterT $ readStoreEntries store
+    paths1 <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
+    for_ err (hPutStrLn stderr . pprError)
     case paths1 of
       Left  e     -> error $ show e
       Right paths -> forM_ (computeClosure (invertMap paths) path) (putStrLn . pprPath)
