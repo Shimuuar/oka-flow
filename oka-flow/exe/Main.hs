@@ -194,20 +194,3 @@ pathToPath = \case
                 _     -> Nothing
            . map (filter (/='/'))
            . splitPath
-
-
--- readMetadata :: FilePath -> Path -> WriterT 
-
---   = fmap concat
---   $ for (liftIO $ listDirectory store) $ \nm -> do
---       let
---       liftIO (doesDirectoryExist path_nm) >>= \case
---         -- False -> mempty <$ tell [FileInStore nm]
---         True  -> undefined
--- -- -- | Check store for 
--- -- fsck :: 
-
-
-----------------------------------------------------------------
--- Lifted
-----------------------------------------------------------------
