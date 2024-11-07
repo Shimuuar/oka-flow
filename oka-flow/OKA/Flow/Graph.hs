@@ -440,7 +440,7 @@ basicLiftPhony
   -> params
      -- ^ Parameters to pass to workflow
   -> Flow eff ()
-basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony exe) p
+basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony (PhonyAction exe)) p
 
 -- | Lift executable into workflow
 basicLiftExe
