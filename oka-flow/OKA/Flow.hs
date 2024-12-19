@@ -1,4 +1,3 @@
-
 -- |
 -- Simple framework for dataflow programming for data
 -- analysis. Primary target is OKA experiment.
@@ -17,6 +16,7 @@ module OKA.Flow
   ( -- * Flow monad
     Flow
   , MetadataFlow
+  , lookupMeta
   , appendMeta
   , scopeMeta
   , withEmptyMeta
@@ -45,6 +45,7 @@ module OKA.Flow
   ) where
 
 import Control.Lens
+import Control.Monad.State
 import Effectful
 import Effectful.State.Static.Local qualified as Eff
 
@@ -56,6 +57,7 @@ import OKA.Flow.Run
 import OKA.Flow.Tools
 import OKA.Flow.Resources
 import OKA.Flow.Std
+import OKA.Flow.Util
 
 
 ----------------------------------------------------------------
@@ -85,3 +87,14 @@ liftPhony
 liftPhony res exe = basicLiftPhony res $ \_ meta args -> do
   a <- runFlowArguments args
   exe meta a
+
+-- | Lookup metadata. Unlike 'metadata' lens. This function only
+--   requires 'IsFromMeta' and not full 'IsMeta'.
+lookupMeta :: forall a eff. (IsFromMeta a) => Flow eff a
+lookupMeta = do
+  m <- get
+  case fromHkdMetadata @a m of
+    Nothing -> error $ "Failed to look up type " ++ typeName @a
+    Just a' -> case unPure a' of
+      Nothing -> error $ "Type is not immediate: " ++ typeName @a
+      Just a  -> pure a

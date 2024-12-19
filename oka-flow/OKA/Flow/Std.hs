@@ -1,3 +1,4 @@
+{-# LANGUAGE MagicHash            #-}
 {-# LANGUAGE UndecidableInstances #-}
 -- |
 -- Standard workflows
@@ -5,6 +6,7 @@ module OKA.Flow.Std
   ( -- * Saved metadata
     SavedMeta(..)
   , stdSaveMeta
+  , narrowSavedMeta
     -- * Reports
   , ReportPDF
   , CollectReports(..)
@@ -17,6 +19,7 @@ module OKA.Flow.Std
 import Control.Monad.State.Strict
 import Data.Coerce
 import Data.Functor.Identity
+import Data.Set                   qualified as Set
 import Effectful                  ((:>))
 import System.FilePath            ((</>))
 import System.Directory           (createFileLink,createDirectory)
@@ -24,6 +27,7 @@ import System.Process.Typed
 import System.IO.Temp
 import System.Environment         (getEnvironment)
 import GHC.Generics
+import GHC.Exts                   (proxy#)
 
 import OKA.Flow.Tools
 import OKA.Flow.Parser
@@ -32,6 +36,7 @@ import OKA.Flow.Types
 import OKA.Flow.Eff
 import OKA.Metadata
 import OKA.Metadata.Meta
+import OKA.Flow.Util
 
 ----------------------------------------------------------------
 -- Saved metadata
@@ -59,6 +64,19 @@ stdSaveMeta a = scopeMeta $ do
                      _  -> error "stdSaveMeta does not take any arguments"
         createFileLink "meta.json" (out </> "saved.json")
     } ()
+
+-- | Convert one saved metadata to another which possibly uses less
+--   data.
+narrowSavedMeta
+  :: forall a b. (IsFromMeta a, IsFromMeta b)
+  => Result (SavedMeta a)
+  -> Result (SavedMeta b)
+narrowSavedMeta r
+  | keysB `Set.isSubsetOf` keysA = coerce r
+  | otherwise = error $ "Cannot narrow saved meta " ++ typeName @a ++ " to " ++ typeName @b
+  where
+    keysA = metadataKeySet (proxy# @a)
+    keysB = metadataKeySet (proxy# @b)
 
 
 ----------------------------------------------------------------

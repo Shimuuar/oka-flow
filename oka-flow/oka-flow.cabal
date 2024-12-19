@@ -67,6 +67,9 @@ Library
         OKA.Flow.Parser
         OKA.Flow.Tools
         OKA.Flow.Std
+  Other-modules:
+        OKA.Flow.Util
+
 
 executable oka-flow
   import:           extensions
