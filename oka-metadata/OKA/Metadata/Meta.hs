@@ -41,6 +41,7 @@ module OKA.Metadata.Meta
   , primToMetadata
   , primFromMetadata
   , singletonMetaTree
+  , optionalMetaTree
   , decodeMetadataPrimEither
   , MetaPath(..)
   , Optional(..)
@@ -506,23 +507,28 @@ singletonMetaTree
         return $! primToMetadata (pure a)
     }
 
+-- | Mark every leaf in MetaTree as an optional
+optionalMetaTree :: forall b a. (b -> Maybe a) -> MetaTree a -> MetaTree b
+optionalMetaTree fun (MetaTree mtree)
+  = MetaTree (toOpt <$> mtree)
+  where
+    toOpt e = Entry { tyRep   = e.tyRep
+                    , encoder = \b -> case fun b of
+                        Nothing -> JSON.Null
+                        Just a  -> e.encoder a
+                    , parser  = \case
+                        JSON.Null -> pure mempty
+                        js        -> e.parser js
+                    }
+
+
 -- | Newtype wrapper for existing metadata which turns its presence
 --   optional. Missing entry will be decoded as
 newtype Optional a = Optional { get :: Maybe a }
   deriving stock (Show,Eq,Ord)
 
 instance IsFromMeta a => IsFromMeta (Optional a) where
-  metaTree = case metaTree @a of
-    MetaTree mtree -> MetaTree (toOpt <$> mtree)
-    where
-      toOpt e = Entry { tyRep   = e.tyRep
-                      , encoder = \case
-                          Optional Nothing  -> JSON.Null
-                          Optional (Just a) -> e.encoder a
-                      , parser  = \case
-                          JSON.Null -> pure mempty
-                          js        -> e.parser js
-                      }
+  metaTree = optionalMetaTree @(Optional a) @a coerce metaTree
   fromHkdMetadata m = case fromHkdMetadata m of
     Nothing -> Just (pure (Optional Nothing))
     Just fa -> Just (Optional . Just <$> fa)
