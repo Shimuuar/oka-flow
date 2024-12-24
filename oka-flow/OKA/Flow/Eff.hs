@@ -15,6 +15,7 @@ module OKA.Flow.Eff
     -- ** Primitives
   , loadMeta
   , readMeta
+  , readOptionalMeta
     -- * Configuration
   , ProgConfigE
   , ProgConfig(..)
@@ -115,6 +116,17 @@ readMeta
   => FilePath -- ^ File path relative to config root
   -> Flow es ()
 readMeta = appendMeta <=< loadMeta @a
+
+-- | Read, decode YAML file using 'IsMeta' instance and store it in
+--   current metadata.
+readOptionalMeta
+  :: forall a es. (HasCallStack, IsMeta a, ReadMeta :> es)
+  => FilePath -- ^ File path relative to config root
+  -> Flow es ()
+readOptionalMeta path = do
+  loadMeta @(Optional a) path >>= \case
+    Optional (Just a)  -> appendMeta a
+    Optional (Nothing) -> pure ()
 
 
 
