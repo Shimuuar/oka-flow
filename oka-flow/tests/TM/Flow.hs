@@ -26,6 +26,7 @@ import OKA.Flow.Graph
 import OKA.Flow.Run
 import OKA.Flow.Std
 import OKA.Flow.Resources
+import OKA.Flow.Eff.Cache
 import OKA.Flow
 
 tests :: TestTree
@@ -106,7 +107,7 @@ tests = testGroup "Run flow"
       observe "flow A" obsA [100]
       observe "flow S" obsS [10000]
     -- Caching works
-  , testCase "Caching" $ withSimpleFlow $ \ctx -> do
+  , testCase "Caching of outputs" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
       (obsS, flowS) <- flowSquare
       let meta  = toMetadata (CounterMeta 100 :: CounterMeta "nA")
@@ -181,14 +182,53 @@ tests = testGroup "Run flow"
       runFlow ctx mempty flow
       observe "flowA" obsA [100]
       observe "flowB" obsB [200]
+    -- CacheE tests
+    --
+    -- We cheat here a bit by using IO to observe number of times
+    -- cached computation is evaluated
+  , testCase "cache metadata handling" $ withSimpleFlow $ \ctx -> do
+      cnt <- newIORef (0::Int)
+      runFlow ctx mempty $ do
+        appendMeta (CounterMeta 100 :: CounterMeta "A")
+        fun <- cache $ \i -> do
+          CounterMeta n <- use (metadata @(CounterMeta "A"))
+          appendMeta (CounterMeta 111 :: CounterMeta "A")
+          liftEff $ liftIO $ modifyIORef' cnt succ
+          pure (n*i)
+        appendMeta (CounterMeta 200 :: CounterMeta "A")
+        -- Cache sees metadata from call site of cache
+        assertFlowEq "result" 300 =<< fun 3
+        assertFlowEq "N eval 1" 1 =<< liftEff (liftIO (readIORef cnt))
+        assertFlowEq "result" 300 =<< fun 3
+        assertFlowEq "N eval 1" 1 =<< liftEff (liftIO (readIORef cnt))
+        assertFlowEq "result" 400 =<< fun 4
+        assertFlowEq "N eval 1" 2 =<< liftEff (liftIO (readIORef cnt))
+        -- Metadata changes in cached function are discarded
+        assertFlowEq "metadata" (CounterMeta 200) =<< use (metadata @(CounterMeta "A"))
+  , testCase "memoize" $ withSimpleFlow $ \ctx -> do
+      cnt <- newIORef (0::Int)
+      runFlow ctx mempty $ do
+        let memoized :: (CacheE :> eff, IOE :> eff) => Int -> Flow eff Int
+            memoized = memoize (Proxy @MemoKey) $ \i -> do
+              assertFlowEq "memoized" (Optional Nothing)
+                =<< lookupMeta @(Optional (CounterMeta "A"))
+              appendMeta (CounterMeta 200 :: CounterMeta "A")
+              liftEff $ liftIO $ modifyIORef' cnt succ
+              pure i
+        assertFlowEq "result"   1 =<< memoized 1
+        assertFlowEq "N eval 1" 1 =<< liftEff (liftIO (readIORef cnt))
+        assertFlowEq "result"   1 =<< memoized 1
+        assertFlowEq "N eval 1" 1 =<< liftEff (liftIO (readIORef cnt))
+        assertFlowEq "result"   2 =<< memoized 2
+        assertFlowEq "N eval 1" 2 =<< liftEff (liftIO (readIORef cnt))
   ]
 
-withSimpleFlow :: (FlowCtx '[] -> IO a) -> IO a
+withSimpleFlow :: (FlowCtx '[CacheE,IOE] -> IO a) -> IO a
 withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
   res <- createResource (LockCoreCPU 4)
      =<< pure mempty
   action FlowCtx { root      = dir
-                 , runEffect = raise
+                 , runEffect = runCacheE
                  , res       = res
                  , logger    = mempty
                  }
@@ -202,7 +242,7 @@ withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
 data CounterMeta (a :: Symbol) = CounterMeta
   { count :: Int
   }
-  deriving stock Generic
+  deriving stock (Show,Eq,Generic)
   deriving MetaEncoding via AsRecord    (CounterMeta a)
   deriving IsMetaPrim   via AsMeta '[a] (CounterMeta a)
   deriving anyclass (IsMeta,IsFromMeta)
@@ -243,9 +283,13 @@ observePhony :: (Ord a, Show a) => String -> ObsPhony a -> [a] -> IO ()
 observePhony msg (ObsPhony ref) xs =
   assertEqual msg xs =<< (sort . toList <$> readIORef ref)
 
+assertFlowEq :: (Eq a, Show a, Monad m) => String -> a -> a -> m ()
+assertFlowEq msg expected got
+  | expected == got = pure ()
+  | otherwise       = error $ msg ++ ": expected " ++ show expected ++ " got " ++ show got
 
 
-
+data MemoKey
 
 flowProduceInt
   :: forall name eff. (KnownSymbol name)
@@ -296,4 +340,3 @@ observeOutput out expected = basicLiftPhony () $ \_ _ [arg] -> do
         , "  Got:      " ++ hash
         ] ++ e
       , ())
-
