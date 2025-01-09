@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes  #-}
+{-# LANGUAGE MagicHash            #-}
 {-# LANGUAGE UndecidableInstances #-}
 -- |
 -- Tools for defining how haskell values are encoded\/decode
@@ -38,33 +39,36 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
-import Data.Aeson                 (Value(..),(.:),(.:?))
-import Data.Aeson                 qualified as JSON
-import Data.Aeson.Key             qualified as JSON
-import Data.Aeson.KeyMap          qualified as KM
-import Data.Aeson.Types           qualified as JSON
+import Data.Aeson                  (Value(..),(.:),(.:?))
+import Data.Aeson                  qualified as JSON
+import Data.Aeson.Key              qualified as JSON
+import Data.Aeson.KeyMap           qualified as KM
+import Data.Aeson.Types            qualified as JSON
 import Data.Coerce
 import Data.Functor.Compose
 import Data.Int
-import Data.Text                  (Text)
-import Data.Text                  qualified as T
-import Data.Vector                qualified as V
-import Data.Vector.Unboxed        qualified as VU
-import Data.Vector.Storable       qualified as VS
-import Data.Vector.Generic        ((!))
-import Data.Vector.Fixed          qualified as F
-import Data.Vector.Fixed.Cont     qualified as F(arity)
-import Data.Vector.Fixed.Unboxed  qualified as FU
-import Data.Vector.Fixed.Boxed    qualified as FB
-import Data.Vector.Fixed.Storable qualified as FS
-import Data.Map.Strict            qualified as Map
+import Data.Text                   (Text)
+import Data.Text                   qualified as T
+import Data.Vector                 qualified as V
+import Data.Vector.Unboxed         qualified as VU
+import Data.Vector.Storable        qualified as VS
+import Data.Vector.Generic         ((!))
+import Data.Vector.Fixed           qualified as F
+import Data.Vector.Fixed.Cont      qualified as FC
+import Data.Vector.Fixed.Unboxed   qualified as FU
+import Data.Vector.Fixed.Strict    qualified as FF
+import Data.Vector.Fixed.Boxed     qualified as FB
+import Data.Vector.Fixed.Storable  qualified as FS
+import Data.Vector.Fixed.Primitive qualified as FP
+import Data.Map.Strict             qualified as Map
 import Data.Typeable
 import Data.Word
 import Text.Printf
 
+import GHC.Exts                   (proxy#)
 import GHC.Generics               hiding (from,to)
 import GHC.Generics               qualified as Generics
-import GHC.TypeLits
+import GHC.TypeLits               (KnownSymbol,KnownNat)
 import OKA.Metadata.Util
 
 ----------------------------------------------------------------
@@ -174,7 +178,7 @@ parseFixedVec
   . JSON.withArray "Vec"
     (\v -> do
         let n   = V.length v
-            dim = F.arity (Proxy @(F.Dim v))
+            dim = FC.peanoToInt (proxy# @(F.Dim v))
         when (n /= dim) $ fail $ printf "Array length mismatch: expected %i but got %i" dim n
         F.generateM $ \i -> JSON.prependFailure (" - index " <> show i)
                           $ parseMeta (v ! i)
@@ -184,6 +188,10 @@ parseFixedVec
 fixedVecToMeta :: (MetaEncoding a, F.Vector v a) => v a -> Value
 fixedVecToMeta = Array . V.fromList . map metaToJson . F.toList
 
+instance (MetaEncoding a, Typeable v, F.Vector v a) => MetaEncoding (F.ViaFixed v a) where
+  parseMeta  = parseFixedVec
+  metaToJson = fixedVecToMeta
+  
 
 ----------------------------------------------------------------
 -- Exhaustive parser
@@ -380,15 +388,18 @@ instance (MetaEncoding a) => MetaEncoding (V.Vector a) where
   metaToJson = Array . V.map metaToJson
 
 
-instance (MetaEncoding a, F.Arity n) => MetaEncoding (FB.Vec n a) where
-  parseMeta  = parseFixedVec
-  metaToJson = fixedVecToMeta
-instance (MetaEncoding a, FU.Unbox n a) => MetaEncoding (FU.Vec n a) where
-  parseMeta  = parseFixedVec
-  metaToJson = fixedVecToMeta
-instance (MetaEncoding a, VS.Storable a, F.Arity n) => MetaEncoding (FS.Vec n a) where
-  parseMeta  = parseFixedVec
-  metaToJson = fixedVecToMeta
+deriving via F.ViaFixed (FB.Vec n) a
+    instance (MetaEncoding a, KnownNat n, F.Arity n) => MetaEncoding (FB.Vec n a)
+deriving via F.ViaFixed (FF.Vec n) a
+    instance (MetaEncoding a, KnownNat n, F.Arity n) => MetaEncoding (FF.Vec n a)
+deriving via F.ViaFixed (FU.Vec n) a
+    instance (MetaEncoding a, KnownNat n, FU.Unbox n a) => MetaEncoding (FU.Vec n a)
+deriving via F.ViaFixed (FS.Vec n) a
+    instance (MetaEncoding a, KnownNat n, F.Arity n, FS.Storable a
+             ) => MetaEncoding (FS.Vec n a)
+deriving via F.ViaFixed (FP.Vec n) a
+    instance (MetaEncoding a, KnownNat n, F.Arity n, FP.Prim a
+             ) => MetaEncoding (FP.Vec n a)
 
 
 instance (Typeable k, JSON.FromJSONKey k, JSON.ToJSONKey k, Ord k, MetaEncoding a
