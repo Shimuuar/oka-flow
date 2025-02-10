@@ -418,8 +418,7 @@ instance (Typeable k, JSON.FromJSONKey k, JSON.ToJSONKey k, Ord k, MetaEncoding 
         JSON.FromJSONKeyTextParser parser -> JSON.withObject "Map"
           $ fmap Map.fromList
           . traverse (\(k,v) -> errK k $ (,) <$> parser (JSON.toText k) <*> parseMeta v)
-          . Map.toList
-          . KM.toMap
+          . KM.toList
         JSON.FromJSONKeyValue parser -> JSON.withArray "Map"
           $ fmap Map.fromList
           . traverse (\o -> do (k,v) <- parseMeta o
