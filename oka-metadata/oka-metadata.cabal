@@ -31,6 +31,7 @@ Library
   --
   Build-Depends:    base                >=4.12 && <5
                   , aeson               >=2
+                  , attoparsec          >=0.14
                   , scientific
                   , transformers
                   , text

@@ -29,6 +29,8 @@ module OKA.Metadata.Encoding
   , metaField
   , metaFieldM
   , metaWithRecord
+    -- ** Helpers
+  , liftAttoparsec
     -- ** Deriving via
   , AsAeson(..)
   , AsReadShow(..)
@@ -44,6 +46,7 @@ import Data.Aeson                  qualified as JSON
 import Data.Aeson.Key              qualified as JSON
 import Data.Aeson.KeyMap           qualified as KM
 import Data.Aeson.Types            qualified as JSON
+import Data.Attoparsec.Text        qualified as Atto
 import Data.Coerce
 import Data.Functor.Compose
 import Data.Int
@@ -61,6 +64,7 @@ import Data.Vector.Fixed.Boxed     qualified as FB
 import Data.Vector.Fixed.Storable  qualified as FS
 import Data.Vector.Fixed.Primitive qualified as FP
 import Data.Map.Strict             qualified as Map
+import Data.IntMap.Strict          qualified as IntMap
 import Data.Typeable
 import Data.Word
 import Text.Printf
@@ -431,3 +435,31 @@ instance (Typeable k, JSON.FromJSONKey k, JSON.ToJSONKey k, Ord k, MetaEncoding 
     JSON.ToJSONKeyValue f _ -> Array $ V.fromListN (Map.size m)
       [ Array $ V.fromListN 2 [f k, coerce $ metaToJson v]
       | (k,v) <- Map.toList m ]
+
+
+instance (MetaEncoding a) => MetaEncoding (IntMap.IntMap a) where
+  parseMeta
+    = JSON.prependFailure "Parsing IntMap\n"
+    . JSON.withObject "IntMap"
+      ( fmap IntMap.fromList
+      . traverse (\(k,v) -> errK k $ do
+                     i <- liftAttoparsec (Atto.signed Atto.decimal) (JSON.toText k)
+                     a <- parseMeta v
+                     pure (i,a))
+      . KM.toList
+      )
+    where
+      errK k = JSON.prependFailure (" - key: "<>JSON.toString k<>"\n")
+  metaToJson m = JSON.object
+    [ T.pack (show k) .== v | (k,v) <- IntMap.toList m ]
+
+
+
+liftAttoparsec :: Atto.Parser a -> Text -> JSON.Parser a
+liftAttoparsec parser txt =
+  case Atto.parse parser txt of
+    Atto.Done rest a
+      | T.null rest -> pure a
+      | otherwise   -> fail "Not all input is consumed"
+    Atto.Fail _ _ err -> fail err
+    Atto.Partial _    -> fail "Incomplete input"
