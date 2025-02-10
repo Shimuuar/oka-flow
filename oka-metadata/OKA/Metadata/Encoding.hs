@@ -428,5 +428,6 @@ instance (Typeable k, JSON.FromJSONKey k, JSON.ToJSONKey k, Ord k, MetaEncoding 
           errK k = JSON.prependFailure (" - key: "<>JSON.toString k<>"\n")
   metaToJson m = case JSON.toJSONKey of
     JSON.ToJSONKeyText  f _ -> JSON.object [ JSON.toText (f k) .== v | (k,v) <- Map.toList m ]
-    JSON.ToJSONKeyValue f _ -> Array $ V.fromList
-      [ Array $ V.fromList [f k, coerce $ metaToJson v] | (k,v) <- Map.toList m ]
+    JSON.ToJSONKeyValue f _ -> Array $ V.fromListN (Map.size m)
+      [ Array $ V.fromListN 2 [f k, coerce $ metaToJson v]
+      | (k,v) <- Map.toList m ]
