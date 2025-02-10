@@ -35,6 +35,7 @@ module OKA.Metadata.Encoding
   , AsAeson(..)
   , AsReadShow(..)
   , AsRecord(..)
+  , AsPositionalSExp(..)
   ) where
 
 import Control.Applicative
@@ -195,7 +196,7 @@ fixedVecToMeta = Array . V.fromList . map metaToJson . F.toList
 instance (MetaEncoding a, Typeable v, F.Vector v a) => MetaEncoding (F.ViaFixed v a) where
   parseMeta  = parseFixedVec
   metaToJson = fixedVecToMeta
-  
+
 
 ----------------------------------------------------------------
 -- Exhaustive parser
@@ -266,9 +267,10 @@ metaWithRecord parser
 ----------------------------------------------------------------
 -- Deriving via
 ----------------------------------------------------------------
-type role AsAeson    representational
-type role AsRecord   representational
-type role AsReadShow representational
+type role AsAeson          representational
+type role AsRecord         representational
+type role AsReadShow       representational
+type role AsPositionalSExp representational
 
 -- | Newtype for deriving 'MetaEncoding' instances from 'FromJSON' and 'ToJSON' instances
 newtype AsAeson a = AsAeson a
@@ -334,6 +336,82 @@ instance {-# OVERLAPPING #-} (MetaEncoding a, KnownSymbol fld
   grecToMeta (M1 (K1 Nothing )) = []
 
 
+
+-- | Encode sum type as a positional S-expression. in form
+--   @["ConstructorName", field1, field2]@.
+newtype AsPositionalSExp a = AsPositionalSExp a
+
+instance ( Generic a
+         , GSExpEncode   (Rep a)
+         , GSExpParseCon (Rep a)
+         , Typeable a
+         ) => MetaEncoding (AsPositionalSExp a) where
+  parseMeta
+    = JSON.prependFailure ("While parsing " ++ typeName @a ++ "\n")
+    . JSON.withArray "S-exp"
+      (\arr -> case V.toList arr of
+          JSON.String tag : fields -> gsexpParseCon tag fields >>= \case
+            Nothing -> fail $ "Unknown constructor " ++ T.unpack tag
+            Just a  -> pure (AsPositionalSExp $ Generics.to a)
+          [] -> fail "No constructor tag"
+          _  -> fail "Constructor tag should be a string"
+      )
+  metaToJson (AsPositionalSExp a)
+    = JSON.Array $ V.fromList $ gsexpToMeta $ Generics.from a
+
+
+-- NOTE. Parser should not attempt to backtrack if we already committed to
+--       constructor. Thus use of maybe to signal unknown constructor
+class GSExpParseCon f where
+  gsexpParseCon :: Text -> [JSON.Value] -> JSON.Parser (Maybe (f p))
+
+class GSExpParseFields f where
+  gsexpParseFld :: StateT [JSON.Value] JSON.Parser (f p)
+
+class GSExpEncode f where
+  gsexpToMeta :: f p -> [JSON.Value]
+
+deriving newtype instance GSExpParseCon f => GSExpParseCon (M1 D i f)
+instance (GSExpParseCon f, GSExpParseCon g) => GSExpParseCon (f :+: g) where
+  gsexpParseCon con fields =
+    gsexpParseCon con fields >>= \case
+      Just f  -> pure (Just (L1 f))
+      Nothing -> fmap R1 <$> gsexpParseCon con fields
+instance (GSExpParseFields f, Constructor con) => GSExpParseCon (M1 C con f) where
+  gsexpParseCon con fields
+    -- Constructor don't match. Backtrack
+    | con /= T.pack (conName (undefined :: M1 C con f ())) = pure Nothing
+    -- Construct match. Commit to parse
+    | otherwise = runStateT gsexpParseFld fields >>= \case
+        (a,[]) -> pure (Just (M1 a))
+        (_,_)  -> fail "Too many fields"
+
+
+deriving newtype instance GSExpParseFields f => GSExpParseFields (M1 S i f)
+instance (GSExpParseFields f, GSExpParseFields g) => GSExpParseFields (f :*: g) where
+  gsexpParseFld = (:*:) <$> gsexpParseFld <*> gsexpParseFld
+instance GSExpParseFields U1 where
+  gsexpParseFld = pure U1
+instance MetaEncoding a => GSExpParseFields (K1 i a) where
+  gsexpParseFld = get >>= \case
+    []   -> fail "Not enough fields"
+    j:js -> put js >> lift (K1 <$> parseMeta j)
+
+
+deriving newtype instance GSExpEncode f => GSExpEncode (M1 D i f)
+deriving newtype instance GSExpEncode f => GSExpEncode (M1 S i f)
+instance (GSExpEncode f, Constructor con) => GSExpEncode (M1 C con f) where
+  gsexpToMeta c@(M1 f) = JSON.String (T.pack (conName c))
+                       : gsexpToMeta f
+instance (GSExpEncode f, GSExpEncode g) => GSExpEncode (f :+: g) where
+  gsexpToMeta (L1 f) = gsexpToMeta f
+  gsexpToMeta (R1 g) = gsexpToMeta g
+instance (GSExpEncode f, GSExpEncode g) => GSExpEncode (f :*: g) where
+  gsexpToMeta (f :*: g) = gsexpToMeta f <> gsexpToMeta g
+instance GSExpEncode U1 where
+  gsexpToMeta U1 = []
+instance (MetaEncoding a) => GSExpEncode (K1 i a) where
+  gsexpToMeta (K1 a) = [metaToJson a]
 
 ----------------------------------------------------------------
 -- Instances

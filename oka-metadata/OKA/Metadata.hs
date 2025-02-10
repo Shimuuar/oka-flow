@@ -45,6 +45,7 @@ module OKA.Metadata
   , AsAeson(..)
   , AsReadShow(..)
   , AsRecord(..)
+  , AsPositionalSExp(..)
   , AsMeta(..)
   ) where
 

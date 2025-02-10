@@ -51,6 +51,7 @@ tests = testGroup "Metadata"
     , testSerialise @ENUM
     , testSerialise @Record
     , testSerialise @Record2
+    , testSerialise @SSum
     ]
   , testGroup "Roundtrip IsMeta"
     [ testIsMeta @Record
@@ -188,6 +189,16 @@ data Record8 = Record8 { foo8 :: Int }
   deriving IsMetaPrim   via AsMeta '["rec8"]  Record8
   deriving anyclass (IsMeta,IsFromMeta)
   deriving Arbitrary    via GenericArbitrary  Record8
+
+
+data SSum
+  = S1 Int Int Int
+  | S2 Int
+  | S3
+  deriving stock (Show,Read,Eq,Generic)
+  deriving MetaEncoding via AsPositionalSExp SSum
+  deriving Arbitrary    via GenericArbitrary SSum
+
 
 ----------------------------------------------------------------
 
