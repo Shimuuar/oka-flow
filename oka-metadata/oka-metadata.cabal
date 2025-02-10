@@ -23,6 +23,7 @@ common extensions
                       DerivingVia
                       LambdaCase
                       ViewPatterns
+                      RoleAnnotations
 
 Library
   import:             extensions

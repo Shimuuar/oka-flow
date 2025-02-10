@@ -266,6 +266,9 @@ metaWithRecord parser
 ----------------------------------------------------------------
 -- Deriving via
 ----------------------------------------------------------------
+type role AsAeson    representational
+type role AsRecord   representational
+type role AsReadShow representational
 
 -- | Newtype for deriving 'MetaEncoding' instances from 'FromJSON' and 'ToJSON' instances
 newtype AsAeson a = AsAeson a
