@@ -22,6 +22,7 @@ import Data.Typeable
 import Data.Aeson.Types           qualified as JSON
 import OKA.Metadata
 import Data.Map.Strict         qualified as Map
+import Data.IntMap.Strict      qualified as IntMap
 import Data.Vector.Fixed       qualified as F
 import Data.Vector.Fixed.Boxed qualified as FB
 import Data.Text               (Text)
@@ -46,6 +47,7 @@ tests = testGroup "Metadata"
     , testSerialise @(Map.Map Text      Int)
     , testSerialise @(Map.Map String    Int)
     , testSerialise @(Map.Map (Int,Int) Int)
+    , testSerialise @(IntMap.IntMap Int)
     , testSerialise @ENUM
     ]
   , testGroup "Roundtrip IsMeta"

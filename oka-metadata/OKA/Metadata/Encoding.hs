@@ -457,9 +457,6 @@ instance (MetaEncoding a) => MetaEncoding (IntMap.IntMap a) where
 
 liftAttoparsec :: Atto.Parser a -> Text -> JSON.Parser a
 liftAttoparsec parser txt =
-  case Atto.parse parser txt of
-    Atto.Done rest a
-      | T.null rest -> pure a
-      | otherwise   -> fail "Not all input is consumed"
-    Atto.Fail _ _ err -> fail err
-    Atto.Partial _    -> fail "Incomplete input"
+  case Atto.parseOnly (parser <* Atto.endOfInput) txt of
+    Right a -> pure a
+    Left  e -> fail e
