@@ -49,6 +49,8 @@ tests = testGroup "Metadata"
     , testSerialise @(Map.Map (Int,Int) Int)
     , testSerialise @(IntMap.IntMap Int)
     , testSerialise @ENUM
+    , testSerialise @Record
+    , testSerialise @Record2
     ]
   , testGroup "Roundtrip IsMeta"
     [ testIsMeta @Record
