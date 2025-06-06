@@ -64,14 +64,18 @@ tests = testGroup "Metadata"
     , testIsMeta @(Record,Record2,Record3,Record4,Record5,Record6,Record7)
     , testIsMeta @(Record,Record2,Record3,Record4,Record5,Record6,Record7,Record8)
     , testIsMeta @((Record,Record2),Record3,Record4)
-    , testIsFromMeta @(Optional Record)
+    , testIsMeta @(Maybe Record)
+    , testIsMeta @(Maybe Record, Maybe Record2)
+    , testIsMeta @(Maybe (Record, Record2))
     -- Check clash detection
     , testCase "Clash detected" $ case encodeToMetadataEither (undefined :: (Record,Record)) of
         Left  _ -> pure ()
         Right _ -> assertFailure "Should detect key clash"
     ]
   , testGroup "Optional"
-    [ testProperty "Lookup" $ optionalLookup 
+    [ testProperty "Lookup"        $ optionalLookup  @Record
+    , testProperty "Lookup tuple"  $ optionalLookup  @(Record, Record2)
+    , testProperty "Lookup tuple2" $ optionalLookup2 @Record @Record2
     ]
   ]
 
@@ -94,31 +98,37 @@ testIsMeta = testGroup (show (typeOf (undefined :: a)))
   , testProperty "Meta"  (testIsMetaMeta   @a)
   ]
 
-testIsFromMeta :: forall a. (Arbitrary a, Show a, Eq a, IsFromMeta a) => TestTree
-testIsFromMeta = testGroup (show (typeOf (undefined :: a)))
-  [ testProperty "JSON"  (testIsMetaJSON   @a)
-  ]
 
-testIsMetaJSON :: (IsFromMeta a, Eq a) => a -> Property
+testIsMetaJSON :: (IsMeta a, Eq a) => a -> Property
 testIsMetaJSON a
   = property
   $ decodeMetadata (encodeToMetadata a) == a
 
 testEncodeIsSame :: (IsMeta a) => a -> Property
 testEncodeIsSame a
-  = property
-  $ encodeToMetadata a == encodeMetadata (toMetadata a)
+  = counterexample ("encodeToMetadata:\n > " ++ show js1)
+  $ counterexample ("encodeMetadata:  \n > " ++ show js2)
+  $ js1 == js2  
+  where
+    js1 = encodeToMetadata a
+    js2 = encodeMetadata (toMetadata a)
 
 testIsMetaMeta :: (IsMeta a, Eq a) => a -> Property
 testIsMetaMeta a
   = property
   $ fromMetadata (toMetadata a) == Just a
 
-optionalLookup :: Maybe Record -> Bool
-optionalLookup mr = fromMetadata meta == Just (Optional mr)
+optionalLookup :: (IsMeta a, Eq a) => Maybe a -> Bool
+optionalLookup mr = fromMetadata meta == Just mr
   where
     meta = foldMap toMetadata mr
-  
+
+optionalLookup2 :: (IsMeta a, Eq a, IsMeta b, Eq b) => Maybe a -> Maybe b -> Bool
+optionalLookup2 ma mb = fromMetadata meta == Just (ma,mb)
+  where
+    meta = foldMap toMetadata ma
+        <> foldMap toMetadata mb
+
 ----------------------------------------------------------------
 -- Derivations
 ----------------------------------------------------------------
@@ -133,62 +143,54 @@ data Record = Record
   , bar :: Maybe Int
   }
   deriving stock (Show,Read,Eq,Generic)
-  deriving MetaEncoding via AsRecord Record
-  deriving IsMetaPrim   via AsMeta '["rec1"] Record
-  deriving anyclass (IsFromMeta,IsMeta)
-  deriving Arbitrary    via GenericArbitrary Record
+  deriving MetaEncoding        via AsRecord Record
+  deriving (IsMetaPrim,IsMeta) via AsMeta '["rec1"] Record
+  deriving Arbitrary           via GenericArbitrary Record
 
 data Record2 = Record2
   { foo2 :: Int
   , bar2 :: Maybe Int
   }
   deriving stock (Show,Read,Eq,Generic)
-  deriving MetaEncoding via AsRecord             Record2
-  deriving IsMetaPrim   via AsMeta ["rec2","xx"] Record2
-  deriving anyclass (IsFromMeta,IsMeta)
-  deriving Arbitrary    via GenericArbitrary     Record2
+  deriving MetaEncoding        via AsRecord             Record2
+  deriving (IsMetaPrim,IsMeta) via AsMeta ["rec2","xx"] Record2
+  deriving Arbitrary           via GenericArbitrary     Record2
 
 data Record3 = Record3 { foo3 :: Int }
   deriving stock (Show,Read,Eq,Generic)
-  deriving MetaEncoding via AsRecord          Record3
-  deriving IsMetaPrim   via AsMeta '["rec3"]  Record3
-  deriving anyclass (IsFromMeta,IsMeta)
-  deriving Arbitrary    via GenericArbitrary  Record3
+  deriving MetaEncoding        via AsRecord          Record3
+  deriving (IsMetaPrim,IsMeta) via AsMeta '["rec3"]  Record3
+  deriving Arbitrary           via GenericArbitrary  Record3
 
 data Record4 = Record4 { foo4 :: Int }
   deriving stock (Show,Read,Eq,Generic)
-  deriving MetaEncoding via AsRecord          Record4
-  deriving IsMetaPrim   via AsMeta '["rec4"]  Record4
-  deriving anyclass (IsFromMeta,IsMeta)
-  deriving Arbitrary    via GenericArbitrary  Record4
+  deriving MetaEncoding        via AsRecord          Record4
+  deriving (IsMetaPrim,IsMeta) via AsMeta '["rec4"]  Record4
+  deriving Arbitrary           via GenericArbitrary  Record4
 
 data Record5 = Record5 { foo5 :: Int }
   deriving stock (Show,Read,Eq,Generic)
-  deriving MetaEncoding via AsRecord          Record5
-  deriving IsMetaPrim   via AsMeta '["rec5"]  Record5
-  deriving anyclass (IsFromMeta,IsMeta)
-  deriving Arbitrary    via GenericArbitrary  Record5
+  deriving MetaEncoding        via AsRecord          Record5
+  deriving (IsMetaPrim,IsMeta) via AsMeta '["rec5"]  Record5
+  deriving Arbitrary           via GenericArbitrary  Record5
 
 data Record6 = Record6 { foo6 :: Int }
   deriving stock (Show,Read,Eq,Generic)
-  deriving MetaEncoding via AsRecord          Record6
-  deriving IsMetaPrim   via AsMeta '["rec6"]  Record6
-  deriving anyclass (IsFromMeta,IsMeta)
-  deriving Arbitrary    via GenericArbitrary  Record6
+  deriving MetaEncoding        via AsRecord          Record6
+  deriving (IsMetaPrim,IsMeta) via AsMeta '["rec6"]  Record6
+  deriving Arbitrary           via GenericArbitrary  Record6
 
 data Record7 = Record7 { foo7 :: Int }
   deriving stock (Show,Read,Eq,Generic)
-  deriving MetaEncoding via AsRecord          Record7
-  deriving IsMetaPrim   via AsMeta '["rec7"]  Record7
-  deriving anyclass (IsFromMeta,IsMeta)
-  deriving Arbitrary    via GenericArbitrary  Record7
+  deriving MetaEncoding        via AsRecord          Record7
+  deriving (IsMetaPrim,IsMeta) via AsMeta '["rec7"]  Record7
+  deriving Arbitrary           via GenericArbitrary  Record7
 
 data Record8 = Record8 { foo8 :: Int }
   deriving stock (Show,Read,Eq,Generic)
-  deriving MetaEncoding via AsRecord          Record8
-  deriving IsMetaPrim   via AsMeta '["rec8"]  Record8
-  deriving anyclass (IsMeta,IsFromMeta)
-  deriving Arbitrary    via GenericArbitrary  Record8
+  deriving MetaEncoding        via AsRecord          Record8
+  deriving (IsMetaPrim,IsMeta) via AsMeta '["rec8"]  Record8
+  deriving Arbitrary           via GenericArbitrary  Record8
 
 
 data SSum
@@ -205,4 +207,3 @@ data SSum
 instance (Arbitrary a, F.Arity n) => Arbitrary (FB.Vec n a) where
   arbitrary = F.replicateM arbitrary
 
-deriving newtype instance Arbitrary a => Arbitrary (Optional a)
