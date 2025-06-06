@@ -18,9 +18,11 @@ import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
 import Data.Map.Strict              (Map,(!))
 import Data.Map.Strict              qualified as Map
+import Data.Monoid                  (Endo(..))
 import Data.Set                     qualified as Set
 import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import Data.Typeable
+import Data.Void
 import Effectful
 import Effectful.State.Static.Local qualified as Eff
 
@@ -102,7 +104,7 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
       $ runEff
       $ runEffect
       $ fmap (\(r,st) -> addTargets r st.graph)
-      $ Eff.runState FlowSt{ meta  = mapMetadataF (\(Identity a) -> Pure a) meta
+      $ Eff.runState FlowSt{ meta  = absurd <$> meta
                            , graph = FlowGraph mempty mempty
                            }
       $ m
@@ -148,8 +150,8 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> readMVar (fst $ outputOf fid)
   -- Compute metadata which should be passed to the workflow by
-  -- applying data loaded from 
-  meta <- traverseMetadataF (lookupExtCache ext_meta) fun.metadata
+  -- applying data loaded from
+  meta <- traverseMetadata (lookupExtCache ext_meta) fun.metadata
   -- Request resources
   atomically $ fun.resources.acquire ctx.res
   -- Run action
@@ -233,17 +235,18 @@ newtype ExtMetaCache = ExtMetaCache (Map (TypeRep, FunID) SomeExtMeta)
 data SomeExtMeta where
   SomeExtMeta :: IsMetaPrim a => IO a -> SomeExtMeta
 
-lookupExtCache :: Typeable a => ExtMetaCache -> MetaStore FunID a -> IO (Identity a)
-lookupExtCache (ExtMetaCache cache) m = case m of
-  Pure a   -> pure $ Identity a
-  FidClash -> error "INTERNAL ERROR: FidClash in metadata"
-  Load fid -> case Map.lookup (typeMetaStore m, fid) cache of
+lookupExtCache :: forall a. Typeable a => ExtMetaCache -> FunID -> IO a
+lookupExtCache (ExtMetaCache cache) fid = 
+  case Map.lookup (ty, fid) cache of
     Nothing -> error "INTERNAL ERROR: missing entry in cache"
     Just (SomeExtMeta io) -> do
       a <- io
       case cast a of
         Nothing -> error "INTERNAL ERROR: corrupted ext_meta cache"
-        Just a' -> pure $ Identity a'
+        Just a' -> pure a'
+  where
+    ty = typeRep (Proxy @a)
+
 
 prepareExtMetaCache
   :: FlowCtx eff
@@ -253,28 +256,29 @@ prepareExtMetaCache
 prepareExtMetaCache ctx gr targets = do
   cache <- traverse (\(SomeExtMeta io) -> SomeExtMeta <$> once io)
          $ Map.fromList
-         [ r
-         | fun <- toList gr.graph
-         , r   <- metadataFToList ((_Just . _2 %~ SomeExtMeta) . toCache) fun.metadata
-         ]
+         $ flip appEndo []
+         $ foldMap
+           (\fun -> getConst $ traverseMetadata toCache fun.metadata)
+           gr.graph
   pure $ ExtMetaCache cache
   where
-    toCache :: IsMetaPrim a => MetaStore FunID a -> Maybe ((TypeRep, FunID), IO a)
-    toCache m = case m of
-      Pure{}   -> Nothing
-      FidClash -> error "INTERNAL ERROR: FidClash in metadata"
-      Load fid -> Just
-        ( (typeMetaStore m, fid)
-        , if | fid `Set.member` targets.wanted ->
+    toCache :: forall a. IsMetaPrim a => FunID -> Const (Endo [((TypeRep, FunID), SomeExtMeta)]) a
+    toCache fid
+      = Const
+      $ Endo
+      ( ( (typeRep (Proxy @a), fid)
+        , SomeExtMeta $ if
+            | fid `Set.member` targets.wanted ->
                  do readMVar (fst $ (gr.graph ! fid).output)
-                    readMeta path
-             | otherwise ->
-                 do readMeta path
+                    readMeta @a path
+            | otherwise ->
+                do readMeta @a path
         )
-        where
-          path = case (gr.graph ! fid).output of
-            (_,Just p)  -> ctx.root </> storePath p </> "saved.json"
-            (_,Nothing) -> error "Dependence on PHONY target"
+      :)
+      where
+        path = case (gr.graph ! fid).output of
+          (_,Just p)  -> ctx.root </> storePath p </> "saved.json"
+          (_,Nothing) -> error "Dependence on PHONY target"
     --
     readMeta :: IsMetaPrim a => FilePath -> IO a
     readMeta path = do

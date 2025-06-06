@@ -73,7 +73,7 @@ addExtMeta
   :: forall a eff. IsMeta a
   => Result (SavedMeta a) -> Flow eff ()
 addExtMeta (Result fid) = Flow $ do
-  Eff.modify $ stMetaL . hkdMetadata .~ Load @_ @a fid 
+  Eff.modify $ stMetaL %~ storeExternal @a fid
 
 
 -- | Lift phony action using standard tools
@@ -90,11 +90,13 @@ liftPhony res exe = basicLiftPhony res $ \_ meta args -> do
 
 -- | Lookup metadata. Unlike 'metadata' lens. This function only
 --   requires 'IsFromMeta' and not full 'IsMeta'.
-lookupMeta :: forall a eff. (IsFromMeta a) => Flow eff a
+lookupMeta :: forall a eff. (IsMeta a) => Flow eff a
 lookupMeta = do
-  m <- get
-  case fromHkdMetadata @a m of
-    Nothing -> error $ "Failed to look up type " ++ typeName @a
-    Just a' -> case unPure a' of
-      Nothing -> error $ "Type is not immediate: " ++ typeName @a
-      Just a  -> pure a
+  meta <- get
+  case runMetaParserWith parseMetadata failK meta of
+    Right Nothing  -> error $ "Failed to look up type " ++ typeName @a
+    Right (Just a) -> pure a
+    Left  e        -> error e
+  where
+    failK :: forall x k. IsMetaPrim x => k -> Either String (Maybe x)
+    failK _ = Left $ "Encountered external metadata for "++typeName @a++". Cannot load"

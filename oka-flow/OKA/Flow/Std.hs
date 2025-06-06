@@ -18,7 +18,6 @@ module OKA.Flow.Std
 
 import Control.Monad.State.Strict
 import Data.Coerce
-import Data.Functor.Identity
 import Data.Set                   qualified as Set
 import Effectful                  ((:>))
 import System.FilePath            ((</>))
@@ -56,7 +55,7 @@ instance (IsMeta a) => FlowInput (SavedMeta a) where
 -- | Save metadata value so it could be passed as parameter.
 stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
 stdSaveMeta a = scopeMeta $ do
-  put $ mapMetadataF (\(Identity x) -> Pure x) $ toMetadata a
+  put $ toMetadata a
   liftWorkflow () Action
     { name = "std.SavedMeta"
     , run  = \_ _meta args out -> do
@@ -68,7 +67,7 @@ stdSaveMeta a = scopeMeta $ do
 -- | Convert one saved metadata to another which possibly uses less
 --   data.
 narrowSavedMeta
-  :: forall a b. (IsFromMeta a, IsFromMeta b)
+  :: forall a b. (IsMeta a, IsMeta b)
   => Result (SavedMeta a)
   -> Result (SavedMeta b)
 narrowSavedMeta r
