@@ -170,7 +170,7 @@ instance (FlowInput a) => FlowArgument (AsFlowOutput a) where
 ----------------------------------------------------------------
 
 -- | Read metadata from stdin
-metaFromStdin :: IsFromMeta a => IO a
+metaFromStdin :: IsMeta a => IO a
 metaFromStdin = do
   (BL.getContents <&> JSON.eitherDecode) >>= \case
     Left  e  -> error $ "Cannot read metadata: " ++ e
@@ -194,7 +194,7 @@ flowArgumentsFromCLI = getArgs >>= \case
 --   conventions: metadata is written to stdin, output directory and
 --   store paths are passed as command line parameters.
 executeStdWorkflow
-  :: (IsFromMeta meta, FlowArgument a, FlowOutput b)
+  :: (IsMeta meta, FlowArgument a, FlowOutput b)
   => (meta -> a -> IO b)
   -> IO ()
 executeStdWorkflow action = executeStdWorkflowOut $ \meta a out -> do
@@ -203,7 +203,7 @@ executeStdWorkflow action = executeStdWorkflowOut $ \meta a out -> do
 
 -- | Same as 'executeStdWorkflow' but workflow should write output directory by itself.
 executeStdWorkflowOut
-  :: (IsFromMeta meta, FlowArgument a)
+  :: (IsMeta meta, FlowArgument a)
   => (meta -> a -> FilePath -> IO ())
   -> IO ()
 executeStdWorkflowOut action = do

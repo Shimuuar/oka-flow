@@ -210,8 +210,8 @@ tests = testGroup "Run flow"
       runFlow ctx mempty $ do
         let memoized :: (CacheE :> eff, IOE :> eff) => Int -> Flow eff Int
             memoized = memoize (Proxy @MemoKey) $ \i -> do
-              assertFlowEq "memoized" (Optional Nothing)
-                =<< lookupMeta @(Optional (CounterMeta "A"))
+              assertFlowEq "memoized" Nothing
+                =<< lookupMeta @(Maybe (CounterMeta "A"))
               appendMeta (CounterMeta 200 :: CounterMeta "A")
               liftEff $ liftIO $ modifyIORef' cnt succ
               pure i
@@ -243,9 +243,8 @@ data CounterMeta (a :: Symbol) = CounterMeta
   { count :: Int
   }
   deriving stock (Show,Eq,Generic)
-  deriving MetaEncoding via AsRecord    (CounterMeta a)
-  deriving IsMetaPrim   via AsMeta '[a] (CounterMeta a)
-  deriving anyclass (IsMeta,IsFromMeta)
+  deriving MetaEncoding        via AsRecord    (CounterMeta a)
+  deriving (IsMetaPrim,IsMeta) via AsMeta '[a] (CounterMeta a)
 
 -- Tool for observation of execution of normal flows
 newtype Observe a = Observe (IORef (Map FilePath a))

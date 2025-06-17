@@ -8,9 +8,7 @@ module OKA.Flow.Graph
   ( -- * Dataflow graph
     Fun(..)
   , FlowGraph(..)
-  , MetaStore(..)
   , MetadataFlow
-  , typeMetaStore
     -- * Flow monad and primitives
   , Flow(..)
   , FlowSt(..)
@@ -51,6 +49,7 @@ import Data.Aeson.Key               (toText)
 import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
 import Data.Coerce
+import Data.Monoid                  (Endo(..))
 import Data.List                    (sortOn,intercalate)
 import Data.List.NonEmpty           qualified as NE
 import Data.List.NonEmpty           (NonEmpty(..))
@@ -74,30 +73,11 @@ import OKA.Flow.Resources
 -- Dataflow graph
 ----------------------------------------------------------------
 
-data MetaStore k a
-  = Pure !a
-  | Load !k
-  | FidClash
-  deriving stock Functor
-
-instance Applicative (MetaStore k) where
-  pure  = Pure
-  Pure f <*> Pure a = Pure (f a)
-  Pure _ <*> Load i = Load i
-  Load i <*> Pure _ = Load i
-  _      <*> _      = FidClash
-
-instance UnPure (MetaStore k) where
-  unPure (Pure a) = Just a
-  unPure _        = Nothing
-
-typeMetaStore :: Typeable a => MetaStore k a -> TypeRep
-typeMetaStore = typeRep
 
 -- | Metadata which is used in @Flow@. It contains both immediate
 --   values and promises which are loaded from outputs at execution
 --   time.
-type MetadataFlow = MetadataF (MetaStore FunID)
+type MetadataFlow = MetadataF FunID
 
 
 -- | Single workflow bound in dataflow graph.
@@ -105,7 +85,7 @@ data Fun k v = Fun
   { workflow  :: Workflow
     -- ^ Execute workflow. It takes resource handle as parameter and
     --   tries to acquire resources and return actual function to run.
-  , metadata  :: MetadataF (MetaStore k)
+  , metadata  :: MetadataF k
     -- ^ Metadata that should be supplied to the workflow
   , resources :: Lock
     -- ^ Resources required by workflow
@@ -209,10 +189,8 @@ hashFun oracle fun = fun
     mkStorePath name
       = StorePath name
       $ hashHashes
-      $ hashMeta (mapMaybeMetadataF (\case
-                                        Pure a -> Just (Identity a)
-                                        _      -> Nothing
-                                    ) fun.metadata)
+      $ hashMeta ( runIdentity
+                 $ traverseMetadataMay (\_ -> pure Nothing) fun.metadata)
       : hashFlowName name
       : [ case oracle k of StorePath _ h -> h
         | k <- fun.param        
@@ -225,19 +203,26 @@ hashFlowName :: String -> Hash
 hashFlowName = Hash . T.encodeUtf8 . T.pack
 
 
-hashExtMeta :: (k -> StorePath) -> MetadataF (MetaStore k) -> [Hash]
-hashExtMeta oracle meta = case extra of
+hashExtMeta :: forall k. (k -> StorePath) -> MetadataF k -> [Hash]
+hashExtMeta oracle meta = case extra [] of
   [] -> []
   hs -> Hash "?EXT_META?" : hs
   where
-    extra = [ h
-            | (ty,StorePath _ h0) <- sortOn fst $ metadataFToList
-                (\m -> case m of
-                    Load k -> Just (typeMetaStore m, oracle k)
-                    _      -> Nothing
-                ) meta
-            , h <- [hashTypeRep ty, h0]
-            ]
+    -- Here we trying to be clever and collect keys using traversal and Const
+    --
+    -- NOTE: TypeReps inside metadata are sorted so traversal order is
+    --       well defined and we don't need to sort anything
+    extra
+      = appEndo $ getConst
+      $ traverseMetadata collectK meta
+    collectK :: forall x. IsMetaPrim x => k -> Const (Endo [Hash]) x
+    collectK k
+      = Const $ Endo
+      $ (hashTypeRep ty                        :)
+      . ((case oracle k of StorePath _ h -> h) :)
+      where
+        ty = typeRep (Proxy @x)
+
 
 
 -- Compute hash of metadata
@@ -291,15 +276,8 @@ deduplicateGraph gr
     clean = fmap replaceKey
           . flip Map.withoutKeys dupes
     replaceKey f = f { param    = replace <$> f.param
-                     , metadata = mapMetadataF replaceKeyMeta f.metadata
+                     , metadata = replace <$> f.metadata
                      }
-    --
-    replaceKeyMeta :: MetaStore FunID x -> MetaStore FunID x
-    replaceKeyMeta FidClash            = FidClash
-    replaceKeyMeta m@(Load k)
-      | Just k' <- replacement ^. at k = Load k'
-      | otherwise                      = m
-    replaceKeyMeta m@Pure{}            = m
     -- FIDs of duplicate
     dupes       = Set.fromList [ fid | _ :| fids <- toList fid_mapping
                                      , fid       <- fids
@@ -345,11 +323,7 @@ shakeFlowGraph tgtExists (FlowGraph workflows targets)
             True  -> pure $ fids & fidExistsL %~ Set.insert fid
             False -> do
               fids'' <- foldM addFID fids'  f.param
-              foldMMetadataF (\fs -> \case
-                                 Load k   -> addFID fs k
-                                 Pure _   -> pure fs
-                                 FidClash -> error "INTERNAL ERROR: FID clashed in metadata"
-                             ) fids'' f.metadata
+              foldM addFID fids'' f.metadata
       where
         f     = workflows ! fid
         fids' = fids & fidWantedL %~ Set.insert fid

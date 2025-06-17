@@ -54,7 +54,7 @@ import OKA.Metadata
 
 -- | Effect for reading metadata from config files
 data ReadMeta :: Effect where
-  ReadMeta :: IsFromMeta a => FilePath -> ReadMeta m a
+  ReadMeta :: IsMeta a => FilePath -> ReadMeta m a
 
 type instance DispatchOf ReadMeta = Dynamic
 
@@ -95,7 +95,7 @@ handlerCachedReadMeta (ReadMetaCache cache_ref) root (ReadMeta path) = do
                   a <$ modifyIORef' cache_ref (Map.insert key (Dyn.toDyn a))
 
 
-doReadMeta :: (IsFromMeta a) => FilePath -> IO a
+doReadMeta :: (IsMeta a) => FilePath -> IO a
 doReadMeta path = YAML.decodeFileEither path >>= \case
   Left  e  -> error $ show e
   Right js -> case decodeMetadataEither js of
@@ -106,7 +106,7 @@ doReadMeta path = YAML.decodeFileEither path >>= \case
 
 -- | Read and decode YAML file using 'IsMeta' instance
 loadMeta
-  :: (HasCallStack, IsFromMeta a, ReadMeta :> es)
+  :: (HasCallStack, IsMeta a, ReadMeta :> es)
   => FilePath -- ^ File path relative to config root
   -> Flow es a
 loadMeta = Flow . send . ReadMeta
@@ -126,9 +126,9 @@ readOptionalMeta
   => FilePath -- ^ File path relative to config root
   -> Flow es ()
 readOptionalMeta path = do
-  loadMeta @(Optional a) path >>= \case
-    Optional (Just a)  -> appendMeta a
-    Optional (Nothing) -> pure ()
+  loadMeta @(Maybe a) path >>= \case
+    Just a  -> appendMeta a
+    Nothing -> pure ()
 
 
 
