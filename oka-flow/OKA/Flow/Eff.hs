@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE TypeFamilies        #-}
 -- |
@@ -41,6 +42,7 @@ import Effectful.Dispatch.Dynamic
 import Effectful.Dispatch.Static
 import System.FilePath              ((</>))
 import System.Random.Stateful
+import GHC.Generics                 (Generic)
 
 import OKA.Flow.Graph
 import OKA.Metadata
@@ -145,8 +147,13 @@ newtype instance StaticRep  ProgConfigE = ProgConfigE ProgConfig
 
 -- | Configuration of a workflow
 data ProgConfig = ProgConfig
-  { pdf :: FilePath -- ^ PDF reader to use
+  { pdf :: Maybe FilePath
+    -- ^ PDF reader to use. Uses xdg-open if not specified
+  , browser :: Maybe FilePath
+    -- ^ Browser to use
   }
+  deriving stock (Show,Eq,Generic)
+  deriving anyclass (YAML.FromJSON, YAML.ToJSON)
 
 runProgConfigE :: ProgConfig -> Eff (ProgConfigE : es) a -> Eff es a
 runProgConfigE cfg = evalStaticRep (ProgConfigE cfg)

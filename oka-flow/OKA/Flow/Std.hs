@@ -19,6 +19,7 @@ module OKA.Flow.Std
 import Control.Monad.State.Strict
 import Data.Coerce
 import Data.Functor.Identity
+import Data.Maybe
 import Data.Set                   qualified as Set
 import Effectful                  ((:>))
 import System.FilePath            ((</>))
@@ -143,7 +144,7 @@ instance (CollectReports a) => GCollectReports (K1 i a) where
 --   configuration.
 runPdfReader :: (CollectReports a, ProgConfigE :> eff) => a -> Flow eff ()
 runPdfReader a = do
-  ProgConfig{pdf} <- askProgConfig
+  pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
   basicLiftPhony ()
     (\_ _ paths -> runExternalProcessNoMeta pdf [p </> "report.pdf" | p <- paths])
     (collectReports a)
@@ -167,24 +168,30 @@ stdConcatPDF reports = restrictMeta @() $ do
 -- | Run jupyter notebook. Metadata and parameters are passed in
 --   environment variables.
 stdJupyter
-  :: (ResultSet p)
+  :: (ResultSet p, ProgConfigE :> eff)
   => FilePath   -- ^ Notebook name
   -> p          -- ^ Parameters to pass to notebook.
   -> Flow eff ()
 -- FIXME: We need mutex although not badly. No reason to run two
 --        notebooks concurrently
-stdJupyter notebook = basicLiftPhony () $ \_ meta param -> do
-  withParametersInEnv meta param $ \env_param -> do
-    withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
-      let dir_config  = tmp </> "config"
-          dir_data    = tmp </> "data"
-      createDirectory dir_config
-      createDirectory dir_data
-      env <- getEnvironment
-      let run = setEnv ([ ("JUPYTER_DATA_DIR",   dir_data)
-                        , ("JUPYTER_CONFIG_DIR", dir_config)
-                        ] ++ env_param ++ env)
-              $ proc "jupyter" [ "notebook" , notebook
-                               , "--browser", "chromium"
-                               ]
-      withProcessWait_ run $ \_ -> pure ()
+stdJupyter notebook params = do
+  cfg <- askProgConfig
+  let browser = case cfg.browser of
+        Nothing -> []
+        Just b  -> ["--browser", b]
+  --
+  basicLiftPhony ()
+    (\_ meta param -> do
+      withParametersInEnv meta param $ \env_param -> do
+        withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
+          let dir_config  = tmp </> "config"
+              dir_data    = tmp </> "data"
+          createDirectory dir_config
+          createDirectory dir_data
+          env <- getEnvironment
+          let run = setEnv ([ ("JUPYTER_DATA_DIR",   dir_data)
+                            , ("JUPYTER_CONFIG_DIR", dir_config)
+                            ] ++ env_param ++ env)
+                  $ proc "jupyter" (["notebook" , notebook] <> browser)
+          withProcessWait_ run $ \_ -> pure ()
+    ) params
