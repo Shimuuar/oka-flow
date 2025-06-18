@@ -6,6 +6,7 @@ module OKA.Flow.Std
   ( -- * Saved metadata
     SavedMeta(..)
   , stdSaveMeta
+  , stdSaveSomeMeta
   , narrowSavedMeta
     -- * Reports
   , ReportPDF
@@ -20,6 +21,7 @@ import Control.Monad.State.Strict
 import Data.Coerce
 import Data.Maybe
 import Data.Set                   qualified as Set
+import Data.Void
 import Effectful                  ((:>))
 import System.FilePath            ((</>))
 import System.Directory           (createFileLink,createDirectory)
@@ -57,6 +59,18 @@ instance (IsMeta a) => FlowInput (SavedMeta a) where
 stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
 stdSaveMeta a = scopeMeta $ do
   put $ toMetadata a
+  liftWorkflow () Action
+    { name = "std.SavedMeta"
+    , run  = \_ _meta args out -> do
+        case args of [] -> pure ()
+                     _  -> error "stdSaveMeta does not take any arguments"
+        createFileLink "meta.json" (out </> "saved.json")
+    } ()
+
+-- | Save metadata value so it could be passed as parameter.
+stdSaveSomeMeta :: Metadata -> Flow eff (Result (SavedMeta Metadata))
+stdSaveSomeMeta meta = scopeMeta $ do
+  put $ absurd <$> meta
   liftWorkflow () Action
     { name = "std.SavedMeta"
     , run  = \_ _meta args out -> do
