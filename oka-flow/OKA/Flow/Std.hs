@@ -182,12 +182,12 @@ stdConcatPDF reports = restrictMeta @() $ do
 --   environment variables.
 stdJupyter
   :: (ResultSet p, ProgConfigE :> eff)
-  => FilePath   -- ^ Notebook name
+  => [FilePath] -- ^ Notebooks name
   -> p          -- ^ Parameters to pass to notebook.
   -> Flow eff ()
 -- FIXME: We need mutex although not badly. No reason to run two
 --        notebooks concurrently
-stdJupyter notebook params = do
+stdJupyter notebooks params = do
   cfg <- askProgConfig
   let browser = case cfg.browser of
         Nothing -> []
@@ -205,6 +205,6 @@ stdJupyter notebook params = do
           let run = setEnv ([ ("JUPYTER_DATA_DIR",   dir_data)
                             , ("JUPYTER_CONFIG_DIR", dir_config)
                             ] ++ env_param ++ env)
-                  $ proc "jupyter" (["notebook" , notebook] <> browser)
+                  $ proc "jupyter" (("notebook" : notebooks) <> browser)
           withProcessWait_ run $ \_ -> pure ()
     ) params
