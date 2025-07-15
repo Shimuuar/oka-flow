@@ -8,9 +8,13 @@ import sys
 import os
 from dataclasses import dataclass
 
+from . import metadata
+
 __all__ = [
-    'Args', 'Parser', 'ParserState', 'Path', 'Many', 'parse'
+    'Args', 'Parser', 'ParserState', 'Path', 'PathSavedMeta', 'Many', 'parse'
 ]
+
+T = TypeVar('T', bound=metadata.IsMetaModel)
 
 ## ================================================================
 ## Argument list
@@ -94,6 +98,23 @@ class Path(Parser):
         match self.path:
             case None: return s
             case name: return os.path.join(s,name)
+
+
+@dataclass
+class PathSavedMeta(Parser, Generic[T]):
+    """Parse single path. If parameter is supplied it will be appended
+       to store path
+    """
+    ty: type[T]
+
+    def parse(self, st: ParserState) -> T:
+        if st.done():
+            raise ParseError("Not enough items")
+        s       = st.args[st.off]
+        st.off += 1
+        meta = metadata.fromSavedMeta(s)
+        return self.ty.fromMeta(meta)
+
 
 @dataclass
 class Many(Parser):
