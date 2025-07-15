@@ -123,8 +123,10 @@ class Some(Parser):
 
 
 
-def _parse(st: ParserState, p: Parser|tuple) -> Any:
+def _parse(st: ParserState, p: Parser|tuple|None) -> Any:
     match p:
+        case None:
+            return None
         case tuple():
             return tuple((_parse(st, q) for q in p))
         case _:
