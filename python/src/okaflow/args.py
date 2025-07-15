@@ -9,7 +9,7 @@ import os
 from dataclasses import dataclass
 
 __all__ = [
-    'Args', 'Parser', 'Path', 'Many', 'parse'
+    'Args', 'Parser', 'ParserState', 'Path', 'Many', 'parse'
 ]
 
 ## ================================================================
