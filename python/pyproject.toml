@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling >= 1.26"]
+requires = ["hatchling >= 1.24"]
 build-backend = "hatchling.build"
 
 
@@ -17,7 +17,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 license = "BSD-3-Clause"
-license-files = ["LICEN[CS]E*"]
+
 
 #[project.urls]
 #Homepage =
