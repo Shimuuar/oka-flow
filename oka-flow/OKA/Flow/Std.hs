@@ -182,7 +182,7 @@ stdConcatPDF reports = restrictMeta @() $ do
 --   environment variables.
 stdJupyter
   :: (ResultSet p, ProgConfigE :> eff)
-  => [FilePath] -- ^ Notebooks name
+  => [FilePath] -- ^ Notebooks' names
   -> p          -- ^ Parameters to pass to notebook.
   -> Flow eff ()
 -- FIXME: We need mutex although not badly. No reason to run two
