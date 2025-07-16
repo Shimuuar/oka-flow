@@ -18,6 +18,7 @@ module OKA.Flow.Std
   ) where
 
 import Control.Concurrent         (threadDelay)
+import Control.Exception
 import Control.Monad.State.Strict
 import Data.Coerce
 import Data.Maybe
@@ -250,12 +251,8 @@ stdJupyter notebooks params = do
                                    , "--NotebookApp.token=" ++ token
                                    ]
           withProcessWait_ run $ \_ -> do
-            -- Start browser process. We don't wait for it.
-            --
-            -- FIXME: I should wait until server start accepting
-            --        connections. But that requires adding network as
-            --        dependency.
-            threadDelay 100_000
+            -- Wait until server starts and launch browser.
+            waitForURL url
             _ <- startProcess (proc browser
                                 [ "http://localhost:"++show port++"/notebooks/"++path++"?token="++token
                                 | path <- notebooks_rel
@@ -276,3 +273,18 @@ commonPrefix (x:xs) = go x xs where
 
   sameHead y (a:as) | y==a = Just as
   sameHead _ _             = Nothing
+
+
+-- We use curl to check availability of URL. If there's no curl we simply won't wait.
+-- I don't want to add network
+waitForURL :: FilePath -> IO ()
+waitForURL url = handle (\(_::IOException) -> pure ()) $ loop backoff where
+    backoff = [50_000, 100_000, 200_000, 400_000]
+    loop []     = pure ()
+    loop (d:ds) = do
+      threadDelay d
+      runProcess curl >>= \case
+        ExitSuccess   -> pure ()
+        ExitFailure _ -> loop ds
+    curl = setStdout nullStream
+         $ proc "curl" ["-s", url]
