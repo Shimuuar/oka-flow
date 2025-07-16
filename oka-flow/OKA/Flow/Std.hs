@@ -17,17 +17,22 @@ module OKA.Flow.Std
   , stdJupyter
   ) where
 
+import Control.Concurrent         (threadDelay)
 import Control.Monad.State.Strict
 import Data.Coerce
 import Data.Maybe
+import Data.List                  (stripPrefix,isPrefixOf)
 import Data.Set                   qualified as Set
+import Data.ByteString.Short      qualified as SBS
 import Data.Void
 import Effectful                  ((:>))
-import System.FilePath            ((</>))
-import System.Directory           (createFileLink,createDirectory)
+import System.FilePath            ((</>), splitFileName,splitPath,joinPath)
+import System.Directory           (createFileLink,createDirectory,canonicalizePath)
 import System.Process.Typed
 import System.IO.Temp
 import System.Environment         (getEnvironment)
+import System.Random.Stateful     (uniformShortByteString, globalStdGen)
+import Text.Printf
 import GHC.Generics
 import GHC.Exts                   (proxy#)
 
@@ -178,6 +183,7 @@ stdConcatPDF reports = restrictMeta @() $ do
 -- Jupyter
 ----------------------------------------------------------------
 
+
 -- | Run jupyter notebook. Metadata and parameters are passed in
 --   environment variables.
 stdJupyter
@@ -185,16 +191,48 @@ stdJupyter
   => [FilePath] -- ^ Notebooks' names
   -> p          -- ^ Parameters to pass to notebook.
   -> Flow eff ()
+-- NOTE: We want to be able to start multiple notebooks at the same
+--       time. Jupyter doesn't seem to support that natively. We have
+--       to jump through quite a few of flaming hoops:
+--
+--       First we start notebook and that open corresponding links in
+--       brower. In order to do so we need to know both port and auth
+--       token.
+--
 -- FIXME: We need mutex although not badly. No reason to run two
 --        notebooks concurrently
 stdJupyter notebooks params = do
   cfg <- askProgConfig
   let browser = case cfg.browser of
-        Nothing -> []
-        Just b  -> ["--browser", b]
-  --
+        Nothing -> "chromium"
+        Just b  -> b
   basicLiftPhony ()
     (\_ meta param -> do
+      -- Generate auth token. I don't consider it to be important
+      -- security measure so random will do.
+      token <- base16 <$> uniformShortByteString 24 globalStdGen
+      let port = fromMaybe 9876 cfg.jupyterPort
+          url  = "http://localhost:"++show port++"/tree?token="++token
+      -- Jupyter doesn't print token if it's specified on command line
+      putStrLn $ "    Jupyter URL: " ++ url
+      -- Figure out notebook directory. We use common prefix as
+      -- heuristic.
+      --
+      -- NOTE: this code relies on directory names with trailing slash.
+      cfg_dir       <- fmap (++"/") <$> traverse canonicalizePath cfg.jupyterNotebookDir
+      notebooks_abs <- traverse canonicalizePath notebooks
+      let notebook_dir = case commonPrefix $ splitPath . fst . splitFileName <$> notebooks_abs of
+            [] -> fromMaybe "." cfg_dir
+            s  -> case cfg_dir of
+              Nothing -> dir
+              Just p | p `isPrefixOf` dir -> p
+                     | otherwise          -> dir
+              where dir = joinPath s
+      -- Notebook names relative to notebook directory
+      let notebooks_rel = case traverse (stripPrefix notebook_dir) notebooks_abs of
+            Just s  -> s
+            Nothing -> error "Error during processing notebooks"
+      -- Now we can start jupyter
       withParametersInEnv meta param $ \env_param -> do
         withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
           let dir_config  = tmp </> "config"
@@ -205,6 +243,36 @@ stdJupyter notebooks params = do
           let run = setEnv ([ ("JUPYTER_DATA_DIR",   dir_data)
                             , ("JUPYTER_CONFIG_DIR", dir_config)
                             ] ++ env_param ++ env)
-                  $ proc "jupyter" (("notebook" : notebooks) <> browser)
-          withProcessWait_ run $ \_ -> pure ()
+                  $ proc "jupyter" [ "notebook"
+                                   , "--no-browser"
+                                   , "--port=" ++ show port
+                                   , "--notebook-dir=" ++ notebook_dir
+                                   , "--NotebookApp.token=" ++ token
+                                   ]
+          withProcessWait_ run $ \_ -> do
+            -- Start browser process. We don't wait for it.
+            --
+            -- FIXME: I should wait until server start accepting
+            --        connections. But that requires adding network as
+            --        dependency.
+            threadDelay 100_000
+            _ <- startProcess (proc browser
+                                [ "http://localhost:"++show port++"/notebooks/"++path++"?token="++token
+                                | path <- notebooks_rel
+                                ])
+            pure ()
     ) params
+
+base16 :: SBS.ShortByteString -> String
+base16 = printf "%02x" <=< SBS.unpack
+
+commonPrefix :: forall a. Eq a => [[a]] -> [a]
+commonPrefix []     = []
+commonPrefix (x:xs) = go x xs where
+  go []     _     = []
+  go (a:as) other = case traverse (sameHead a) other of
+    Nothing     -> []
+    Just other' -> a : go as other'
+
+  sameHead y (a:as) | y==a = Just as
+  sameHead _ _             = Nothing
