@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveAnyClass       #-}
 {-# LANGUAGE MagicHash            #-}
 {-# LANGUAGE UndecidableInstances #-}
 -- |
@@ -20,20 +21,20 @@ module OKA.Flow.Std
 import Control.Concurrent         (threadDelay)
 import Control.Exception
 import Control.Monad.State.Strict
+import Control.Monad.Trans.Maybe
+import Data.Aeson                 qualified as JSON
 import Data.Coerce
 import Data.Maybe
-import Data.List                  (stripPrefix,isPrefixOf)
+import Data.List                  (stripPrefix,isPrefixOf,isSuffixOf)
 import Data.Set                   qualified as Set
-import Data.ByteString.Short      qualified as SBS
+import Data.ByteString.Lazy       qualified as BL
 import Data.Void
 import Effectful                  ((:>))
 import System.FilePath            ((</>), splitFileName,splitPath,joinPath)
-import System.Directory           (createFileLink,createDirectory,canonicalizePath)
+import System.Directory           (createFileLink,createDirectory,canonicalizePath,listDirectory)
 import System.Process.Typed
 import System.IO.Temp
 import System.Environment         (getEnvironment)
-import System.Random.Stateful     (uniformShortByteString, globalStdGen)
-import Text.Printf
 import GHC.Generics
 import GHC.Exts                   (proxy#)
 
@@ -149,7 +150,7 @@ instance (Generic a, GCollectReports (Rep a)) => CollectReports (Generically a) 
 
 class GCollectReports f where
   gcollectReports :: f p -> [Result ReportPDF]
-  
+
 deriving newtype instance GCollectReports f => GCollectReports (M1 c i f)
 
 instance (GCollectReports f, GCollectReports g) => GCollectReports (f :*: g) where
@@ -196,9 +197,9 @@ stdJupyter
 --       time. Jupyter doesn't seem to support that natively. We have
 --       to jump through quite a few of flaming hoops:
 --
---       First we start notebook and that open corresponding links in
---       brower. In order to do so we need to know both port and auth
---       token.
+--       First we start notebook and wait until it creates JSON file
+--       with server description, read it and then use parameters in
+--       it to start browser.
 --
 -- FIXME: We need mutex although not badly. No reason to run two
 --        notebooks concurrently
@@ -209,13 +210,6 @@ stdJupyter notebooks params = do
         Just b  -> b
   basicLiftPhony ()
     (\_ meta param -> do
-      -- Generate auth token. I don't consider it to be important
-      -- security measure so random will do.
-      token <- base16 <$> uniformShortByteString 24 globalStdGen
-      let port = fromMaybe 9876 cfg.jupyterPort
-          url  = "http://localhost:"++show port++"/tree?token="++token
-      -- Jupyter doesn't print token if it's specified on command line
-      putStrLn $ "    Jupyter URL: " ++ url
       -- Figure out notebook directory. We use common prefix as
       -- heuristic.
       --
@@ -246,22 +240,20 @@ stdJupyter notebooks params = do
                             ] ++ env_param ++ env)
                   $ proc "jupyter" [ "notebook"
                                    , "--no-browser"
-                                   , "--port=" ++ show port
                                    , "--notebook-dir=" ++ notebook_dir
-                                   , "--NotebookApp.token=" ++ token
                                    ]
           withProcessWait_ run $ \_ -> do
             -- Wait until server starts and launch browser.
-            waitForURL url
+            jp <- waitForJupyter dir_data >>= \case
+              Nothing -> error "stdJupyter: can't find server config"
+              Just a  -> pure a
             _ <- startProcess (proc browser
-                                [ "http://localhost:"++show port++"/notebooks/"++path++"?token="++token
+                                [ jp.url ++ "notebooks/"++path++"?token="++jp.token
                                 | path <- notebooks_rel
                                 ])
             pure ()
     ) params
 
-base16 :: SBS.ShortByteString -> String
-base16 = printf "%02x" <=< SBS.unpack
 
 commonPrefix :: forall a. Eq a => [[a]] -> [a]
 commonPrefix []     = []
@@ -277,14 +269,55 @@ commonPrefix (x:xs) = go x xs where
 
 -- We use curl to check availability of URL. If there's no curl we simply won't wait.
 -- I don't want to add network
-waitForURL :: FilePath -> IO ()
-waitForURL url = handle (\(_::IOException) -> pure ()) $ loop backoff where
-    backoff = [50_000, 100_000, 200_000, 400_000]
-    loop []     = pure ()
-    loop (d:ds) = do
-      threadDelay d
-      runProcess curl >>= \case
-        ExitSuccess   -> pure ()
-        ExitFailure _ -> loop ds
-    curl = setStdout nullStream
-         $ proc "curl" ["-s", url]
+waitForJupyter :: FilePath -> IO (Maybe JupyterConfig)
+waitForJupyter datadir = backoff delays wait where
+  delays = takeWhile (<5_000_000) $ iterate (*2) 100_000
+  wait   = runMaybeT $ do
+    cfg <- MaybeT $ findJupyterConfig datadir
+    MaybeT $ readJupyterConfig cfg
+
+backoff :: [Int] -> IO (Maybe a) -> IO (Maybe a)
+backoff delays action = go delays where
+  go [] = pure Nothing
+  go (t:ts) = threadDelay t >> action >>= \case
+    Nothing  -> go ts
+    a@Just{} -> pure a
+
+findJupyterConfig :: FilePath -> IO (Maybe FilePath)
+findJupyterConfig datadir = ignoreIOException $ do
+  let runtime_dir = datadir </> "runtime"
+  paths <- listDirectory runtime_dir
+  let cfg = [ nm
+            | nm <- paths
+            , "jpserver" `isPrefixOf` nm
+            , ".json"    `isSuffixOf` nm
+            ]
+  case cfg of
+    []   -> pure Nothing
+    [nm] -> pure $ Just (runtime_dir </> nm)
+    _    -> error "stdJupyter: something wrong with jupyter. Multiple configs"
+
+readJupyterConfig :: FilePath -> IO (Maybe JupyterConfig)
+readJupyterConfig path = ignoreIOException $ do
+  -- We may read file only partially due to races. So if we fail to
+  -- decode JSON it should be OK. But failure to parse valid JSON is
+  -- a problem
+  bs <- BL.readFile path
+  case JSON.decode bs of
+    Nothing -> pure Nothing
+    Just js -> case JSON.fromJSON js of
+      JSON.Error   e -> error $ "stdJupyter: Cannot parse jpserver....json: " ++ e
+      JSON.Success c -> pure (Just c)
+
+
+ignoreIOException :: IO (Maybe a) -> IO (Maybe a)
+ignoreIOException = handle (\(_::IOException) -> pure Nothing)
+
+-- | Parts of Jupyter server config generated on server start.
+--   We only read parts we're interested in
+data JupyterConfig = JupyterConfig
+  { token :: FilePath
+  , url   :: FilePath
+  }
+  deriving stock (Show,Generic)
+  deriving anyclass (JSON.FromJSON)

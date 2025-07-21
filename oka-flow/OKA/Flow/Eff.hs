@@ -151,8 +151,6 @@ data ProgConfig = ProgConfig
     -- ^ PDF reader to use. Uses xdg-open if not specified
   , browser :: Maybe FilePath
     -- ^ Browser to use
-  , jupyterPort :: Maybe Int
-    -- ^ Port for jupyter to use. Defaults to 9876
   , jupyterNotebookDir :: Maybe FilePath
     -- ^ Directory for jupyter notebooks.
   }
