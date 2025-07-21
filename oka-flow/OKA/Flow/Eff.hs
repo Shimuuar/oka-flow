@@ -20,6 +20,7 @@ module OKA.Flow.Eff
     -- * Configuration
   , ProgConfigE
   , ProgConfig(..)
+  , defaultProgConfig
   , runProgConfigE
   , askProgConfig
     -- * PRNG
@@ -156,6 +157,13 @@ data ProgConfig = ProgConfig
   }
   deriving stock (Show,Eq,Generic)
   deriving anyclass (YAML.FromJSON, YAML.ToJSON)
+
+defaultProgConfig :: ProgConfig
+defaultProgConfig = ProgConfig
+  { pdf                = Nothing
+  , browser            = Nothing
+  , jupyterNotebookDir = Nothing
+  }
 
 runProgConfigE :: ProgConfig -> Eff (ProgConfigE : es) a -> Eff es a
 runProgConfigE cfg = evalStaticRep (ProgConfigE cfg)
