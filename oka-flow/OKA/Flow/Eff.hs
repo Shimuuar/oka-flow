@@ -2,6 +2,8 @@
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE GADTs               #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE TypeFamilies        #-}
 -- |
 -- Standard effects for Flow monad
@@ -31,6 +33,8 @@ module OKA.Flow.Eff
 
 import Control.Exception
 import Control.Monad
+import Data.Aeson                   qualified as JSON
+import Data.Aeson                   ((.:?), (.!=), (.=))
 import Data.Coerce
 import Data.Yaml                    qualified as YAML
 import Data.Dynamic                 qualified as Dyn
@@ -154,15 +158,32 @@ data ProgConfig = ProgConfig
     -- ^ Browser to use
   , jupyterNotebookDir :: Maybe FilePath
     -- ^ Directory for jupyter notebooks.
+  , jupyterBrowser     :: !Bool
   }
   deriving stock (Show,Eq,Generic)
-  deriving anyclass (YAML.FromJSON, YAML.ToJSON)
+
+instance JSON.FromJSON ProgConfig where
+  parseJSON = JSON.withObject "ProgConfig" $ \o -> do
+    pdf                <- o .:? "pdf"
+    browser            <- o .:? "browser"
+    jupyterNotebookDir <- o .:? "jupyterNotebookDir"
+    jupyterBrowser     <- o .:? "jupyterBrowser" .!= False
+    pure ProgConfig{..}
+
+instance JSON.ToJSON ProgConfig where
+  toJSON ProgConfig{..} = JSON.object
+    [ "pdf"                .= pdf
+    , "browser"            .= browser
+    , "jupyterNotebookDir" .= jupyterNotebookDir
+    , "jupyterBrowser"     .= jupyterBrowser
+    ]
 
 defaultProgConfig :: ProgConfig
 defaultProgConfig = ProgConfig
   { pdf                = Nothing
   , browser            = Nothing
   , jupyterNotebookDir = Nothing
+  , jupyterBrowser     = False
   }
 
 runProgConfigE :: ProgConfig -> Eff (ProgConfigE : es) a -> Eff es a

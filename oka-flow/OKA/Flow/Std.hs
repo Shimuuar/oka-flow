@@ -247,10 +247,12 @@ stdJupyter notebooks params = do
             jp <- waitForJupyter dir_data >>= \case
               Nothing -> error "stdJupyter: can't find server config"
               Just a  -> pure a
-            _ <- startProcess (proc browser
-                                [ jp.url ++ "notebooks/"++path++"?token="++jp.token
-                                | path <- notebooks_rel
-                                ])
+            let nb_url = [ jp.url ++ "notebooks/"++path++"?token="++jp.token
+                         | path <- notebooks_rel
+                         ]
+                tree_url | cfg.jupyterBrowser = ((jp.url++"tree/"++"?token="++jp.token):)
+                         | otherwise          = id
+            _ <- startProcess (proc browser (tree_url nb_url))
             pure ()
     ) params
 
