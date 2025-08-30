@@ -55,7 +55,7 @@ import OKA.Flow.Graph
 import OKA.Flow.Types
 import OKA.Flow.Run
 import OKA.Flow.Tools
-import OKA.Flow.Resources
+import OKA.Flow.Core.Resources
 import OKA.Flow.Std
 import OKA.Flow.Util
 

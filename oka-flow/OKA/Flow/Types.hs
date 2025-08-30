@@ -22,8 +22,7 @@ import System.FilePath        ((</>))
 import GHC.Generics
 
 import OKA.Metadata           (Metadata)
-import OKA.Flow.Resources
-
+import OKA.Flow.Core.Resources
 
 ----------------------------------------------------------------
 -- Workflow primitives

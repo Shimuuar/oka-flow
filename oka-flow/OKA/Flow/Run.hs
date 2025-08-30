@@ -34,7 +34,7 @@ import System.Directory             (createDirectory,createDirectoryIfMissing,re
 import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Graph
-import OKA.Flow.Resources
+import OKA.Flow.Core.Resources
 import OKA.Flow.Types
 import OKA.Flow.Tools
 import OKA.Flow.Core.Types

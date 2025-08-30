@@ -67,7 +67,7 @@ import Effectful.State.Static.Local qualified as Eff
 import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Types
-import OKA.Flow.Resources
+import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Types
 
 ----------------------------------------------------------------
