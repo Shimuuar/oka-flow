@@ -107,10 +107,6 @@ isPhony = \case
   Phony{}       -> True
 
 
-----------------------------------------------------------------
--- Dataflow graph
-----------------------------------------------------------------
-
 -- | Metadata which is used in @Flow@. It contains both immediate
 --   values and promises which are loaded from outputs at execution
 --   time.
@@ -150,102 +146,6 @@ data FlowGraph a = FlowGraph
 ----------------------------------------------------------------
 -- Execution of the workflow
 ----------------------------------------------------------------
-
--- | Compute all hashes and resolve all nodes to corresponding paths
-hashFlowGraph :: FlowGraph () -> FlowGraph (Maybe StorePath)
-hashFlowGraph gr = res where
-  res      = gr & flowGraphL . mapped %~ hashFun oracle
-  oracle k = case res ^. flowGraphL . at k of
-    Nothing -> error "INTERNAL ERROR: flow graph is not consistent"
-    Just f  -> case f.output of
-      Nothing -> error "INTERNAL ERROR: dependence on PHONY node"
-      Just p  -> p
-
-hashFun :: (k -> StorePath) -> Fun k a -> Fun k (Maybe StorePath)
-hashFun oracle fun = fun
-  { output = case fun.workflow of
-      Phony{}                -> Nothing
-      Workflow (Action nm _) -> Just $ mkStorePath nm
-      WorkflowExe exe        -> Just $ mkStorePath exe.name
-  }
-  where
-    -- Partition 
-    mkStorePath name
-      = StorePath name
-      $ hashHashes
-      $ hashMeta ( runIdentity
-                 $ traverseMetadataMay (\_ -> pure Nothing) fun.metadata)
-      : hashFlowName name
-      : [ case oracle k of StorePath _ h -> h
-        | k <- fun.param        
-        ] ++ hashExtMeta oracle fun.metadata
-
-hashHashes :: [Hash] -> Hash
-hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks
-
-hashFlowName :: String -> Hash
-hashFlowName = Hash . T.encodeUtf8 . T.pack
-
-
-hashExtMeta :: forall k. (k -> StorePath) -> MetadataF k -> [Hash]
-hashExtMeta oracle meta = case extra [] of
-  [] -> []
-  hs -> Hash "?EXT_META?" : hs
-  where
-    -- Here we trying to be clever and collect keys using traversal and Const
-    --
-    -- NOTE: TypeReps inside metadata are sorted so traversal order is
-    --       well defined and we don't need to sort anything
-    extra
-      = appEndo $ getConst
-      $ traverseMetadata collectK meta
-    collectK :: forall x. IsMetaPrim x => k -> Const (Endo [Hash]) x
-    collectK k
-      = Const $ Endo
-      $ (hashTypeRep ty                        :)
-      . ((case oracle k of StorePath _ h -> h) :)
-      where
-        ty = typeRep (Proxy @x)
-
-
-
--- Compute hash of metadata
-hashMeta :: Metadata -> Hash
-hashMeta
-  = Hash
-  . SHA1.hashlazy
-  . JSONB.encodingToLazyByteString
-  . encodeToBuilder
-  . encodeMetadata
-
--- Hash TypeRep. Hopefully this scheme will be stable enough
-hashTypeRep :: TypeRep -> Hash
-hashTypeRep = Hash . SHA1.hash . T.encodeUtf8 . T.pack . showTy
-  where
-    showTy ty = case splitTyConApp ty of
-      (con,param) -> "("++intercalate " " (showCon con : map showTy param)++ ")"
-    showCon con = tyConModule con <> "." <> tyConName con
-
-
-encodeToBuilder :: JSON.Value -> JSONB.Encoding
-encodeToBuilder JSON.Null       = JSONB.null_
-encodeToBuilder (JSON.Bool b)   = JSONB.bool b
-encodeToBuilder (JSON.Number n) = JSONB.scientific n
-encodeToBuilder (JSON.String s) = JSONB.text s
-encodeToBuilder (JSON.Array v)  = jsArray v
-encodeToBuilder (JSON.Object m) = JSONB.dict JSONB.text encodeToBuilder
-  (\step z m0 -> foldr (\(k,v) a -> step (toText k) v a) z $ sortOn fst $ KM.toList m0)
-  m
-
-jsArray :: V.Vector JSON.Value -> JSONB.Encoding
-jsArray v
-  | V.null v  = JSONB.emptyArray_
-  | otherwise = JSONB.wrapArray
-              $  encodeToBuilder (V.unsafeHead v)
-             <@> V.foldr withComma (JSONB.Encoding mempty) (V.unsafeTail v)
-  where
-    withComma a z = JSONB.comma <@> encodeToBuilder a <@> z
-    JSONB.Encoding e1 <@> JSONB.Encoding e2 = JSONB.Encoding (e1 <> e2)
 
 -- | Remove duplicate nodes where different FunID correspond to same
 --   workflow
@@ -317,6 +217,109 @@ data FIDSet = FIDSet
   , wanted :: !(Set FunID) -- ^ We need to compute these workflows
   }
   deriving (Show)
+
+
+
+----------------------------------------------------------------
+-- Hashing
+----------------------------------------------------------------
+
+-- | Compute all hashes and resolve all nodes to corresponding paths
+hashFlowGraph :: FlowGraph () -> FlowGraph (Maybe StorePath)
+hashFlowGraph gr = res where
+  res      = gr & flowGraphL . mapped %~ hashFun oracle
+  oracle k = case res ^. flowGraphL . at k of
+    Nothing -> error "INTERNAL ERROR: flow graph is not consistent"
+    Just f  -> case f.output of
+      Nothing -> error "INTERNAL ERROR: dependence on PHONY node"
+      Just p  -> p
+
+hashFun :: (k -> StorePath) -> Fun k a -> Fun k (Maybe StorePath)
+hashFun oracle fun = fun
+  { output = case fun.workflow of
+      Phony{}                -> Nothing
+      Workflow (Action nm _) -> Just $ mkStorePath nm
+      WorkflowExe exe        -> Just $ mkStorePath exe.name
+  }
+  where
+    -- Partition 
+    mkStorePath name
+      = StorePath name
+      $ hashHashes
+      $ hashMeta ( runIdentity
+                 $ traverseMetadataMay (\_ -> pure Nothing) fun.metadata)
+      : hashFlowName name
+      : [ case oracle k of StorePath _ h -> h
+        | k <- fun.param        
+        ] ++ hashExtMeta oracle fun.metadata
+
+hashHashes :: [Hash] -> Hash
+hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks
+
+hashFlowName :: String -> Hash
+hashFlowName = Hash . T.encodeUtf8 . T.pack
+
+hashExtMeta :: forall k. (k -> StorePath) -> MetadataF k -> [Hash]
+hashExtMeta oracle meta = case extra [] of
+  [] -> []
+  hs -> Hash "?EXT_META?" : hs
+  where
+    -- Here we trying to be clever and collect keys using traversal and Const
+    --
+    -- NOTE: TypeReps inside metadata are sorted so traversal order is
+    --       well defined and we don't need to sort anything
+    extra
+      = appEndo $ getConst
+      $ traverseMetadata collectK meta
+    collectK :: forall x. IsMetaPrim x => k -> Const (Endo [Hash]) x
+    collectK k
+      = Const $ Endo
+      $ (hashTypeRep ty                        :)
+      . ((case oracle k of StorePath _ h -> h) :)
+      where
+        ty = typeRep (Proxy @x)
+
+
+
+-- Compute hash of metadata
+hashMeta :: Metadata -> Hash
+hashMeta
+  = Hash
+  . SHA1.hashlazy
+  . JSONB.encodingToLazyByteString
+  . encodeToBuilder
+  . encodeMetadata
+
+-- Hash TypeRep. Hopefully this scheme will be stable enough
+hashTypeRep :: TypeRep -> Hash
+hashTypeRep = Hash . SHA1.hash . T.encodeUtf8 . T.pack . showTy
+  where
+    showTy ty = case splitTyConApp ty of
+      (con,param) -> "("++intercalate " " (showCon con : map showTy param)++ ")"
+    showCon con = tyConModule con <> "." <> tyConName con
+
+
+encodeToBuilder :: JSON.Value -> JSONB.Encoding
+encodeToBuilder JSON.Null       = JSONB.null_
+encodeToBuilder (JSON.Bool b)   = JSONB.bool b
+encodeToBuilder (JSON.Number n) = JSONB.scientific n
+encodeToBuilder (JSON.String s) = JSONB.text s
+encodeToBuilder (JSON.Array v)  = jsArray v
+encodeToBuilder (JSON.Object m) = JSONB.dict JSONB.text encodeToBuilder
+  (\step z m0 -> foldr (\(k,v) a -> step (toText k) v a) z $ sortOn fst $ KM.toList m0)
+  m
+
+jsArray :: V.Vector JSON.Value -> JSONB.Encoding
+jsArray v
+  | V.null v  = JSONB.emptyArray_
+  | otherwise = JSONB.wrapArray
+              $  encodeToBuilder (V.unsafeHead v)
+             <@> V.foldr withComma (JSONB.Encoding mempty) (V.unsafeTail v)
+  where
+    withComma a z = JSONB.comma <@> encodeToBuilder a <@> z
+    JSONB.Encoding e1 <@> JSONB.Encoding e2 = JSONB.Encoding (e1 <> e2)
+
+
 
 ----------------------------------------------------------------
 -- Lens
