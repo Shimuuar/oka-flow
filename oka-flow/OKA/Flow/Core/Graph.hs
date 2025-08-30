@@ -24,8 +24,6 @@ module OKA.Flow.Core.Graph
     -- * Lens
   , flowTgtL
   , flowGraphL
-  , fidExistsL
-  , fidWantedL
   ) where
 
 import Control.Applicative
@@ -333,6 +331,3 @@ flowTgtL = lens (.targets) (\x s -> x {targets = s})
 
 flowGraphL :: Lens (FlowGraph a) (FlowGraph b) (Map FunID (Fun FunID a)) (Map FunID (Fun FunID b))
 flowGraphL = lens (.graph) (\FlowGraph{..} s -> FlowGraph{graph = s, ..})
-
-
-
