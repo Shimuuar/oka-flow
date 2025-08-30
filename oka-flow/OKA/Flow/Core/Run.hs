@@ -2,7 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 -- |
 -- Evaluator of dataflow graph.
-module OKA.Flow.Run
+module OKA.Flow.Core.Run
   ( FlowCtx(..)
   , FlowLogger(..)
   , runFlow

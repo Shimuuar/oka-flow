@@ -63,9 +63,9 @@ Library
         OKA.Flow.Core.Resources
         OKA.Flow.Core.Types
         OKA.Flow.Core.Flow
+        OKA.Flow.Core.Run
         --
         OKA.Flow
-        OKA.Flow.Run
         OKA.Flow.Types
         OKA.Flow.Eff
         OKA.Flow.Eff.Cache
