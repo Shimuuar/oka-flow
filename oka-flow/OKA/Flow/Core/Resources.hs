@@ -32,6 +32,7 @@ module OKA.Flow.Core.Resources
   , LockMemGB(..)
   ) where
 
+import Control.Applicative
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
@@ -57,15 +58,15 @@ data ResBox where
 
 -- | Data structure which provides pair of STM transaction which are
 --   used for acquiring and releasing resources.
-data Lock = Lock
-  { acquire :: ResourceSet -> STM ()
-  , release :: ResourceSet -> STM ()
+newtype Lock = Lock
+  { acquire :: ResourceSet -> STM (STM ())
   }
 
 instance Semigroup Lock where
-  Lock l1 u1 <> Lock l2 u2 = Lock (l1 <> l2) (u1 <> u2)
+  Lock l1 <> Lock l2 = Lock $ (liftA2 . liftA2) (>>) l1 l2
+
 instance Monoid Lock where
-  mempty = Lock mempty mempty
+  mempty = Lock mempty
 
 
 
@@ -124,10 +125,10 @@ withResources
   -> res         -- ^ Requested resources
   -> IO a        -- ^ Action to execute
   -> IO a
-withResources res r = bracket_ ini fini where
+withResources res r = bracket ini fini . const where
   lock = resourceLock r
   ini  = atomically $ lock.acquire res
-  fini = atomically $ lock.release res
+  fini = atomically
 
 
 ----------------------------------------------------------------
@@ -146,8 +147,8 @@ instance Typeable a => Resource (ResAsMutex a) where
       , \_ -> putTMVar  lock ()
       )
   resourceLock (ResAsMutex a) = Lock
-    { acquire = basicRequestResource a
-    , release = basicReleaseResource a
+    { acquire = \r -> do basicRequestResource a r
+                         pure $ basicReleaseResource a r
     }
 
 -- | Derive resource where there're N instance of resource and we
@@ -172,8 +173,8 @@ instance (Typeable a, Coercible a Int) => Resource (ResAsCounter a) where
       )
     where ty = typeOf (undefined :: a)
   resourceLock (ResAsCounter a) = Lock
-    { acquire = basicRequestResource a
-    , release = basicReleaseResource a
+    { acquire = \r -> do basicRequestResource a r
+                         pure $ basicReleaseResource a r
     }
 
 

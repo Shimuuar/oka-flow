@@ -154,7 +154,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
   -- applying data loaded from
   meta <- traverseMetadata (lookupExtCache ext_meta) fun.metadata
   -- Request resources
-  atomically $ fun.resources.acquire ctx.res
+  release <- atomically $ fun.resources.acquire ctx.res
   -- Run action
   case fun.workflow of
     -- Prepare normal action. We first create output directory and
@@ -165,7 +165,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
     Phony    act            -> act.run ctx.res meta params
   -- Signal that we successfully completed execution
   putMVar (fst fun.output) ()
-  atomically $ fun.resources.release ctx.res
+  atomically release
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output
