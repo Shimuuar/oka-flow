@@ -22,10 +22,10 @@ import GHC.Generics     (Generic)
 import GHC.TypeLits
 
 import OKA.Metadata
-import OKA.Flow.Graph
-import OKA.Flow.Run
+import OKA.Flow.Core.Graph
+import OKA.Flow.Core.Run
 import OKA.Flow.Std
-import OKA.Flow.Resources
+import OKA.Flow.Core.Resources
 import OKA.Flow.Eff.Cache
 import OKA.Flow
 
