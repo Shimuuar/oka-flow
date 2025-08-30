@@ -49,7 +49,7 @@ import System.FilePath              ((</>))
 import System.Random.Stateful
 import GHC.Generics                 (Generic)
 
-import OKA.Flow.Core.Graph
+import OKA.Flow.Core.Flow
 import OKA.Metadata
 
 

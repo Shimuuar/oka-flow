@@ -32,7 +32,6 @@ import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.Except
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
 import Data.ByteString.Lazy         qualified as BL

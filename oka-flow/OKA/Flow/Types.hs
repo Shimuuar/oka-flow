@@ -7,16 +7,8 @@ module OKA.Flow.Types
     ResultSet(..)
   ) where
 
-import Data.ByteString        (ByteString)
-import Data.ByteString.Char8  qualified as BC8
-import Data.ByteString.Base16 qualified as Base16
 import Data.Coerce
-import System.FilePath        ((</>))
 import GHC.Generics
-
-import OKA.Metadata           (Metadata)
-import OKA.Flow.Core.Resources
-
 
 import OKA.Flow.Core.Types
 

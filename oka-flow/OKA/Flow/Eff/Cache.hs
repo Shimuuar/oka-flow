@@ -20,7 +20,8 @@ import Effectful.Dispatch.Dynamic
 import Effectful.State.Static.Local qualified as Eff
 
 import OKA.Flow
-import OKA.Flow.Core.Graph
+import OKA.Flow.Core.Flow
+
 
 -- | Effect which provides ability to create caches.
 data CacheE :: Effect where
