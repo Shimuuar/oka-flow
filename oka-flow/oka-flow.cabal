@@ -59,11 +59,11 @@ Library
                   , random               >=1.2
   Exposed-modules:
         -- Core modules
-        OKA.Flow.Core.Types
+        OKA.Flow.Core.Graph
         OKA.Flow.Core.Resources
+        OKA.Flow.Core.Types
         --
         OKA.Flow
-        OKA.Flow.Graph
         OKA.Flow.Run
         OKA.Flow.Types
         OKA.Flow.Eff

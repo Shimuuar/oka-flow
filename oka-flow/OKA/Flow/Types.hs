@@ -3,15 +3,8 @@
 -- Basic data types used in definition of dataflow program
 module OKA.Flow.Types
   ( -- * Workflow primitives
-    Action(..)
-  , PhonyAction(..)
-  , Executable(..)
-  , Workflow(..)
-  , isPhony
     -- * Store objects API
-  , FunID(..)
-  , Result(..)
-  , ResultSet(..)
+    ResultSet(..)
   ) where
 
 import Data.ByteString        (ByteString)
@@ -24,55 +17,8 @@ import GHC.Generics
 import OKA.Metadata           (Metadata)
 import OKA.Flow.Core.Resources
 
-----------------------------------------------------------------
--- Workflow primitives
-----------------------------------------------------------------
 
--- | Single action to be performed. It contains both workflow name and
---   action to pefgorm workflow
-data Action = Action
-  { name :: String
-    -- ^ Name of a workflow
-  , run  :: ResourceSet -> Metadata -> [FilePath] -> FilePath -> IO ()
-    -- ^ Execute action on store
-  }
-
--- | Phony action which is executed always and doesn't produce any output
-newtype PhonyAction = PhonyAction
-  { run :: ResourceSet -> Metadata -> [FilePath] -> IO ()
-  }
-
--- | Action which execute executable. It should be always used if one
---   want to call external executable. This way executor can correctly
---   pass metadata to it.
-data Executable = Executable
-  { name :: String
-    -- ^ Name of a workflow
-  , executable :: FilePath
-    -- ^ Executable to start
-  , io         :: ResourceSet -> IO ()
-    -- ^ IO action which could be executed to prepare program.
-  }
-
-
-
--- | Descritpion of workflow function. It knows how to build
-data Workflow
-  = Workflow Action
-    -- ^ Standard workflow which executes haskell action
-  | WorkflowExe Executable
-    -- ^ Target which run executable
-  | Phony    PhonyAction
-    -- ^ Phony target which always executes action
-
-
-isPhony :: Workflow -> Bool
-isPhony = \case
-  Workflow{}    -> False
-  WorkflowExe{} -> False
-  Phony{}       -> True
-
-
+import OKA.Flow.Core.Types
 
 ----------------------------------------------------------------
 -- Store objects and interaction
@@ -121,18 +67,3 @@ instance (GResultSet f, GResultSet g) => GResultSet (f :*: g) where
 
 instance (ResultSet a) => GResultSet (K1 i a) where
   gtoResultSet = coerce (toResultSet @a)
-
-
-
-----------------------------------------------------------------
--- Dataflow graph
-----------------------------------------------------------------
-
--- | Internal identifier of dataflow function in a graph.
-newtype FunID = FunID Int
-  deriving (Show,Eq,Ord)
-
--- | Opaque handle to result of evaluation of single dataflow
---   function. It doesn't contain any real data and in fact is just a
---   promise to evaluate result.
-newtype Result a = Result FunID

@@ -4,9 +4,16 @@
 {-# LANGUAGE RecordWildCards     #-}
 -- |
 -- Implementation of dataflow graph.
-module OKA.Flow.Graph
+module OKA.Flow.Core.Graph
   ( -- * Dataflow graph
-    Fun(..)
+    Action(..)
+  , PhonyAction(..)
+  , Executable(..)
+  , Workflow(..)
+  , isPhony
+  , FunID(..)
+  , Result(..)
+  , Fun(..)
   , FlowGraph(..)
   , MetadataFlow
     -- * Flow monad and primitives
@@ -69,6 +76,55 @@ import OKA.Metadata.Meta
 import OKA.Flow.Types
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Types
+
+
+----------------------------------------------------------------
+-- Workflow primitives
+----------------------------------------------------------------
+
+-- | Single action to be performed. It contains both workflow name and
+--   action to pefgorm workflow
+data Action = Action
+  { name :: String
+    -- ^ Name of a workflow
+  , run  :: ResourceSet -> Metadata -> [FilePath] -> FilePath -> IO ()
+    -- ^ Execute action on store
+  }
+
+-- | Phony action which is executed always and doesn't produce any output
+newtype PhonyAction = PhonyAction
+  { run :: ResourceSet -> Metadata -> [FilePath] -> IO ()
+  }
+
+-- | Action which execute executable. It should be always used if one
+--   want to call external executable. This way executor can correctly
+--   pass metadata to it.
+data Executable = Executable
+  { name :: String
+    -- ^ Name of a workflow
+  , executable :: FilePath
+    -- ^ Executable to start
+  , io         :: ResourceSet -> IO ()
+    -- ^ IO action which could be executed to prepare program.
+  }
+
+
+
+-- | Descritpion of workflow function. It knows how to build
+data Workflow
+  = Workflow Action
+    -- ^ Standard workflow which executes haskell action
+  | WorkflowExe Executable
+    -- ^ Target which run executable
+  | Phony    PhonyAction
+    -- ^ Phony target which always executes action
+
+
+isPhony :: Workflow -> Bool
+isPhony = \case
+  Workflow{}    -> False
+  WorkflowExe{} -> False
+  Phony{}       -> True
 
 ----------------------------------------------------------------
 -- Dataflow graph

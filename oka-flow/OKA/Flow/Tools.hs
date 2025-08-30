@@ -46,6 +46,7 @@ import System.Posix.Signals         (signalProcess, sigINT)
 import OKA.Metadata
 import OKA.Flow.Types
 import OKA.Flow.Core.Resources
+import OKA.Flow.Core.Types
 import OKA.Flow.Parser
 
 
