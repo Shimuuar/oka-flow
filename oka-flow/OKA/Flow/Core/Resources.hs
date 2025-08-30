@@ -53,7 +53,7 @@ newtype ResourceSet = ResourceSet (Map.Map TypeRep ResBox)
   deriving newtype (Semigroup, Monoid)
 
 data ResBox where
-  ResBox :: Typeable a => (a -> STM (), a -> STM ()) -> ResBox
+  ResBox :: Typeable a => (a -> STM ()) -> (a -> STM ()) -> ResBox
 
 
 -- | Data structure which provides pair of STM transaction which are
@@ -76,8 +76,8 @@ basicAddResource
   => ResourceSet                -- ^ set of resources
   -> (a -> STM (), a -> STM ()) -- ^ Pair of request\/release functions
   -> ResourceSet
-basicAddResource (ResourceSet m) fun = do
-  ResourceSet $ Map.insert (typeOf (undefined :: a)) (ResBox fun) m
+basicAddResource (ResourceSet m) (l,u) = do
+  ResourceSet $ Map.insert (typeOf (undefined :: a)) (ResBox l u) m
 
 -- | Primitive for requesting resource for evaluation. Should be only
 --   used for 'Resource' instances definition
@@ -89,7 +89,7 @@ basicRequestResource a (ResourceSet m) =
       : [ " - " ++ show k
         | k <- Map.keys m
         ]
-    Just (ResBox (lock,_))
+    Just (ResBox lock _)
       | Just lock' <- cast lock -> lock' a
       | otherwise               -> error $ "requestResource: INTERNAL ERROR"
 
@@ -99,7 +99,7 @@ basicReleaseResource :: forall a. Typeable a => a -> ResourceSet -> STM ()
 basicReleaseResource a (ResourceSet m) =
   case typeOf a `Map.lookup` m of
     Nothing -> error $ "releaseResource: " ++ show (typeOf a) ++ " is not available"
-    Just (ResBox (_,unlock))
+    Just (ResBox _ unlock)
       | Just unlock' <- cast unlock -> unlock' a
       | otherwise                   -> error $ "requestResource: INTERNAL ERROR"
 
