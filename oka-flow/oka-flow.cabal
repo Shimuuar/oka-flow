@@ -58,6 +58,9 @@ Library
                   , yaml
                   , random               >=1.2
   Exposed-modules:
+        -- Core modules
+        OKA.Flow.Core.Types
+        --
         OKA.Flow
         OKA.Flow.Graph
         OKA.Flow.Run

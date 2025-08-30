@@ -68,6 +68,7 @@ import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Types
 import OKA.Flow.Resources
+import OKA.Flow.Core.Types
 
 ----------------------------------------------------------------
 -- Dataflow graph
