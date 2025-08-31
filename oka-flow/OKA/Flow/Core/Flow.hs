@@ -168,6 +168,10 @@ basicLiftExe
 basicLiftExe res exe p = basicLiftWorkflow res (WorkflowExe exe) p
 
 
+----------------------------------------------------------------
+-- Lens
+----------------------------------------------------------------
+
 stMetaL :: Lens' FlowSt MetadataFlow
 stMetaL = lens (.meta) (\FlowSt{..} x -> FlowSt{meta=x, ..})
 

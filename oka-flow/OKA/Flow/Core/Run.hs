@@ -12,7 +12,6 @@ import Control.Concurrent.Async
 import Control.Concurrent.MVar
 import Control.Exception
 import Control.Lens
-import Control.Monad.STM
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
@@ -39,7 +38,7 @@ import OKA.Flow.Core.Resources
 import OKA.Flow.Types
 import OKA.Flow.Tools
 import OKA.Flow.Core.Types
-
+import OKA.Flow.Util           (once)
 
 ----------------------------------------------------------------
 --
@@ -128,7 +127,6 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
   where
     addTargets r = flowTgtL %~ mappend (Set.fromList (toResultSet r))
     targetExists path = doesDirectoryExist (ctx.root </> storePath path)
-
 
 -- Add MVars to each node of graph. They are used to block evaluator
 -- until all dependencies are ready
@@ -286,14 +284,3 @@ prepareExtMetaCache ctx gr targets = do
         Right js -> case decodeMetadataPrimEither js of
           Left  e -> throw e
           Right a -> pure a
-
--- | Return action that will perform action exactly once
-once :: IO a -> IO (IO a)
-once action = do
-  cache <- newMVar Nothing
-  return $ readMVar cache >>= \case
-    Just a  -> pure a
-    Nothing -> modifyMVar cache $ \case
-      Just a  -> return (Just a, a)
-      Nothing -> do a <- action
-                    return (Just a, a)
