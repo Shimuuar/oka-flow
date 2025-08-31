@@ -5,6 +5,12 @@ module OKA.Flow.Util
     typeName
     -- * Concurrency
   , once
+    -- ** Barrier
+  , Barrier
+  , newBarrier
+  , newOpenBarrier
+  , checkBarrier
+  , clearBarrier
   ) where
 
 import Control.Concurrent.MVar
@@ -25,3 +31,20 @@ once action = do
       Just a  -> return (Just a, a)
       Nothing -> do a <- action
                     return (Just a, a)
+
+
+-- | Barrier which blocks thread until it's cleared
+newtype Barrier = Barrier (MVar ())
+
+newBarrier :: IO Barrier
+newBarrier = Barrier <$> newEmptyMVar
+
+newOpenBarrier :: IO Barrier
+newOpenBarrier = Barrier <$> newMVar ()
+  
+checkBarrier :: Barrier -> IO ()
+checkBarrier (Barrier mv) = readMVar mv
+
+clearBarrier :: Barrier -> IO ()
+clearBarrier (Barrier mv) = () <$ tryPutMVar mv ()
+

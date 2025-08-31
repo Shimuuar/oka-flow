@@ -9,7 +9,6 @@ module OKA.Flow.Core.Run
   ) where
 
 import Control.Concurrent.Async
-import Control.Concurrent.MVar
 import Control.Exception
 import Control.Lens
 import Data.Aeson                   qualified as JSON
@@ -38,7 +37,7 @@ import OKA.Flow.Core.Resources
 import OKA.Flow.Types
 import OKA.Flow.Tools
 import OKA.Flow.Core.Types
-import OKA.Flow.Util           (once)
+import OKA.Flow.Util
 
 ----------------------------------------------------------------
 --
@@ -87,6 +86,11 @@ data FlowCtx eff = FlowCtx
   }
 
 
+data Barricaded a = Barricaded
+  { barrier :: Barrier
+  , val     :: a
+  }
+
 ----------------------------------------------------------------
 -- Execution
 ----------------------------------------------------------------
@@ -130,24 +134,24 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
 
 -- Add MVars to each node of graph. They are used to block evaluator
 -- until all dependencies are ready
-addMVars :: FIDSet -> FlowGraph a -> IO (FlowGraph (MVar (), a))
+addMVars :: FIDSet -> FlowGraph a -> IO (FlowGraph (Barricaded a))
 addMVars FIDSet{exists}
   = traverseOf flowGraphL
   $ Map.traverseWithKey $ \fid fun -> do
-      v <- if | fid `Set.member` exists -> newMVar ()
-              | otherwise               -> newEmptyMVar
-      pure ((v,) <$> fun)
+      v <- if | fid `Set.member` exists -> newOpenBarrier
+              | otherwise               -> newBarrier
+      pure (Barricaded v <$> fun)
 
 -- Prepare functixon for evaluation
 prepareFun
-  :: FlowCtx eff                          -- Evaluation context
-  -> FlowGraph (MVar (), Maybe StorePath) -- Full dataflow graph
-  -> ExtMetaCache                         -- External metadata
-  -> Fun FunID (MVar (), Maybe StorePath) -- Function to evaluate
+  :: FlowCtx eff                              -- Evaluation context
+  -> FlowGraph (Barricaded (Maybe StorePath)) -- Full dataflow graph
+  -> ExtMetaCache                             -- External metadata
+  -> Fun FunID (Barricaded (Maybe StorePath)) -- Function to evaluate
   -> IO ()
 prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ do
   -- Check that all function parameters are already evaluated:
-  for_ fun.param $ \fid -> readMVar (fst $ outputOf fid)
+  for_ fun.param $ \fid -> checkBarrier (outputOf fid).barrier
   -- Compute metadata which should be passed to the workflow by
   -- applying data loaded from
   meta <- traverseMetadata (lookupExtCache ext_meta) fun.metadata
@@ -161,7 +165,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
       -- Execute phony action. We don't need to bother with setting up output
       Phony    act            -> act.run ctx.res meta params
     -- Signal that we successfully completed execution
-    putMVar (fst fun.output) ()
+    clearBarrier fun.output.barrier
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output
@@ -170,8 +174,8 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
     paramP = toPath . outputOf <$> fun.param  -- Parameters relative to store
     params = [ ctx.root </> p | p <- paramP ] -- Parameters as real path
     --
-    toPath (_,Just path) = storePath path
-    toPath (_,Nothing  ) = error "INTERNAL ERROR: dependence on PHONY node"
+    toPath (Barricaded _ (Just path)) = storePath path
+    toPath (Barricaded _ Nothing    ) = error "INTERNAL ERROR: dependence on PHONY node"
     -- Execution of haskell action
     prepareNormal meta action = normalExecution meta $ \build -> do
       action meta params build
@@ -181,25 +185,24 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
       runExternalProcess exe.executable meta (build:params)
     -- Standard wrapper for execution of workflows that create outputs
     normalExecution meta action = do
-      let path  = case fun.output of
-            (_, Just p) -> p
-            _           -> error "INTERNAL ERROR: phony node treated as normal"
+      let path  = case fun.output.val of
+            Just p -> p
+            _      -> error "INTERNAL ERROR: phony node treated as normal"
       ctx.logger.start path
       t1 <- getCurrentTime
       withBuildDirectory ctx.root path $ \build -> do
         BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
         writeFile    (build </> "deps.txt")  $ unlines paramP
-        () <- action build
-        pure ()
+        action build
       t2 <- getCurrentTime
       ctx.logger.done path (diffUTCTime t2 t1)
 
 
 
 -- Report crash in case of exception
-crashReport :: FlowLogger -> Fun i (a, Maybe StorePath) -> IO x -> IO x
+crashReport :: FlowLogger -> Fun i (Barricaded (Maybe StorePath)) -> IO x -> IO x
 crashReport logger fun = handle $ \e0@(SomeException e) -> do
-  let path = snd fun.output
+  let path = fun.output.val
   if | Just AsyncCancelled <- cast e
        -> pure ()
      | Just (SomeAsyncException e') <- cast e
@@ -247,7 +250,7 @@ lookupExtCache (ExtMetaCache cache) fid =
 
 prepareExtMetaCache
   :: FlowCtx eff
-  -> FlowGraph (MVar (), Maybe StorePath)
+  -> FlowGraph (Barricaded (Maybe StorePath))
   -> FIDSet
   -> IO ExtMetaCache
 prepareExtMetaCache ctx gr targets = do
@@ -266,16 +269,16 @@ prepareExtMetaCache ctx gr targets = do
       ( ( (typeRep (Proxy @a), fid)
         , SomeExtMeta $ if
             | fid `Set.member` targets.wanted ->
-                 do readMVar (fst $ (gr.graph ! fid).output)
+                 do checkBarrier (gr.graph ! fid).output.barrier
                     readMeta @a path
             | otherwise ->
                 do readMeta @a path
         )
       :)
       where
-        path = case (gr.graph ! fid).output of
-          (_,Just p)  -> ctx.root </> storePath p </> "saved.json"
-          (_,Nothing) -> error "Dependence on PHONY target"
+        path = case (gr.graph ! fid).output.val of
+          Just p  -> ctx.root </> storePath p </> "saved.json"
+          Nothing -> error "Dependence on PHONY target"
     --
     readMeta :: IsMetaPrim a => FilePath -> IO a
     readMeta path = do
