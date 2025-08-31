@@ -153,19 +153,17 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
   -- Compute metadata which should be passed to the workflow by
   -- applying data loaded from
   meta <- traverseMetadata (lookupExtCache ext_meta) fun.metadata
-  -- Request resources
-  atomically $ fun.resources.acquire ctx.res
-  -- Run action
-  case fun.workflow of
-    -- Prepare normal action. We first create output directory and
-    -- write everything there. After we're done we rename it.
-    Workflow (Action _ act) -> prepareNormal meta (act ctx.res)
-    WorkflowExe exe         -> prepareExe    meta exe
-    -- Execute phony action. We don't need to bother with setting up output
-    Phony    act            -> act.run ctx.res meta params
-  -- Signal that we successfully completed execution
-  putMVar (fst fun.output) ()
-  atomically $ fun.resources.release ctx.res
+  -- Request resources & run action
+  withResources ctx.res fun.resources $ do
+    case fun.workflow of
+      -- Prepare normal action. We first create output directory and
+      -- write everything there. After we're done we rename it.
+      Workflow (Action _ act) -> prepareNormal meta (act ctx.res)
+      WorkflowExe exe         -> prepareExe    meta exe
+      -- Execute phony action. We don't need to bother with setting up output
+      Phony    act            -> act.run ctx.res meta params
+    -- Signal that we successfully completed execution
+    putMVar (fst fun.output) ()
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output
