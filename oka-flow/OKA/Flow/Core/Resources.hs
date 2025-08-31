@@ -12,7 +12,7 @@
 -- Note that we treat tuples as collections. @()@ is used to denote
 -- request of no resource and for example @(A,B)@ requests both @A@
 -- and @B@.
-module OKA.Flow.Resources
+module OKA.Flow.Core.Resources
   ( -- * Resources
     ResourceSet
   , Lock(..)

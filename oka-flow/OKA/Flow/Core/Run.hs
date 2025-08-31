@@ -2,7 +2,7 @@
 {-# LANGUAGE RecordWildCards #-}
 -- |
 -- Evaluator of dataflow graph.
-module OKA.Flow.Run
+module OKA.Flow.Core.Run
   ( FlowCtx(..)
   , FlowLogger(..)
   , runFlow
@@ -33,11 +33,12 @@ import System.Directory             (createDirectory,createDirectoryIfMissing,re
 
 import OKA.Metadata
 import OKA.Metadata.Meta
-import OKA.Flow.Graph
-import OKA.Flow.Resources
+import OKA.Flow.Core.Graph
+import OKA.Flow.Core.Flow
+import OKA.Flow.Core.Resources
 import OKA.Flow.Types
 import OKA.Flow.Tools
-
+import OKA.Flow.Core.Types
 
 
 ----------------------------------------------------------------

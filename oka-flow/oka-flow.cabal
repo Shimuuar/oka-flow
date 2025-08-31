@@ -58,10 +58,14 @@ Library
                   , yaml
                   , random               >=1.2
   Exposed-modules:
+        -- Core modules
+        OKA.Flow.Core.Graph
+        OKA.Flow.Core.Resources
+        OKA.Flow.Core.Types
+        OKA.Flow.Core.Flow
+        OKA.Flow.Core.Run
+        --
         OKA.Flow
-        OKA.Flow.Graph
-        OKA.Flow.Run
-        OKA.Flow.Resources
         OKA.Flow.Types
         OKA.Flow.Eff
         OKA.Flow.Eff.Cache
