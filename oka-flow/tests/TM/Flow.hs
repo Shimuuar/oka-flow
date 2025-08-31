@@ -226,7 +226,6 @@ tests = testGroup "Run flow"
 withSimpleFlow :: (FlowCtx '[CacheE,IOE] -> IO a) -> IO a
 withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
   res <- createResource (LockCoreCPU 4)
-     =<< pure mempty
   action FlowCtx { root      = dir
                  , runEffect = runCacheE
                  , res       = res

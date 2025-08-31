@@ -106,7 +106,7 @@ want a = Flow $ Eff.modify $ stGraphL . flowTgtL %~ (<> Set.fromList (toResultSe
 -- | Basic primitive for creating workflows. It doesn't offer any type
 --   safety so it's better to use other tools
 basicLiftWorkflow
-  :: (ResultSet params, Resource res)
+  :: (ResultSet params, ResourceClaim res)
   => res      -- ^ Resource required by workflow
   -> Workflow -- ^ Workflow to be executed
   -> params   -- ^ Parameters of workflow
@@ -127,7 +127,7 @@ basicLiftWorkflow resource exe p = Flow $ do
     { workflow  = exe
     , metadata  = st.meta
     , output    = ()
-    , resources = resourceLock resource
+    , resources = claimResource resource
     , param     = res
     }
   return $ Result fid
@@ -136,7 +136,7 @@ basicLiftWorkflow resource exe p = Flow $ do
 --
 --   This function does not provide any type safety by itself!
 liftWorkflow
-  :: (ResultSet params, Resource res)
+  :: (ResultSet params, ResourceClaim res)
   => res    -- ^ Resources required by workflow
   -> Action -- ^ Action to execute
   -> params -- ^ Parameters
@@ -145,7 +145,7 @@ liftWorkflow res action p = basicLiftWorkflow res (Workflow action) p
 
 -- | Lift phony workflow (not checked)
 basicLiftPhony
-  :: (ResultSet params, Resource res)
+  :: (ResultSet params, ResourceClaim res)
   => res
      -- ^ Resources required by workflow
   -> (ResourceSet -> Metadata -> [FilePath] -> IO ())
@@ -157,7 +157,7 @@ basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony (PhonyAction ex
 
 -- | Lift executable into workflow
 basicLiftExe
-  :: (ResultSet params, Resource res)
+  :: (ResultSet params, ResourceClaim res)
   => res
      -- ^ Resources required by workflow
   -> Executable

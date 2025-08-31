@@ -35,7 +35,8 @@ module OKA.Flow
   , liftPhony
   , basicLiftExe
     -- * Resources
-  , Resource(..)
+  , ResourceClaim(..)
+  , ResourceDef(..)
   , ResAsMutex(..)
   , ResAsCounter(..)
     -- * Execution
@@ -79,7 +80,7 @@ addExtMeta (Result fid) = Flow $ do
 
 -- | Lift phony action using standard tools
 liftPhony
-  :: (Resource res, FlowArgument args)
+  :: (ResourceClaim res, FlowArgument args)
   => res
      -- ^ Resources required by workflow
   -> (Metadata -> args -> IO ())

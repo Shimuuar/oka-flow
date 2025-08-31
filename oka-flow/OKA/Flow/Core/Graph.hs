@@ -120,7 +120,7 @@ data Fun k v = Fun
     --   tries to acquire resources and return actual function to run.
   , metadata  :: MetadataF k
     -- ^ Metadata that should be supplied to the workflow
-  , resources :: Lock
+  , resources :: Claim
     -- ^ Resources required by workflow
   , param     :: [k]
     -- ^ Parameters to workflow.
