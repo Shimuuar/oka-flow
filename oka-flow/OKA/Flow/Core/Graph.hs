@@ -30,6 +30,7 @@ import Control.Applicative
 import Control.Lens
 import Control.Monad
 import Crypto.Hash.SHA1             qualified as SHA1
+import Data.ByteString.Builder      qualified as BB
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Encoding          qualified as JSONB
 import Data.Aeson.Encoding.Internal qualified as JSONB
@@ -39,7 +40,7 @@ import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
 import Data.Coerce
 import Data.Monoid                  (Endo(..))
-import Data.List                    (sortOn,intercalate)
+import Data.List                    (sortOn,intercalate,intersperse)
 import Data.List.NonEmpty           qualified as NE
 import Data.List.NonEmpty           (NonEmpty(..))
 import Data.Map.Strict              (Map, (!))
@@ -237,9 +238,9 @@ hashFlowGraph gr = res where
 hashFun :: (k -> StorePath) -> Fun k a -> Fun k (Maybe StorePath)
 hashFun oracle fun = fun
   { output = case fun.workflow of
-      Phony{}                -> Nothing
-      Workflow (Action nm _) -> Just $ mkStorePath nm
-      WorkflowExe exe        -> Just $ mkStorePath exe.name
+      Phony{}         -> Nothing
+      Workflow    a   -> Just $ mkStorePath a.name
+      WorkflowExe exe -> Just $ mkStorePath exe.name
   }
   where
     -- Partition 
@@ -249,17 +250,26 @@ hashFun oracle fun = fun
       $ hashMeta ( runIdentity
                  $ traverseMetadataMay (\_ -> pure Nothing) fun.metadata)
       : hashFlowName name
-      -- FIXME: hash S expression
-      : []
-      -- : [ case oracle k of StorePath _ h -> h
-      --   | k <- fun.param        
-      --   ] ++ hashExtMeta oracle fun.metadata
+      : hashS oracle fun.param
+      : hashExtMeta oracle fun.metadata
 
 hashHashes :: [Hash] -> Hash
 hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks
 
 hashFlowName :: String -> Hash
 hashFlowName = Hash . T.encodeUtf8 . T.pack
+
+hashS :: (k -> StorePath) -> S k -> Hash
+hashS oracle s0
+  = Hash $ SHA1.hashlazy $ BB.toLazyByteString $ BB.string7 "?ARGS?" <> go s0
+  where
+    go = \case
+      Param k -> BB.char7 '/' <> BB.byteString (case oracle k of StorePath _ (Hash h) -> h)
+      Atom  a -> BB.char7 ':' <> BB.string8 a
+      Nil     -> BB.char7 '-'
+      S ss    -> BB.char7 '('
+              <> mconcat (intersperse (BB.char7 ',') (go <$> ss))
+              <> BB.char7 ')'
 
 hashExtMeta :: forall k. (k -> StorePath) -> MetadataF k -> [Hash]
 hashExtMeta oracle meta = case extra [] of
