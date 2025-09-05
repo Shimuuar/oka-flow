@@ -64,6 +64,7 @@ Library
         OKA.Flow.Core.Types
         OKA.Flow.Core.Flow
         OKA.Flow.Core.Run
+        OKA.Flow.Core.S
         --
         OKA.Flow
         OKA.Flow.Types

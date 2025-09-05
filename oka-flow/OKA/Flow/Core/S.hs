@@ -1,0 +1,100 @@
+-- |
+-- We need to pass possibly nested data types as parameters to flows.
+-- We also need to be able to hash set of parameters. To do so we need
+-- to provide standard way to serialize arguments. And easiest way is
+-- to use S-expressions
+module OKA.Flow.Core.S
+  ( -- * S-expression
+    S(..)
+  , ToS(..)
+    -- * Flow parameters
+  , ParamFlow(..)
+  , ParamPhony(..)
+  , ProcessData(..)
+  ) where
+
+import OKA.Metadata
+import OKA.Flow.Core.Types
+
+----------------------------------------------------------------
+-- S-expressions
+----------------------------------------------------------------
+
+-- | Standard encoding for set of arguments. All parameters to flow
+--   are encoded as some S-expression.
+data S a
+  = Param a
+  | Atom  String
+  | Nil
+  | S     [S a]
+  deriving stock (Show,Read,Functor,Foldable,Traversable)
+
+-- | Some collection of 'Result's
+class ToS a where
+  -- | Convert value to a S-expression for passing to S.
+  toS :: a -> S FunID
+
+
+instance ToS (Result a) where
+  toS (Result i) = Param i
+
+instance ToS () where
+  toS () = Nil
+
+instance (ToS a, ToS b) => ToS (a,b) where
+  toS (a,b) = S [toS a, toS b]
+
+instance (ToS a1, ToS a2, ToS a3) => ToS (a1, a2, a3) where
+  toS (a1, a2, a3) = S [toS a1, toS a2, toS a3]
+
+instance (ToS a1, ToS a2, ToS a3, ToS a4) => ToS (a1, a2, a3, a4) where
+  toS (a1, a2, a3, a4) = S [toS a1, toS a2, toS a3, toS a4]
+
+instance (ToS a1, ToS a2, ToS a3, ToS a4, ToS a5) => ToS (a1, a2, a3, a4, a5) where
+  toS (a1, a2, a3, a4, a5) = S [toS a1, toS a2, toS a3, toS a4, toS a5]
+
+instance (ToS a1, ToS a2, ToS a3, ToS a4, ToS a5, ToS a6) => ToS (a1, a2, a3, a4, a5, a6) where
+  toS (a1, a2, a3, a4, a5, a6) = S [toS a1, toS a2, toS a3, toS a4, toS a5, toS a6]
+
+instance (ToS a1, ToS a2, ToS a3, ToS a4, ToS a5, ToS a6, ToS a7) => ToS (a1, a2, a3, a4, a5, a6, a7) where
+  toS (a1, a2, a3, a4, a5, a6, a7) = S [toS a1, toS a2, toS a3, toS a4, toS a5, toS a6, toS a7]
+
+instance (ToS a1, ToS a2, ToS a3, ToS a4, ToS a5, ToS a6, ToS a7, ToS a8) => ToS (a1, a2, a3, a4, a5, a6, a7, a8) where
+  toS (a1, a2, a3, a4, a5, a6, a7, a8) = S [toS a1, toS a2, toS a3, toS a4, toS a5, toS a6, toS a7, toS a8]
+
+instance (ToS a) => ToS (Maybe a) where
+  toS Nothing  = Nil
+  toS (Just a) = toS a
+
+instance (ToS a, ToS b) => ToS (Either a b) where
+  toS (Left  a) = S [Atom "Left",  toS a]
+  toS (Right b) = S [Atom "Right", toS b]
+
+
+----------------------------------------------------------------
+-- Calling Flows
+----------------------------------------------------------------
+
+-- | Parameters for a standard flow
+data ParamFlow a = ParamFlow
+  { meta :: Metadata
+  , args :: S a
+  , out  :: a
+  }
+  deriving stock (Functor,Foldable,Traversable)
+
+-- | Parameters for phony flow.
+data ParamPhony a = ParamPhony
+  { meta :: Metadata
+  , args :: S a
+  }
+  deriving stock (Functor,Foldable,Traversable)
+
+
+-- | Data for calling external process
+data ProcessData = ProcessData
+  { env  :: [(String,String)] -- ^ Data for putting into environment
+  , args :: [String]          -- ^ Arguments for a process
+  , io   :: IO ()             -- ^ IO action to perform before spawning process
+  }
+
