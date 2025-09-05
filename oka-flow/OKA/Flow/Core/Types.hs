@@ -1,5 +1,11 @@
 -- |
-module OKA.Flow.Core.Types where
+module OKA.Flow.Core.Types
+  ( FunID(..)
+  , Result(..)
+  , Hash(..)
+  , StorePath(..)
+  , storePath
+  ) where
 
 import Data.ByteString        (ByteString)
 import Data.ByteString.Char8  qualified as BC8
