@@ -9,6 +9,7 @@ module OKA.Flow.Core.Run
   ) where
 
 import Control.Concurrent.Async
+import Control.Concurrent.STM
 import Control.Exception
 import Control.Lens
 import Data.Aeson                   qualified as JSON
@@ -25,6 +26,8 @@ import Effectful
 import Effectful.State.Static.Local qualified as Eff
 
 import System.FilePath              ((</>))
+import System.Process.Typed
+import System.Environment           (getEnvironment)
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
                                      doesDirectoryExist
                                     )
@@ -34,6 +37,7 @@ import OKA.Metadata.Meta
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.Resources
+import OKA.Flow.Core.S
 import OKA.Flow.Types
 import OKA.Flow.Tools
 import OKA.Flow.Core.Types
@@ -160,10 +164,10 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
     case fun.workflow of
       -- Prepare normal action. We first create output directory and
       -- write everything there. After we're done we rename it.
-      Workflow (Action _ act) -> prepareNormal meta (act ctx.res)
-      WorkflowExe exe         -> prepareExe    meta exe
+      Workflow (Action _ act)    -> prepareNormal meta (act ctx.res)
+      WorkflowExe exe            -> prepareExe    meta exe
       -- Execute phony action. We don't need to bother with setting up output
-      Phony    act            -> act.run ctx.res meta params
+      Phony    (PhonyAction act) -> preparePhony  meta (act ctx.res)
     -- Signal that we successfully completed execution
     clearBarrier fun.output.barrier
   where
@@ -171,18 +175,42 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
       Just f  -> f.output
       Nothing -> error "INTERNAL ERROR: inconsistent flow graph"
     --
-    paramP = toPath . outputOf <$> fun.param  -- Parameters relative to store
-    params = [ ctx.root </> p | p <- paramP ] -- Parameters as real path
-    --
+    paramP = toPath . outputOf      <$> fun.param  -- Parameters relative to store
+    params = (\p -> ctx.root </> p) <$> paramP     -- Parameters as real path
+    
     toPath (Barricaded _ (Just path)) = storePath path
     toPath (Barricaded _ Nothing    ) = error "INTERNAL ERROR: dependence on PHONY node"
     -- Execution of haskell action
-    prepareNormal meta action = normalExecution meta $ \build -> do
-      action meta params build
+    prepareNormal meta action = normalExecution meta $ \build ->
+      action ParamFlow { meta = meta
+                       , args = params
+                       , out  = build
+                       }
+    preparePhony meta action = normalExecution meta $ \_ ->
+      action ParamPhony { meta = meta
+                        , args = params
+                        }
     -- Execution of an external executable
     prepareExe meta exe@Executable{} = normalExecution meta $ \build -> do
-      exe.io ctx.res
-      runExternalProcess exe.executable meta (build:params)
+      let process = exe.callCon ParamFlow { meta = meta
+                                          , args = params
+                                          , out  = build
+                                          }
+      env <- case process.env of
+        [] -> pure []
+        es -> do env <- getEnvironment
+                 pure $ es ++ env
+      let run = case process.stdin of
+                  Nothing -> id
+                  Just bs -> setStdin (byteStringInput bs)
+              $ case env of
+                  [] -> id
+                  _  -> setEnv env
+              $ proc exe.name process.args
+      process.io
+      withProcessWait_ run $ \pid -> do
+        _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
+        pure ()
     -- Standard wrapper for execution of workflows that create outputs
     normalExecution meta action = do
       let path  = case fun.output.val of
@@ -190,9 +218,10 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
             _      -> error "INTERNAL ERROR: phony node treated as normal"
       ctx.logger.start path
       t1 <- getCurrentTime
-      withBuildDirectory ctx.root path $ \build -> do
+      () <- withBuildDirectory ctx.root path $ \build -> do
         BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
-        writeFile    (build </> "deps.txt")  $ unlines paramP
+        -- FIXME: I need to properly write deps.txt
+        -- writeFile    (build </> "deps.txt")  $ unlines paramP
         action build
       t2 <- getCurrentTime
       ctx.logger.done path (diffUTCTime t2 t1)

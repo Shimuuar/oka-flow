@@ -14,10 +14,10 @@ module OKA.Flow.Core.Flow
   , restrictMeta
     -- * Defining workflows
   , want
-  , basicLiftWorkflow
-  , liftWorkflow
-  , basicLiftPhony
-  , basicLiftExe
+  -- , basicLiftWorkflow
+  -- , liftWorkflow
+  -- , basicLiftPhony
+  -- , basicLiftExe
     -- * Lens
   , stMetaL
   , stGraphL
@@ -38,7 +38,7 @@ import OKA.Metadata
 import OKA.Flow.Types
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Resources
-
+import OKA.Flow.Core.S
 
 ----------------------------------------------------------------
 -- Flow monad and primitives
@@ -106,7 +106,7 @@ want a = Flow $ Eff.modify $ stGraphL . flowTgtL %~ (<> Set.fromList (toResultSe
 -- | Basic primitive for creating workflows. It doesn't offer any type
 --   safety so it's better to use other tools
 basicLiftWorkflow
-  :: (ResultSet params, ResourceClaim res)
+  :: (ToS params, ResourceClaim res)
   => res      -- ^ Resource required by workflow
   -> Workflow -- ^ Workflow to be executed
   -> params   -- ^ Parameters of workflow
@@ -118,7 +118,7 @@ basicLiftWorkflow resource exe p = Flow $ do
               Just (FunID i, _) -> FunID (i + 1)
               Nothing           -> FunID 0
   -- Dependence on function without result is an error
-  let res = toResultSet p
+  let res = toS p
       phonyDep i = isPhony $ (st.graph.graph ! i).workflow
   when (any phonyDep res) $ do
     error "Depending on phony target"
@@ -132,40 +132,40 @@ basicLiftWorkflow resource exe p = Flow $ do
     }
   return $ Result fid
 
--- | Create new primitive workflow.
---
---   This function does not provide any type safety by itself!
-liftWorkflow
-  :: (ResultSet params, ResourceClaim res)
-  => res    -- ^ Resources required by workflow
-  -> Action -- ^ Action to execute
-  -> params -- ^ Parameters
-  -> Flow eff (Result a)
-liftWorkflow res action p = basicLiftWorkflow res (Workflow action) p
+-- -- | Create new primitive workflow.
+-- --
+-- --   This function does not provide any type safety by itself!
+-- liftWorkflow
+--   :: (ResultSet params, ResourceClaim res)
+--   => res    -- ^ Resources required by workflow
+--   -> Action -- ^ Action to execute
+--   -> params -- ^ Parameters
+--   -> Flow eff (Result a)
+-- liftWorkflow res action p = basicLiftWorkflow res (Workflow action) p
 
--- | Lift phony workflow (not checked)
-basicLiftPhony
-  :: (ResultSet params, ResourceClaim res)
-  => res
-     -- ^ Resources required by workflow
-  -> (ResourceSet -> Metadata -> [FilePath] -> IO ())
-     -- ^ Action to execute
-  -> params
-     -- ^ Parameters to pass to workflow
-  -> Flow eff ()
-basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony (PhonyAction exe)) p
+-- -- | Lift phony workflow (not checked)
+-- basicLiftPhony
+--   :: (ResultSet params, ResourceClaim res)
+--   => res
+--      -- ^ Resources required by workflow
+--   -> (ResourceSet -> Metadata -> [FilePath] -> IO ())
+--      -- ^ Action to execute
+--   -> params
+--      -- ^ Parameters to pass to workflow
+--   -> Flow eff ()
+-- basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony (PhonyAction exe)) p
 
--- | Lift executable into workflow
-basicLiftExe
-  :: (ResultSet params, ResourceClaim res)
-  => res
-     -- ^ Resources required by workflow
-  -> Executable
-     -- ^ Action to execute
-  -> params
-     -- ^ Parameters to pass to workflow
-  -> Flow eff (Result a)
-basicLiftExe res exe p = basicLiftWorkflow res (WorkflowExe exe) p
+-- -- | Lift executable into workflow
+-- basicLiftExe
+--   :: (ResultSet params, ResourceClaim res)
+--   => res
+--      -- ^ Resources required by workflow
+--   -> Executable
+--      -- ^ Action to execute
+--   -> params
+--      -- ^ Parameters to pass to workflow
+--   -> Flow eff (Result a)
+-- basicLiftExe res exe p = basicLiftWorkflow res (WorkflowExe exe) p
 
 
 ----------------------------------------------------------------

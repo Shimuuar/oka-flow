@@ -13,6 +13,7 @@ module OKA.Flow.Core.S
   , ProcessData(..)
   ) where
 
+import Data.ByteString.Lazy (ByteString)
 import OKA.Metadata
 import OKA.Flow.Core.Types
 
@@ -93,8 +94,9 @@ data ParamPhony a = ParamPhony
 
 -- | Data for calling external process
 data ProcessData = ProcessData
-  { env  :: [(String,String)] -- ^ Data for putting into environment
-  , args :: [String]          -- ^ Arguments for a process
-  , io   :: IO ()             -- ^ IO action to perform before spawning process
+  { stdin :: !(Maybe ByteString) -- ^ Data to pass stdin
+  , env   :: [(String,String)]   -- ^ Data for putting into environment
+  , args  :: [String]            -- ^ Arguments for a process
+  , io    :: IO ()               -- ^ IO action to perform before spawning process
   }
 

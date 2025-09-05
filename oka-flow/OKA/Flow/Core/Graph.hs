@@ -55,7 +55,7 @@ import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Types
-
+import OKA.Flow.Core.S
 
 ----------------------------------------------------------------
 -- Dataflow graph definition
@@ -66,14 +66,14 @@ import OKA.Flow.Core.Types
 data Action = Action
   { name :: String
     -- ^ Name of a workflow
-  , run  :: ResourceSet -> Metadata -> [FilePath] -> FilePath -> IO ()
+  , run  :: ResourceSet -> ParamFlow FilePath -> IO ()
     -- ^ Execute action on store
   }
 
 
 -- | Phony action which is executed always and doesn't produce any output
 newtype PhonyAction = PhonyAction
-  { run :: ResourceSet -> Metadata -> [FilePath] -> IO ()
+  { run :: ResourceSet -> ParamPhony FilePath -> IO ()
   }
 
 
@@ -81,11 +81,11 @@ newtype PhonyAction = PhonyAction
 --   want to call external executable. This way executor can correctly
 --   pass metadata to it.
 data Executable = Executable
-  { name :: String
+  { name       :: String
     -- ^ Name of a workflow
   , executable :: FilePath
     -- ^ Executable to start
-  , io         :: ResourceSet -> IO ()
+  , callCon    :: ParamFlow FilePath -> ProcessData
     -- ^ IO action which could be executed to prepare program.
   }
 
@@ -122,7 +122,7 @@ data Fun k v = Fun
     -- ^ Metadata that should be supplied to the workflow
   , resources :: Claim
     -- ^ Resources required by workflow
-  , param     :: [k]
+  , param     :: S k
     -- ^ Parameters to workflow.
   , output    :: v
     -- ^ Output of workflow
@@ -249,9 +249,11 @@ hashFun oracle fun = fun
       $ hashMeta ( runIdentity
                  $ traverseMetadataMay (\_ -> pure Nothing) fun.metadata)
       : hashFlowName name
-      : [ case oracle k of StorePath _ h -> h
-        | k <- fun.param        
-        ] ++ hashExtMeta oracle fun.metadata
+      -- FIXME: hash S expression
+      : []
+      -- : [ case oracle k of StorePath _ h -> h
+      --   | k <- fun.param        
+      --   ] ++ hashExtMeta oracle fun.metadata
 
 hashHashes :: [Hash] -> Hash
 hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks

@@ -25,6 +25,7 @@ module OKA.Flow.Tools
   , runExternalProcess
   , runExternalProcessNoMeta
   , withParametersInEnv
+  , softKill
   ) where
 
 import Control.Applicative
