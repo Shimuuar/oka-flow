@@ -210,7 +210,7 @@ stdJupyter notebooks params = do
         Nothing -> "chromium"
         Just b  -> b
   basicLiftPhony ()
-    (\_ meta param -> do
+    (PhonyAction $ \_ param -> do
       -- Figure out notebook directory. We use common prefix as
       -- heuristic.
       --
@@ -229,7 +229,7 @@ stdJupyter notebooks params = do
             Just s  -> s
             Nothing -> error "Error during processing notebooks"
       -- Now we can start jupyter
-      withParametersInEnv meta param $ \env_param -> do
+      withParametersInEnv param.meta param.args $ \env_param -> do
         withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
           let dir_config  = tmp </> "config"
               dir_data    = tmp </> "data"

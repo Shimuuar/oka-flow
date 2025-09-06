@@ -14,10 +14,10 @@ module OKA.Flow.Core.Flow
   , restrictMeta
     -- * Defining workflows
   , want
-  -- , basicLiftWorkflow
-  -- , liftWorkflow
-  -- , basicLiftPhony
-  -- , basicLiftExe
+  , basicLiftWorkflow
+  , liftWorkflow
+  , basicLiftPhony
+  , basicLiftExe
     -- * Lens
   , stMetaL
   , stGraphL
@@ -132,40 +132,40 @@ basicLiftWorkflow resource exe p = Flow $ do
     }
   return $ Result fid
 
--- -- | Create new primitive workflow.
--- --
--- --   This function does not provide any type safety by itself!
--- liftWorkflow
---   :: (ResultSet params, ResourceClaim res)
---   => res    -- ^ Resources required by workflow
---   -> Action -- ^ Action to execute
---   -> params -- ^ Parameters
---   -> Flow eff (Result a)
--- liftWorkflow res action p = basicLiftWorkflow res (Workflow action) p
+-- | Create new primitive workflow.
+--
+--   This function does not provide any type safety by itself!
+liftWorkflow
+  :: (ToS params, ResourceClaim res)
+  => res    -- ^ Resources required by workflow
+  -> Action -- ^ Action to execute
+  -> params -- ^ Parameters
+  -> Flow eff (Result a)
+liftWorkflow res action p = basicLiftWorkflow res (Workflow action) p
 
--- -- | Lift phony workflow (not checked)
--- basicLiftPhony
---   :: (ResultSet params, ResourceClaim res)
---   => res
---      -- ^ Resources required by workflow
---   -> (ResourceSet -> Metadata -> [FilePath] -> IO ())
---      -- ^ Action to execute
---   -> params
---      -- ^ Parameters to pass to workflow
---   -> Flow eff ()
--- basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony (PhonyAction exe)) p
+-- | Lift phony workflow (not checked)
+basicLiftPhony
+  :: (ToS params, ResourceClaim res)
+  => res
+     -- ^ Resources required by workflow
+  -> PhonyAction
+     -- ^ Action to execute
+  -> params
+     -- ^ Parameters to pass to workflow
+  -> Flow eff ()
+basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony exe) p
 
--- -- | Lift executable into workflow
--- basicLiftExe
---   :: (ResultSet params, ResourceClaim res)
---   => res
---      -- ^ Resources required by workflow
---   -> Executable
---      -- ^ Action to execute
---   -> params
---      -- ^ Parameters to pass to workflow
---   -> Flow eff (Result a)
--- basicLiftExe res exe p = basicLiftWorkflow res (WorkflowExe exe) p
+-- | Lift executable into workflow
+basicLiftExe
+  :: (ToS params, ResourceClaim res)
+  => res
+     -- ^ Resources required by workflow
+  -> Executable
+     -- ^ Action to execute
+  -> params
+     -- ^ Parameters to pass to workflow
+  -> Flow eff (Result a)
+basicLiftExe res exe p = basicLiftWorkflow res (WorkflowExe exe) p
 
 
 ----------------------------------------------------------------
