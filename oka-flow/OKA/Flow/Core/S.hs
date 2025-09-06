@@ -63,6 +63,8 @@ instance (ToS a1, ToS a2, ToS a3, ToS a4, ToS a5, ToS a6, ToS a7) => ToS (a1, a2
 instance (ToS a1, ToS a2, ToS a3, ToS a4, ToS a5, ToS a6, ToS a7, ToS a8) => ToS (a1, a2, a3, a4, a5, a6, a7, a8) where
   toS (a1, a2, a3, a4, a5, a6, a7, a8) = S [toS a1, toS a2, toS a3, toS a4, toS a5, toS a6, toS a7, toS a8]
 
+instance ToS a => ToS [a] where
+  toS = S . fmap toS
 instance (ToS a) => ToS (Maybe a) where
   toS Nothing  = Nil
   toS (Just a) = toS a
@@ -70,6 +72,8 @@ instance (ToS a) => ToS (Maybe a) where
 instance (ToS a, ToS b) => ToS (Either a b) where
   toS (Left  a) = S [Atom "Left",  toS a]
   toS (Right b) = S [Atom "Right", toS b]
+
+
 
 
 ----------------------------------------------------------------
