@@ -28,6 +28,7 @@ import Control.Applicative
 import Control.Lens
 import Control.Monad
 import Control.Monad.State.Strict
+import Data.Foldable                (toList)
 import Data.Map.Strict              ((!))
 import Data.Map.Strict              qualified as Map
 import Data.Set                     qualified as Set
@@ -35,7 +36,6 @@ import Effectful
 import Effectful.State.Static.Local qualified as Eff
 
 import OKA.Metadata
-import OKA.Flow.Types
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.S
@@ -100,8 +100,8 @@ restrictMeta action = scopeMeta $ do
 ----------------------------------------------------------------
 
 -- | We want given workflow evaluated
-want :: ResultSet a => a -> Flow eff ()
-want a = Flow $ Eff.modify $ stGraphL . flowTgtL %~ (<> Set.fromList (toResultSet a))
+want :: ToS a => a -> Flow eff ()
+want a = Flow $ Eff.modify $ stGraphL . flowTgtL %~ (<> (Set.fromList . toList . toS) a)
 
 -- | Basic primitive for creating workflows. It doesn't offer any type
 --   safety so it's better to use other tools

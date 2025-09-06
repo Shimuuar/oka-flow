@@ -38,9 +38,9 @@ import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.S
-import OKA.Flow.Types
-import OKA.Flow.Tools
 import OKA.Flow.Core.Types
+
+import OKA.Flow.Tools
 import OKA.Flow.Util
 
 ----------------------------------------------------------------
@@ -101,7 +101,7 @@ data Barricaded a = Barricaded
 
 -- | Execute dataflow program
 runFlow
-  :: (ResultSet r)
+  :: (ToS r)
   => FlowCtx eff -- ^ Evaluation context
   -> Metadata    -- ^ Metadata for program
   -> Flow eff r  -- ^ Dataflow program
@@ -133,7 +133,7 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
     | i <- Set.toList targets.wanted
     ]
   where
-    addTargets r = flowTgtL %~ mappend (Set.fromList (toResultSet r))
+    addTargets r = flowTgtL %~ mappend ((Set.fromList . toList . toS) r)
     targetExists path = doesDirectoryExist (ctx.root </> storePath path)
 
 -- Add MVars to each node of graph. They are used to block evaluator
