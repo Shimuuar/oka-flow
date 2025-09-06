@@ -7,6 +7,7 @@ module OKA.Flow.Core.S
   ( -- * S-expression
     S(..)
   , ToS(..)
+  , sequenceS
     -- * Flow parameters
   , ParamFlow(..)
   , ParamPhony(..)
@@ -14,6 +15,7 @@ module OKA.Flow.Core.S
   ) where
 
 import Data.ByteString.Lazy (ByteString)
+import Data.Monoid          (Endo(..))
 import OKA.Metadata
 import OKA.Flow.Core.Types
 
@@ -34,6 +36,16 @@ data S a
 class ToS a where
   -- | Convert value to a S-expression for passing to S.
   toS :: a -> S FunID
+
+-- | Convert S-expression that doesn't contain 'Atom's into list.
+sequenceS :: S a -> Maybe [a]
+sequenceS = sequence . ($ []) . appEndo . go where
+  go = \case
+    Param a  -> Endo (Just a :)
+    Atom  _  -> Endo (Nothing:)
+    Nil      -> mempty
+    S     xs -> foldMap go xs
+
 
 
 instance ToS (Result a) where
