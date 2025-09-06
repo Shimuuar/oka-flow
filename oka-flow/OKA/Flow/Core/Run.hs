@@ -8,6 +8,8 @@ module OKA.Flow.Core.Run
   , runFlow
   ) where
 
+import Control.Applicative
+import Control.Monad
 import Control.Concurrent.Async
 import Control.Concurrent.STM
 import Control.Exception
@@ -31,6 +33,7 @@ import System.Environment           (getEnvironment)
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
                                      doesDirectoryExist
                                     )
+import System.Posix.Signals         (signalProcess, sigINT)
 
 import OKA.Metadata
 import OKA.Metadata.Meta
@@ -40,7 +43,6 @@ import OKA.Flow.Core.Resources
 import OKA.Flow.Core.S
 import OKA.Flow.Core.Types
 
-import OKA.Flow.Tools
 import OKA.Flow.Util
 
 ----------------------------------------------------------------
@@ -207,10 +209,12 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
                   [] -> id
                   _  -> setEnv env
               $ proc exe.name process.args
-      process.io
-      withProcessWait_ run $ \pid -> do
-        _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
-        pure ()
+      case process of
+        ProcessData{io=withIO} ->
+          withIO $
+          withProcessWait_ run $ \pid -> do
+            _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
+            pure ()
     -- Standard wrapper for execution of workflows that create outputs
     normalExecution meta action = do
       let path  = case fun.output.val of
@@ -316,3 +320,19 @@ prepareExtMetaCache ctx gr targets = do
         Right js -> case decodeMetadataPrimEither js of
           Left  e -> throw e
           Right a -> pure a
+
+
+----------------------------------------------------------------
+-- Helpers
+----------------------------------------------------------------
+
+-- Kill process but allow it to die gracefully by sending SIGINT
+-- first. GHC install handler for it but not for SIGTERM
+softKill :: Process stdin stdout stderr -> IO ()
+softKill p = getPid p >>= \case
+  Nothing  -> pure ()
+  Just pid -> do
+    delay <- registerDelay 1_000_000
+    signalProcess sigINT pid
+    atomically $  (check =<< readTVar delay)
+              <|> (void $ waitExitCodeSTM p)
