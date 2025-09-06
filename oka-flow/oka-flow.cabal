@@ -67,7 +67,6 @@ Library
         OKA.Flow.Core.S
         --
         OKA.Flow
-        OKA.Flow.Types
         OKA.Flow.Eff
         OKA.Flow.Eff.Cache
         OKA.Flow.Parser
