@@ -105,7 +105,5 @@ data ProcessData = ProcessData
   { stdin   :: !(Maybe ByteString)    -- ^ Data to pass stdin
   , env     :: [(String,String)]      -- ^ Data for putting into environment
   , args    :: [String]               -- ^ Arguments for a process
-  , io      :: forall a. IO a -> IO a -- ^ IO action to perform before spawning process
   , workdir :: !(Maybe FilePath)      -- ^ Working directory for subprocess
   }
-

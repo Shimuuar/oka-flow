@@ -194,31 +194,29 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
                        , out  = Nothing
                        }
     -- Execution of an external executable
-    prepareExe meta exe@Executable{} = normalExecution meta $ \build -> do
-      let process = exe.callCon ParamFlow { meta = meta
-                                          , args = params
-                                          , out  = Just build
-                                          }
-      env <- case process.env of
-        [] -> pure []
-        es -> do env <- getEnvironment
-                 pure $ es ++ env
-      let run = case process.workdir of
-                  Nothing -> id
-                  Just p  -> setWorkingDir p
-              $ case process.stdin of
-                  Nothing -> id
-                  Just bs -> setStdin (byteStringInput bs)
-              $ case env of
-                  [] -> id
-                  _  -> setEnv env
-              $ proc exe.name process.args
-      case process of
-        ProcessData{io=withIO} ->
-          withIO $
-          withProcessWait_ run $ \pid -> do
-            _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
-            pure ()
+    prepareExe meta exe@Executable{call} = normalExecution meta $ \build -> do
+      let param = ParamFlow { meta = meta
+                            , args = params
+                            , out  = Just build
+                            }
+      call param $ \process -> do
+        env <- case process.env of
+          [] -> pure []
+          es -> do env <- getEnvironment
+                   pure $ env ++ es
+        let run = case process.workdir of
+                    Nothing -> id
+                    Just p  -> setWorkingDir p
+                $ case process.stdin of
+                    Nothing -> id
+                    Just bs -> setStdin (byteStringInput bs)
+                $ case env of
+                    [] -> id
+                    _  -> setEnv env
+                $ proc exe.name process.args
+        withProcessWait_ run $ \pid -> do
+          _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
+          pure ()
     -- Standard wrapper for execution of workflows that create outputs
     normalExecution meta action = do
       let path  = case fun.output.val of

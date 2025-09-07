@@ -31,6 +31,7 @@ module OKA.Flow.Tools
 import Control.Applicative
 import Control.Concurrent.STM
 import Control.Exception
+import Control.Lens                 ((^?))
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Aeson                   qualified as JSON
@@ -47,7 +48,9 @@ import System.Posix.Signals         (signalProcess, sigINT)
 import OKA.Metadata
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Types
+import OKA.Flow.Core.Graph
 import OKA.Flow.Core.S
+import OKA.Flow.Core.Flow
 import OKA.Flow.Internal.Parser
 
 
@@ -194,6 +197,35 @@ instance (FlowArgument a, FlowArgument b, FlowArgument c, FlowArgument d
                                , parameterShape p d)
 
 
+
+----------------------------------------------------------------
+-- Lifting haskell function
+----------------------------------------------------------------
+
+liftHaskellFun
+  :: (FlowArgument a, FlowOutput b, IsMeta meta, ResourceClaim res)
+  => String              -- ^ Name of flow
+  -> res                 -- ^ Resources required by workflow
+  -> (meta -> a -> IO b) -- ^ IO action 
+  -> (AsRes a -> Flow eff (Result b))
+-- FIXME: How to properly encode result of b? Is Result OK?
+liftHaskellFun name res action = basicLiftWorkflow res $ Workflow Action
+  { name = name
+  , run  = \_ p -> do
+      meta <- case p.meta ^? metadata of
+        Just m  -> pure m
+        Nothing -> error $ "loadFlowArguments: Cannot get metadata"
+      a    <- case parseFlowArguments p.args of
+        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+        Right ioa -> ioa
+      b <- action meta a
+      case p.out of
+        Just out -> writeOutput out b
+        Nothing  -> error "liftHaskellFun: output is required"
+  }
+
+
+
 ----------------------------------------------------------------
 -- Calling conventions
 ----------------------------------------------------------------
@@ -211,12 +243,12 @@ instance (FlowArgument a, FlowArgument b, FlowArgument c, FlowArgument d
 
 callStandardExe
   :: ParamFlow FilePath
-  -> ProcessData
-callStandardExe p = ProcessData
+  -> (ProcessData -> IO a)
+  -> IO a
+callStandardExe p action = action ProcessData
   { stdin   = Just $ JSON.encode $ encodeMetadata p.meta
   , env     = []
   , args    = sexpToArgs p.args
-  , io      = id
   , workdir = p.out
   }
 
@@ -245,14 +277,27 @@ loadParametersFromCLI = do
 -- | Pass arguments in the environment
 callInEnvironment
   :: ParamFlow FilePath
-  -> ProcessData
-callInEnvironment p = ProcessData
-  { stdin   = Nothing
-  , env     = undefined
-  , args    = []
-  , io      = undefined
-  , workdir = p.out
-  }
+  -> (ProcessData -> IO a)
+  -> IO a
+callInEnvironment p action =
+  withSystemTempFile "oka-flow-metadata-" $ \file_meta h -> do
+    -- Write metadata to temporary file
+    BL.hPutStr h $ JSON.encode $ encodeMetadata p.meta
+    hClose h
+    -- Populate environment
+    let env = case p.out of
+                Nothing -> id
+                Just d  -> (("OKA_OUT", d):)
+            $ ("OKA_META", file_meta)
+            : [ ("OKA_ARG_" ++ show i, arg)
+              | (i,arg) <- [1::Int ..] `zip` sexpToArgs p.args
+              ]
+    action ProcessData
+      { stdin   = Nothing
+      , env     = env
+      , args    = []
+      , workdir = p.out
+      }
 
 ----------------------------------------------------------------
 -- Conversion
@@ -349,61 +394,4 @@ sexpFromArgs xs = runListParser parserS xs where
 -- defGhcOpts = [ "-O2"
 --              , "-threaded"
 --              , "-with-rtsopts=-T -A8m"
---              ]
-
-
--- ----------------------------------------------------------------
--- -- Run external processes
--- ----------------------------------------------------------------
-
--- -- | Run external process that adheres to standard calling
--- --   conventions: metadata is written to the stdin of a process and
--- --   parameters are passed as command line parameters.
--- runExternalProcess
---   :: FilePath   -- ^ Path to executable
---   -> Metadata   -- ^ Metadata to pass to process
---   -> [FilePath] -- ^ Parameter list. When called as part of a workflow
---                 --   absolute paths will be passed.
---   -> IO ()
--- runExternalProcess exe meta args = do
---   withProcessWait_ run $ \pid -> do
---     _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
---     pure ()
---   where
---     run = setStdin (byteStringInput $ JSON.encode $ encodeMetadata meta)
---         $ proc exe args
-
--- -- | Run external process that adheres to standard calling conventions
--- --   but don't pass metadata to it. Useful for phony targets.
--- runExternalProcessNoMeta
---   :: FilePath   -- ^ Path to executable
---   -> [FilePath] -- ^ Parameter list. When called as part of a workflow
---                 --   absolute paths will be passed.
---   -> IO ()
--- runExternalProcessNoMeta exe args = do
---   withProcessWait_ run $ \pid -> do
---     _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
---     pure ()
---   where
---     run = proc exe args
-
-
--- -- | Pass metadata parameters in the environment. Metadata is written
--- --   in temporary file which is deleted when callback returns.
--- --
--- --   Path to JSON encoded metadata will be passed in @OKA_META@
--- --   variable, absolute paths to parameters will be passed in
--- --   @OKA_ARG_#@ variables.
--- withParametersInEnv
---   :: Metadata                    -- ^ Metadata
---   -> [FilePath]                  -- ^ Parameters
---   -> ([(String,String)] -> IO a) -- ^ Callback
---   -> IO a
--- withParametersInEnv meta param action = do
---   withSystemTempFile "oka-flow-metadata-" $ \file_meta h -> do
---     BL.hPutStr h $ JSON.encode $ encodeMetadata meta
---     hClose h
---     action $ ("OKA_META", file_meta)
---            : [ ("OKA_ARG_" ++ show i, arg)
---              | (i,arg) <- [1::Int ..] `zip` param
 --              ]

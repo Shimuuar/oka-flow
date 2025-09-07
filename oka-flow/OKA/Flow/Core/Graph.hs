@@ -86,7 +86,7 @@ data Executable = Executable
     -- ^ Name of a workflow
   , executable :: FilePath
     -- ^ Executable to start
-  , callCon    :: ParamFlow FilePath -> ProcessData
+  , call       :: forall a. ParamFlow FilePath -> (ProcessData -> IO a) -> IO a
     -- ^ IO action which could be executed to prepare program.
   }
 
