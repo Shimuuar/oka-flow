@@ -28,6 +28,9 @@ newtype ListParserT s m a = ListParserT
   deriving (Functor, Applicative, Alternative, Monad, MonadIO, MonadError String, MonadState [s])
        via StateT [s] (ExceptT String m)
 
+instance Monad m => MonadFail (ListParserT s m) where
+  fail = ListParserT . pure . pure . Left
+
 -- | Pure parser
 type ListParser s = ListParserT s Identity
 
