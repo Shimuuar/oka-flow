@@ -46,7 +46,7 @@ import OKA.Flow.Core.S
 import OKA.Flow.Eff
 import OKA.Metadata
 import OKA.Metadata.Meta
-import OKA.Flow.Util
+import OKA.Flow.Internal.Util
 {-
 ----------------------------------------------------------------
 -- Saved metadata

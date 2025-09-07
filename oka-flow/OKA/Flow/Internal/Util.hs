@@ -1,6 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 -- |
-module OKA.Flow.Util
+module OKA.Flow.Internal.Util
   ( -- * Typeable
     typeName
     -- * Concurrency

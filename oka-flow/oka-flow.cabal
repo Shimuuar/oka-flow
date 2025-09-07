@@ -72,7 +72,7 @@ Library
         OKA.Flow.Tools
         OKA.Flow.Std
   Other-modules:
-        OKA.Flow.Util
+        OKA.Flow.Internal.Util
         OKA.Flow.Internal.Parser
 
 executable oka-flow
