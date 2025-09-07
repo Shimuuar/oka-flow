@@ -1,7 +1,7 @@
 {-# LANGUAGE RoleAnnotations #-}
 -- |
 -- Extremely simple parser for parsing lists
-module OKA.Flow.Parser
+module OKA.Flow.Internal.Parser
   ( ListParserT(..)
   , ListParser
   , runListParserT

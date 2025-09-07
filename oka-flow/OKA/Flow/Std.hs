@@ -39,11 +39,10 @@ import GHC.Generics
 import GHC.Exts                   (proxy#)
 
 import OKA.Flow.Tools
-import OKA.Flow.Parser
+import OKA.Flow.Internal.Parser
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.S
-import OKA.Flow.Types
 import OKA.Flow.Eff
 import OKA.Metadata
 import OKA.Metadata.Meta

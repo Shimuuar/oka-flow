@@ -69,12 +69,11 @@ Library
         OKA.Flow
         OKA.Flow.Eff
         OKA.Flow.Eff.Cache
-        OKA.Flow.Parser
         OKA.Flow.Tools
         OKA.Flow.Std
   Other-modules:
         OKA.Flow.Util
-
+        OKA.Flow.Internal.Parser
 
 executable oka-flow
   import:           extensions
