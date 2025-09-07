@@ -42,6 +42,7 @@ import OKA.Flow.Tools
 import OKA.Flow.Parser
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
+import OKA.Flow.Core.S
 import OKA.Flow.Types
 import OKA.Flow.Eff
 import OKA.Metadata
@@ -69,10 +70,10 @@ stdSaveMeta a = scopeMeta $ do
   put $ toMetadata a
   liftWorkflow () Action
     { name = "std.SavedMeta"
-    , run  = \_ _meta args out -> do
-        case args of [] -> pure ()
-                     _  -> error "stdSaveMeta does not take any arguments"
-        createFileLink "meta.json" (out </> "saved.json")
+    , run  = \_ p -> do
+        case p.args of Nil -> pure ()
+                       _   -> error "stdSaveMeta does not take any arguments"
+        createFileLink "meta.json" (p.out </> "saved.json")
     } ()
 
 -- | Save metadata value so it could be passed as parameter.
@@ -81,10 +82,10 @@ stdSaveSomeMeta meta = scopeMeta $ do
   put $ absurd <$> meta
   liftWorkflow () Action
     { name = "std.SavedMeta"
-    , run  = \_ _meta args out -> do
-        case args of [] -> pure ()
-                     _  -> error "stdSaveMeta does not take any arguments"
-        createFileLink "meta.json" (out </> "saved.json")
+    , run  = \_ p -> do
+        case p.args of Nil -> pure ()
+                       _   -> error "stdSaveMeta does not take any arguments"
+        createFileLink "meta.json" (p.out </> "saved.json")
     } ()
 
 -- | Convert one saved metadata to another which possibly uses less
@@ -167,7 +168,7 @@ runPdfReader :: (CollectReports a, ProgConfigE :> eff) => a -> Flow eff ()
 runPdfReader a = do
   pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
   basicLiftPhony ()
-    (\_ _ paths -> runExternalProcessNoMeta pdf [p </> "report.pdf" | p <- paths])
+    (PhonyAction (\_ param -> runExternalProcessNoMeta pdf [p </> "report.pdf" | p <- param.args ]))
     (collectReports a)
 
 
@@ -176,9 +177,9 @@ stdConcatPDF :: CollectReports a => a -> Flow eff (Result ReportPDF)
 stdConcatPDF reports = restrictMeta @() $ do
   liftWorkflow () Action
     { name = "std.pdftk.concat"
-    , run  = \_res _meta args out -> do
+    , run  = \_ p -> do
         runExternalProcessNoMeta "pdftk"
-          ([a</>"report.pdf" | a <- args] ++ ["cat", "output", out</>"report.pdf"])
+          ([a</>"report.pdf" | a <- p.args] ++ ["cat", "output", p.out</>"report.pdf"])
     } (collectReports reports)
 
 
