@@ -202,7 +202,10 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
         [] -> pure []
         es -> do env <- getEnvironment
                  pure $ es ++ env
-      let run = case process.stdin of
+      let run = case process.workdir of
+                  Nothing -> id
+                  Just p  -> setWorkingDir p
+              $ case process.stdin of
                   Nothing -> id
                   Just bs -> setStdin (byteStringInput bs)
               $ case env of
