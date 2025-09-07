@@ -186,17 +186,18 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
     prepareNormal meta action = normalExecution meta $ \build ->
       action ParamFlow { meta = meta
                        , args = params
-                       , out  = build
+                       , out  = Just build
                        }
     preparePhony meta action = normalExecution meta $ \_ ->
-      action ParamPhony { meta = meta
-                        , args = params
-                        }
+      action ParamFlow { meta = meta
+                       , args = params
+                       , out  = Nothing
+                       }
     -- Execution of an external executable
     prepareExe meta exe@Executable{} = normalExecution meta $ \build -> do
       let process = exe.callCon ParamFlow { meta = meta
                                           , args = params
-                                          , out  = build
+                                          , out  = Just build
                                           }
       env <- case process.env of
         [] -> pure []

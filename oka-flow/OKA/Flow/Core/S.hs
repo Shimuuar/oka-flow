@@ -10,7 +10,6 @@ module OKA.Flow.Core.S
   , sequenceS
     -- * Flow parameters
   , ParamFlow(..)
-  , ParamPhony(..)
   , ProcessData(..)
   ) where
 
@@ -96,14 +95,7 @@ instance (ToS a, ToS b) => ToS (Either a b) where
 data ParamFlow a = ParamFlow
   { meta :: Metadata
   , args :: S a
-  , out  :: a
-  }
-  deriving stock (Functor,Foldable,Traversable)
-
--- | Parameters for phony flow.
-data ParamPhony a = ParamPhony
-  { meta :: Metadata
-  , args :: S a
+  , out  :: Maybe a
   }
   deriving stock (Functor,Foldable,Traversable)
 

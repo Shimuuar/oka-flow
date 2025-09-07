@@ -74,7 +74,7 @@ data Action = Action
 
 -- | Phony action which is executed always and doesn't produce any output
 newtype PhonyAction = PhonyAction
-  { run :: ResourceSet -> ParamPhony FilePath -> IO ()
+  { run :: ResourceSet -> ParamFlow FilePath -> IO ()
   }
 
 

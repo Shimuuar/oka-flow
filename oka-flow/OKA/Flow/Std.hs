@@ -4,7 +4,7 @@
 -- |
 -- Standard workflows
 module OKA.Flow.Std
-  ( -- * Saved metadata
+{-  ( -- * Saved metadata
     SavedMeta(..)
   , stdSaveMeta
   , stdSaveSomeMeta
@@ -16,7 +16,7 @@ module OKA.Flow.Std
   , stdConcatPDF
     -- * Jupyter
   , stdJupyter
-  ) where
+  ) -} where
 
 import Control.Concurrent         (threadDelay)
 import Control.Exception
@@ -47,7 +47,7 @@ import OKA.Flow.Eff
 import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Util
-
+{-
 ----------------------------------------------------------------
 -- Saved metadata
 ----------------------------------------------------------------
@@ -324,3 +324,4 @@ data JupyterConfig = JupyterConfig
   }
   deriving stock (Show,Generic)
   deriving anyclass (JSON.FromJSON)
+-}

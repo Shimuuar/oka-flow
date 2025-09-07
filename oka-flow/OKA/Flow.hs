@@ -13,7 +13,7 @@
 -- programs. Latter is solved by having many small programs instead
 -- one large one. This way we can recompile only few modules at time.
 module OKA.Flow
-  ( -- * Flow monad
+{-  ( -- * Flow monad
     Flow
   , MetadataFlow
   , lookupMeta
@@ -43,7 +43,7 @@ module OKA.Flow
   , FlowCtx(..)
   , FlowLogger(..)
   , runFlow
-  ) where
+  ) -} where
 
 import Control.Lens
 import Control.Monad.State
@@ -54,14 +54,13 @@ import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
-import OKA.Flow.Types
 import OKA.Flow.Core.Run
 import OKA.Flow.Tools
 import OKA.Flow.Core.Resources
 import OKA.Flow.Std
 import OKA.Flow.Util
 
-
+{-
 ----------------------------------------------------------------
 -- Flow monad
 ----------------------------------------------------------------
@@ -102,3 +101,4 @@ lookupMeta = do
   where
     failK :: forall x k. IsMetaPrim x => k -> Either String (Maybe x)
     failK _ = Left $ "Encountered external metadata for "++typeName @a++". Cannot load"
+-}

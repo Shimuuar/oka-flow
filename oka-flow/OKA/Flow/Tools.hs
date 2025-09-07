@@ -217,7 +217,7 @@ callStandardExe p = ProcessData
   , env     = []
   , args    = sexpToArgs p.args
   , io      = id
-  , workdir = Just p.out
+  , workdir = p.out
   }
 
 -- | Read metadata from stdin
@@ -251,7 +251,7 @@ callInEnvironment p = ProcessData
   , env     = undefined
   , args    = []
   , io      = undefined
-  , workdir = Just p.out
+  , workdir = p.out
   }
 
 ----------------------------------------------------------------
