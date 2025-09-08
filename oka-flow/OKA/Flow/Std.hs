@@ -4,19 +4,18 @@
 -- |
 -- Standard workflows
 module OKA.Flow.Std
-{-  ( -- * Saved metadata
+  ( -- * Saved metadata
     SavedMeta(..)
   , stdSaveMeta
   , stdSaveSomeMeta
   , narrowSavedMeta
     -- * Reports
   , ReportPDF
-  , CollectReports(..)
   , runPdfReader
   , stdConcatPDF
     -- * Jupyter
   , stdJupyter
-  ) -} where
+  ) where
 
 import Control.Concurrent         (threadDelay)
 import Control.Exception
@@ -125,9 +124,6 @@ stdConcatPDF reports = restrictMeta @() $ do
 
 
 
-{-
-
-
 ----------------------------------------------------------------
 -- Jupyter
 ----------------------------------------------------------------
@@ -136,7 +132,7 @@ stdConcatPDF reports = restrictMeta @() $ do
 -- | Run jupyter notebook. Metadata and parameters are passed in
 --   environment variables.
 stdJupyter
-  :: (ResultSet p, ProgConfigE :> eff)
+  :: (ToS p, ProgConfigE :> eff)
   => [FilePath] -- ^ Notebooks' names
   -> p          -- ^ Parameters to pass to notebook.
   -> Flow eff ()
@@ -174,22 +170,22 @@ stdJupyter notebooks params = do
       let notebooks_rel = case traverse (stripPrefix notebook_dir) notebooks_abs of
             Just s  -> s
             Nothing -> error "Error during processing notebooks"
-      -- Now we can start jupyter
-      withParametersInEnv param.meta param.args $ \env_param -> do
+      callInEnvironment param $ \proc_jupyter -> do
         withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
           let dir_config  = tmp </> "config"
               dir_data    = tmp </> "data"
           createDirectory dir_config
           createDirectory dir_data
-          env <- getEnvironment
-          let run = setEnv ([ ("JUPYTER_DATA_DIR",   dir_data)
-                            , ("JUPYTER_CONFIG_DIR", dir_config)
-                            ] ++ env_param ++ env)
-                  $ proc "jupyter" [ "notebook"
-                                   , "--no-browser"
-                                   , "--notebook-dir=" ++ notebook_dir
-                                   ]
-          withProcessWait_ run $ \_ -> do
+          run_jupyter <- toTypedProcess "jupyter"
+            proc_jupyter { env  = [ ("JUPYTER_DATA_DIR",   dir_data)
+                                  , ("JUPYTER_CONFIG_DIR", dir_config)
+                                  ] ++ proc_jupyter.env
+                         , args = [ "notebook"
+                                  , "--no-browser"
+                                  , "--notebook-dir=" ++ notebook_dir
+                                  ]
+                         }
+          withProcessWait_ run_jupyter $ \_ -> do
             -- Wait until server starts and launch browser.
             jp <- waitForJupyter dir_data >>= \case
               Nothing -> error "stdJupyter: can't find server config"
@@ -270,4 +266,4 @@ data JupyterConfig = JupyterConfig
   }
   deriving stock (Show,Generic)
   deriving anyclass (JSON.FromJSON)
--}
+
