@@ -29,7 +29,6 @@ import Effectful.State.Static.Local qualified as Eff
 
 import System.FilePath              ((</>))
 import System.Process.Typed
-import System.Environment           (getEnvironment)
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
                                      doesDirectoryExist
                                     )
@@ -199,20 +198,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
                             , out  = Just build
                             }
       call param $ \process -> do
-        env <- case process.env of
-          [] -> pure []
-          es -> do env <- getEnvironment
-                   pure $ env ++ es
-        let run = case process.workdir of
-                    Nothing -> id
-                    Just p  -> setWorkingDir p
-                $ case process.stdin of
-                    Nothing -> id
-                    Just bs -> setStdin (byteStringInput bs)
-                $ case env of
-                    [] -> id
-                    _  -> setEnv env
-                $ proc exe.name process.args
+        run <- toTypedProcess exe.executable process
         withProcessWait_ run $ \pid -> do
           _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
           pure ()

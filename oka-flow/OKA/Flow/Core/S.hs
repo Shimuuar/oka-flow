@@ -11,10 +11,14 @@ module OKA.Flow.Core.S
     -- * Flow parameters
   , ParamFlow(..)
   , ProcessData(..)
+  , toTypedProcess
   ) where
 
 import Data.ByteString.Lazy (ByteString)
 import Data.Monoid          (Endo(..))
+import System.Environment   (getEnvironment)
+import System.Process.Typed
+
 import OKA.Metadata
 import OKA.Flow.Core.Types
 
@@ -107,3 +111,20 @@ data ProcessData = ProcessData
   , args    :: [String]               -- ^ Arguments for a process
   , workdir :: !(Maybe FilePath)      -- ^ Working directory for subprocess
   }
+
+toTypedProcess :: FilePath -> ProcessData -> IO (ProcessConfig () () ())
+toTypedProcess exe process = do
+  env <- case process.env of
+    [] -> pure []
+    es -> do env <- getEnvironment
+             pure $ env ++ es
+  pure $ case process.workdir of
+           Nothing -> id
+           Just p  -> setWorkingDir p
+       $ case process.stdin of
+           Nothing -> id
+           Just bs -> setStdin (byteStringInput bs)
+       $ case env of
+           [] -> id
+           _  -> setEnv env
+       $ proc exe process.args
