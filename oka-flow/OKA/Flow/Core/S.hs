@@ -33,7 +33,7 @@ data S a
   | Atom  String
   | Nil
   | S     [S a]
-  deriving stock (Show,Read,Functor,Foldable,Traversable)
+  deriving stock (Show,Eq,Read,Functor,Foldable,Traversable)
 
 -- | Some collection of 'Result's
 class ToS a where

@@ -117,4 +117,6 @@ Test-suite oka-flow-tests
                   , tasty-hunit
   hs-source-dirs: tests
   main-is:        Main.hs
-  other-modules:  TM.Flow
+  other-modules:
+      TM.Flow
+      TM.Serialization

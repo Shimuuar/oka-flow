@@ -490,7 +490,8 @@ loadParametersFromCLI = do
 ----------------------------------------------------------------
 
 sexpToArgs :: S FilePath -> [FilePath]
-sexpToArgs = ($ []) . appEndo . go where
+sexpToArgs Nil = []
+sexpToArgs s0  = ($ []) $ appEndo $ go s0 where
   go = \case
     Nil     -> cons "-"
     Atom  a -> cons ('!':a)
@@ -504,6 +505,7 @@ sexpFromArgs xs = runListParser parserS xs where
   parserS = consume >>= \case
     ""    -> fail "Empty parameter encountered"
     "("   -> S <$> parserL
+    "-"   -> pure Nil
     '!':a -> pure $ Atom  a
     p     -> pure $ Param p
   parserL =  eol
