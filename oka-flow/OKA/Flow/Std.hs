@@ -47,7 +47,7 @@ import OKA.Flow.Eff
 import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Internal.Util
-{-
+
 ----------------------------------------------------------------
 -- Saved metadata
 ----------------------------------------------------------------
@@ -58,34 +58,31 @@ import OKA.Flow.Internal.Util
 --   as well) is used in order to allow other flows to generate
 --   compatible outputs.
 data SavedMeta a = SavedMeta a
-  deriving FlowArgument via AsFlowOutput (SavedMeta a)
+  deriving FlowArgument via AsFlowInput (SavedMeta a)
 
 instance (IsMeta a) => FlowInput (SavedMeta a) where
   readOutput path = SavedMeta <$> readMetadata (path </> "saved.json")
+
+instance (IsMeta a) => FlowOutput (SavedMeta a) where
+  writeOutput path (SavedMeta a)
+    = BL.writeFile (path </> "saved.json")
+    $ JSON.encode $ encodeToMetadata a
 
 -- | Save metadata value so it could be passed as parameter.
 stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
 stdSaveMeta a = scopeMeta $ do
   put $ toMetadata a
-  liftWorkflow () Action
-    { name = "std.SavedMeta"
-    , run  = \_ p -> do
-        case p.args of Nil -> pure ()
-                       _   -> error "stdSaveMeta does not take any arguments"
-        createFileLink "meta.json" (p.out </> "saved.json")
-    } ()
+  liftHaskellFun "std.SavedMeta" ()
+    (\(a::a) () -> pure $ SavedMeta a)
+    ()
 
 -- | Save metadata value so it could be passed as parameter.
 stdSaveSomeMeta :: Metadata -> Flow eff (Result (SavedMeta Metadata))
 stdSaveSomeMeta meta = scopeMeta $ do
   put $ absurd <$> meta
-  liftWorkflow () Action
-    { name = "std.SavedMeta"
-    , run  = \_ p -> do
-        case p.args of Nil -> pure ()
-                       _   -> error "stdSaveMeta does not take any arguments"
-        createFileLink "meta.json" (p.out </> "saved.json")
-    } ()
+  liftHaskellFunMeta_ "std.SavedMeta" ()
+    (\out meta () -> createFileLink "meta.json" (out </> "saved.json"))
+    ()
 
 -- | Convert one saved metadata to another which possibly uses less
 --   data.
@@ -100,13 +97,14 @@ narrowSavedMeta r
     keysA = metadataKeySet (proxy# @a)
     keysB = metadataKeySet (proxy# @b)
 
-
 ----------------------------------------------------------------
--- Report PDF
+-- PDF reports
 ----------------------------------------------------------------
 
 -- | Type tag for outputs which contains @report.pdf@
 data ReportPDF
+
+{-
 
 -- | Convenience type class for collecting list of reports from tuples
 --   and lists of parameters.

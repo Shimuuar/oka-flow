@@ -4,47 +4,60 @@
 -- Tools for defining concrete workflows. It contain both tools for
 -- defining workflows themselves and @Flow@ wrappers.
 module OKA.Flow.Tools
-{-  ( -- * Interaction with store
+  ( -- * Interaction with store
     -- $store
     FlowOutput(..)
   , FlowInput(..)
   , AsMetaEncoded(..)
-    -- * Argument passing
+    -- ** Argument reading
   , FlowArgument(..)
-  , AsFlowOutput(..)
-    -- * Standard workflow execution
+  , AsFlowInput(..)
+    -- * Lifting of haskell function
+  , liftHaskellFun
+  , liftHaskellFunMeta
+  , liftHaskellFun_
+  , liftHaskellFunMeta_
+    -- * Calling of external executables
+  , callStandardExe
   , metaFromStdin
-  , runFlowArguments
-  , flowArgumentsFromCLI
-  , executeStdWorkflow
-  , executeStdWorkflowOut
-    -- * Building GHC programs
-  , compileProgramGHC
-  , defGhcOpts
-    -- * External process
-  , runExternalProcess
-  , runExternalProcessNoMeta
-  , withParametersInEnv
-  , softKill
-  ) -} where
+  , loadParametersFromCLI
+  , callInEnvironment
+    -- * Encoding
+  , sexpToArgs
+  , sexpFromArgs
+
+  
+    -- * Standard workflow execution
+  -- , metaFromStdin
+  -- , runFlowArguments
+  -- , flowArgumentsFromCLI
+  -- , executeStdWorkflow
+  -- , executeStdWorkflowOut
+  --   -- * Building GHC programs
+  -- , compileProgramGHC
+  -- , defGhcOpts
+  --   -- * External process
+  -- , runExternalProcess
+  -- , runExternalProcessNoMeta
+  -- , withParametersInEnv
+  -- , softKill
+  ) where
 
 import Control.Applicative
-import Control.Concurrent.STM
+-- import Control.Concurrent.STM
 import Control.Exception
 import Control.Lens                 ((^?))
-import Control.Monad
-import Control.Monad.IO.Class
+-- import Control.Monad
+-- import Control.Monad.IO.Class
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
 import Data.Monoid                  (Endo(..))
 import Data.Functor
-import System.Process.Typed
 import System.FilePath              ((</>))
 import System.IO.Temp
 import System.IO                    (hClose)
 import System.Environment           (getArgs)
-import System.Posix.Signals         (signalProcess, sigINT)
 import OKA.Metadata
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Types
@@ -105,7 +118,7 @@ class (ToS (AsRes a)) => FlowArgument a where
 --   instance where data is store as JSON file @data.json@ encoded
 --   using 'MetaEncoding' instance.
 newtype AsMetaEncoded a = AsMetaEncoded a
-  -- deriving FlowArgument via AsFlowOutput a
+  deriving FlowArgument via AsFlowInput a
 
 instance MetaEncoding a => FlowOutput (AsMetaEncoded a) where
   writeOutput dir (AsMetaEncoded a) =
@@ -117,17 +130,20 @@ instance MetaEncoding a => FlowInput (AsMetaEncoded a) where
     case JSON.decode bs of
       Nothing -> error "Invalid JSON"
       Just js -> case JSON.parseEither parseMeta js of
-        Left  e -> error $ "Cannot decode PErr: " ++ show e
+        Left  e -> error $ "Cannot decode metadata: " ++ show e
         Right x -> pure (AsMetaEncoded x)
 
--- -- | Derive instance of 'FlowArgument' for instance of 'FlowInput'
--- newtype AsFlowOutput a = AsFlowOutput a
 
--- instance (FlowInput a) => FlowArgument (AsFlowOutput a) where
---   type AsRes (AsFlowOutput a) = Result a
---   parserFlowArguments = do
---     path <- consumeIO
---     liftIO $ AsFlowOutput <$> readOutput path
+-- | Derive instance of 'FlowArgument' for instance of 'FlowInput'
+newtype AsFlowInput a = AsFlowInput a
+
+instance (FlowInput a) => FlowArgument (AsFlowInput a) where
+  type AsRes (AsFlowInput a) = Result a
+  parseFlowArguments = \case
+    Param p -> Right $ AsFlowInput <$> readOutput p
+    _       -> Left "Expecting single parameter"
+  parameterShape x _ = x
+
 
 ----------------------------------------------------------------
 -- Instances
@@ -200,6 +216,8 @@ instance (FlowArgument a, FlowArgument b, FlowArgument c, FlowArgument d
 
 ----------------------------------------------------------------
 -- Lifting haskell function
+--
+-- FIXME: How to properly encode result of b? Is Result OK?
 ----------------------------------------------------------------
 
 liftHaskellFun
@@ -208,7 +226,6 @@ liftHaskellFun
   -> res                 -- ^ Resources required by workflow
   -> (meta -> a -> IO b) -- ^ IO action 
   -> (AsRes a -> Flow eff (Result b))
--- FIXME: How to properly encode result of b? Is Result OK?
 liftHaskellFun name res action = basicLiftWorkflow res $ Workflow Action
   { name = name
   , run  = \_ p -> do
@@ -224,6 +241,60 @@ liftHaskellFun name res action = basicLiftWorkflow res $ Workflow Action
         Nothing  -> error "liftHaskellFun: output is required"
   }
 
+liftHaskellFunMeta
+  :: (FlowArgument a, FlowOutput b, ResourceClaim res)
+  => String                  -- ^ Name of flow
+  -> res                     -- ^ Resources required by workflow
+  -> (Metadata -> a -> IO b) -- ^ IO action 
+  -> (AsRes a -> Flow eff (Result b))
+liftHaskellFunMeta name res action = basicLiftWorkflow res $ Workflow Action
+  { name = name
+  , run  = \_ p -> do
+      a <- case parseFlowArguments p.args of
+        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+        Right ioa -> ioa
+      b <- action p.meta a
+      case p.out of
+        Just out -> writeOutput out b
+        Nothing  -> error "liftHaskellFun: output is required"
+  }
+
+liftHaskellFun_
+  :: (FlowArgument a, IsMeta meta, ResourceClaim res)
+  => String                           -- ^ Name of flow
+  -> res                              -- ^ Resources required by workflow
+  -> (FilePath -> meta -> a -> IO ()) -- ^ IO action 
+  -> (AsRes a -> Flow eff (Result b))
+liftHaskellFun_ name res action = basicLiftWorkflow res $ Workflow Action
+  { name = name
+  , run  = \_ p -> do
+      meta <- case p.meta ^? metadata of
+        Just m  -> pure m
+        Nothing -> error $ "loadFlowArguments: Cannot get metadata"
+      a    <- case parseFlowArguments p.args of
+        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+        Right ioa -> ioa
+      case p.out of
+        Just out -> action out meta a
+        Nothing  -> error "liftHaskellFun: output is required"
+  }
+
+liftHaskellFunMeta_
+  :: (FlowArgument a, ResourceClaim res)
+  => String                               -- ^ Name of flow
+  -> res                                  -- ^ Resources required by workflow
+  -> (FilePath -> Metadata -> a -> IO ()) -- ^ IO action 
+  -> (AsRes a -> Flow eff (Result b))
+liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Workflow Action
+  { name = name
+  , run  = \_ p -> do
+      a <- case parseFlowArguments p.args of
+        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+        Right ioa -> ioa
+      case p.out of
+        Just out -> action out p.meta a
+        Nothing  -> error "liftHaskellFun: output is required"
+  }
 
 
 ----------------------------------------------------------------
