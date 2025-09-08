@@ -392,13 +392,10 @@ liftPhonyExecutable
   -- ^ Calling convention
   -> (args -> Flow eff ())
 liftPhonyExecutable exe res call =
-  -- FIXME: I need to better define distinction between real and phony targets
-  undefined
-  -- basicLiftPhony res $ WorkflowExe Executable
-  --   { name       = name
-  --   , executable = exe
-  --   , call       = call
-  --   }
+  basicLiftPhonyExe res $ PhonyExecutable
+    { executable = exe
+    , call       = call
+    }
 
 -- | Standard calling conventions for external process.
 --

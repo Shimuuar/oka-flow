@@ -18,6 +18,7 @@ module OKA.Flow.Core.Flow
   , liftWorkflow
   , basicLiftPhony
   , basicLiftExe
+  , basicLiftPhonyExe
     -- * Lens
   , stMetaL
   , stGraphL
@@ -154,6 +155,18 @@ basicLiftPhony
      -- ^ Parameters to pass to workflow
   -> Flow eff ()
 basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony exe) p
+
+-- | Lift phony workflow (not checked)
+basicLiftPhonyExe
+  :: (ToS params, ResourceClaim res)
+  => res
+     -- ^ Resources required by workflow
+  -> PhonyExecutable
+     -- ^ Action to execute
+  -> params
+     -- ^ Parameters to pass to workflow
+  -> Flow eff ()
+basicLiftPhonyExe res exe p = want =<< basicLiftWorkflow res (PhonyExe exe) p
 
 -- | Lift executable into workflow
 basicLiftExe

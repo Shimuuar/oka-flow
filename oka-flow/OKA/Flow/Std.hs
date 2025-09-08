@@ -33,12 +33,10 @@ import System.FilePath            ((</>), splitFileName,splitPath,joinPath)
 import System.Directory           (createFileLink,createDirectory,canonicalizePath,listDirectory)
 import System.Process.Typed
 import System.IO.Temp
-import System.Environment         (getEnvironment)
 import GHC.Generics
 import GHC.Exts                   (proxy#)
 
 import OKA.Flow.Tools
-import OKA.Flow.Internal.Parser
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.S

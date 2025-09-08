@@ -168,6 +168,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
       WorkflowExe exe            -> prepareExe    meta exe
       -- Execute phony action. We don't need to bother with setting up output
       Phony    (PhonyAction act) -> preparePhony  meta (act ctx.res)
+      PhonyExe exe               -> preparePhonyExe meta exe
     -- Signal that we successfully completed execution
     clearBarrier fun.output.barrier
   where
@@ -186,12 +187,22 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
                        , args = params
                        , out  = Just build
                        }
-    preparePhony meta action = normalExecution meta $ \_ ->
+    preparePhony meta action =
       action ParamFlow { meta = meta
                        , args = params
                        , out  = Nothing
                        }
     -- Execution of an external executable
+    preparePhonyExe meta exe@PhonyExecutable{call} = do
+      let param = ParamFlow { meta = meta
+                            , args = params
+                            , out  = Nothing
+                            }
+      call param $ \process -> do
+        run <- toTypedProcess exe.executable process
+        withProcessWait_ run $ \pid -> do
+          _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
+          pure ()
     prepareExe meta exe@Executable{call} = normalExecution meta $ \build -> do
       let param = ParamFlow { meta = meta
                             , args = params

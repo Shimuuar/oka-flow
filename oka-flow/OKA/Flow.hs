@@ -13,7 +13,7 @@
 -- programs. Latter is solved by having many small programs instead
 -- one large one. This way we can recompile only few modules at time.
 module OKA.Flow
-{-  ( -- * Flow monad
+  ( -- * Flow monad
     Flow
   , MetadataFlow
   , lookupMeta
@@ -22,7 +22,7 @@ module OKA.Flow
   , withEmptyMeta
   , restrictMeta
   , Result
-  , ResultSet(..)
+  , ToS(..)
   , want
   , liftEff
   , addExtMeta
@@ -32,7 +32,7 @@ module OKA.Flow
   , basicLiftWorkflow
   , liftWorkflow
   , basicLiftPhony
-  , liftPhony
+  -- , liftPhony
   , basicLiftExe
     -- * Resources
   , ResourceClaim(..)
@@ -43,7 +43,7 @@ module OKA.Flow
   , FlowCtx(..)
   , FlowLogger(..)
   , runFlow
-  ) -} where
+  ) where
 
 import Control.Lens
 import Control.Monad.State
@@ -55,12 +55,12 @@ import OKA.Metadata.Meta
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.Run
-import OKA.Flow.Tools
+-- import OKA.Flow.Tools
 import OKA.Flow.Core.Resources
+import OKA.Flow.Core.S
 import OKA.Flow.Std
--- import OKA.Flow.Util
+import OKA.Flow.Internal.Util
 
-{-
 ----------------------------------------------------------------
 -- Flow monad
 ----------------------------------------------------------------
@@ -77,17 +77,17 @@ addExtMeta (Result fid) = Flow $ do
   Eff.modify $ stMetaL %~ storeExternal @a fid
 
 
--- | Lift phony action using standard tools
-liftPhony
-  :: (ResourceClaim res, FlowArgument args)
-  => res
-     -- ^ Resources required by workflow
-  -> (Metadata -> args -> IO ())
-  -> AsRes args
-  -> Flow eff ()
-liftPhony res exe = basicLiftPhony res $ \_ meta args -> do
-  a <- runFlowArguments args
-  exe meta a
+-- -- | Lift phony action using standard tools
+-- liftPhony
+--   :: (ResourceClaim res, FlowArgument args)
+--   => res
+--      -- ^ Resources required by workflow
+--   -> (Metadata -> args -> IO ())
+--   -> AsRes args
+--   -> Flow eff ()
+-- liftPhony res exe = basicLiftPhony res $ \_ meta args -> do
+--   a <- runFlowArguments args
+--   exe meta a
 
 -- | Lookup metadata. Unlike 'metadata' lens. This function only
 --   requires 'IsFromMeta' and not full 'IsMeta'.
@@ -101,4 +101,4 @@ lookupMeta = do
   where
     failK :: forall x k. IsMetaPrim x => k -> Either String (Maybe x)
     failK _ = Left $ "Encountered external metadata for "++typeName @a++". Cannot load"
--}
+

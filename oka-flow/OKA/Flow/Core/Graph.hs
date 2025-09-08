@@ -9,6 +9,7 @@ module OKA.Flow.Core.Graph
     Action(..)
   , PhonyAction(..)
   , Executable(..)
+  , PhonyExecutable(..)
   , Workflow(..)
   , isPhony
   , FunID(..)
@@ -90,6 +91,16 @@ data Executable = Executable
     -- ^ IO action which could be executed to prepare program.
   }
 
+-- | Action which execute executable. It should be always used if one
+--   want to call external executable. This way executor can correctly
+--   pass metadata to it.
+data PhonyExecutable = PhonyExecutable
+  { executable :: FilePath
+    -- ^ Executable to start
+  , call       :: forall a. ParamFlow FilePath -> (ProcessData -> IO a) -> IO a
+    -- ^ IO action which could be executed to prepare program.
+  }
+
 
 -- | Descritpion of workflow function. It knows how to build
 data Workflow
@@ -99,6 +110,8 @@ data Workflow
     -- ^ Target which run executable
   | Phony    PhonyAction
     -- ^ Phony target which always executes action
+  | PhonyExe PhonyExecutable
+    -- ^ Phony target which always executes action
 
 
 isPhony :: Workflow -> Bool
@@ -106,6 +119,7 @@ isPhony = \case
   Workflow{}    -> False
   WorkflowExe{} -> False
   Phony{}       -> True
+  PhonyExe{}    -> True
 
 
 -- | Metadata which is used in @Flow@. It contains both immediate
@@ -198,6 +212,7 @@ shakeFlowGraph tgtExists (FlowGraph workflows targets)
           exists <- case f.workflow of
             -- Phony targets are always executed
             Phony{}    -> pure False
+            PhonyExe{} -> pure False
             Workflow{} -> case f.output of
               Just path -> tgtExists path
               Nothing   -> error "INTERNAL ERROR: dependence on phony target"
@@ -239,6 +254,7 @@ hashFun :: (k -> StorePath) -> Fun k a -> Fun k (Maybe StorePath)
 hashFun oracle fun = fun
   { output = case fun.workflow of
       Phony{}         -> Nothing
+      PhonyExe{}      -> Nothing
       Workflow    a   -> Just $ mkStorePath a.name
       WorkflowExe exe -> Just $ mkStorePath exe.name
   }
