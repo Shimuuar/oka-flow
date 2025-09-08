@@ -70,8 +70,8 @@ instance (IsMeta a) => FlowOutput (SavedMeta a) where
 
 -- | Save metadata value so it could be passed as parameter.
 stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
-stdSaveMeta a = scopeMeta $ do
-  put $ toMetadata a
+stdSaveMeta meta = scopeMeta $ do
+  put $ toMetadata meta
   liftHaskellFun "std.SavedMeta" ()
     (\(a::a) () -> pure $ SavedMeta a)
     ()
@@ -81,7 +81,7 @@ stdSaveSomeMeta :: Metadata -> Flow eff (Result (SavedMeta Metadata))
 stdSaveSomeMeta meta = scopeMeta $ do
   put $ absurd <$> meta
   liftHaskellFunMeta_ "std.SavedMeta" ()
-    (\out meta () -> createFileLink "meta.json" (out </> "saved.json"))
+    (\out _ () -> createFileLink "meta.json" (out </> "saved.json"))
     ()
 
 -- | Convert one saved metadata to another which possibly uses less
