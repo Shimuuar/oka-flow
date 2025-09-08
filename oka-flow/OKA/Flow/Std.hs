@@ -104,80 +104,28 @@ narrowSavedMeta r
 -- | Type tag for outputs which contains @report.pdf@
 data ReportPDF
 
-{-
-
--- | Convenience type class for collecting list of reports from tuples
---   and lists of parameters.
-class CollectReports a where
-  collectReports :: a -> [Result ReportPDF]
-
-instance CollectReports (Result ReportPDF) where
-  collectReports p = [p]
-deriving via Generically (a,b)
-    instance (CollectReports a, CollectReports b) => CollectReports (a,b)
-deriving via Generically (a,b,c)
-    instance (CollectReports a, CollectReports b, CollectReports c) => CollectReports (a,b,c)
-deriving via Generically (a,b,c,d)
-    instance (CollectReports a, CollectReports b, CollectReports c, CollectReports d
-             ) => CollectReports (a,b,c,d)
-deriving via Generically (a,b,c,d,e)
-    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
-             , CollectReports e
-             ) => CollectReports (a,b,c,d,e)
-deriving via Generically (a,b,c,d,e,f)
-    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
-             , CollectReports e, CollectReports f
-             ) => CollectReports (a,b,c,d,e,f)
-deriving via Generically (a,b,c,d,e,f,g)
-    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
-             , CollectReports e, CollectReports f, CollectReports g
-             ) => CollectReports (a,b,c,d,e,f,g)
-deriving via Generically (a,b,c,d,e,f,g,h)
-    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
-             , CollectReports e, CollectReports f, CollectReports g, CollectReports h
-             ) => CollectReports (a,b,c,d,e,f,g,h)
-
-
-instance (CollectReports a) => CollectReports [a] where
-  collectReports = concatMap collectReports
-
--- | This instance could be used to derive CollectReports instance
---   with @DerivingVia@
-instance (Generic a, GCollectReports (Rep a)) => CollectReports (Generically a) where
-  collectReports (Generically a) = gcollectReports (from a)
-
-
-class GCollectReports f where
-  gcollectReports :: f p -> [Result ReportPDF]
-
-deriving newtype instance GCollectReports f => GCollectReports (M1 c i f)
-
-instance (GCollectReports f, GCollectReports g) => GCollectReports (f :*: g) where
-  gcollectReports (f :*: g) = gcollectReports f <> gcollectReports g
-
-instance (CollectReports a) => GCollectReports (K1 i a) where
-  gcollectReports = coerce (collectReports @a)
-
 
 -- | Run PDF viewer as phony workflow. Reader is picked from runtime
 --   configuration.
-runPdfReader :: (CollectReports a, ProgConfigE :> eff) => a -> Flow eff ()
-runPdfReader a = do
+runPdfReader :: (SequenceOf ReportPDF a, ProgConfigE :> eff) => a -> Flow eff ()
+runPdfReader a = do 
   pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
-  basicLiftPhony ()
-    (PhonyAction (\_ param -> runExternalProcessNoMeta pdf [p </> "report.pdf" | p <- param.args ]))
-    (collectReports a)
-
+  liftPhonyExecutable pdf ()
+    (callViaArgList $ \args -> [p </> "report.pdf" | p <- args])
+    (sequenceOf @ReportPDF a)
 
 -- | Concatenate PDFs using @pdftk@ program
-stdConcatPDF :: CollectReports a => a -> Flow eff (Result ReportPDF)
+stdConcatPDF :: SequenceOf ReportPDF a => a -> Flow eff (Result ReportPDF)
 stdConcatPDF reports = restrictMeta @() $ do
-  liftWorkflow () Action
-    { name = "std.pdftk.concat"
-    , run  = \_ p -> do
-        runExternalProcessNoMeta "pdftk"
-          ([a</>"report.pdf" | a <- p.args] ++ ["cat", "output", p.out</>"report.pdf"])
-    } (collectReports reports)
+  liftExecutable "std.pdftk.concat" "pdftk" ()
+    (callViaArgList $ \args ->
+        [a</>"report.pdf" | a <- args] ++ ["cat", "output", "report.pdf"]
+        )
+    (sequenceOf @ReportPDF reports)
+
+
+
+{-
 
 
 ----------------------------------------------------------------

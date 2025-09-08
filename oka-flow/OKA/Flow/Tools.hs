@@ -12,21 +12,27 @@ module OKA.Flow.Tools
     -- ** Argument reading
   , FlowArgument(..)
   , AsFlowInput(..)
+    -- * Class for polymorphic parameters
+  , SequenceOf(..)
     -- * Lifting of haskell function
   , liftHaskellFun
   , liftHaskellFunMeta
   , liftHaskellFun_
   , liftHaskellFunMeta_
     -- * Calling of external executables
+  , liftExecutable
+  , liftPhonyExecutable
   , callStandardExe
-  , metaFromStdin
-  , loadParametersFromCLI
   , callInEnvironment
-    -- * Encoding
+  , callViaArgList
+    -- * Encoding\/decoding of S-expressions
   , sexpToArgs
   , sexpFromArgs
+    -- * Creating executables
+  , metaFromStdin
+  , loadParametersFromCLI
 
-  
+
     -- * Standard workflow execution
   -- , metaFromStdin
   -- , runFlowArguments
@@ -49,6 +55,7 @@ import Control.Exception
 import Control.Lens                 ((^?))
 -- import Control.Monad
 -- import Control.Monad.IO.Class
+import Data.Coerce
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
@@ -58,6 +65,9 @@ import System.FilePath              ((</>))
 import System.IO.Temp
 import System.IO                    (hClose)
 import System.Environment           (getArgs)
+
+import GHC.Generics hiding (S)
+
 import OKA.Metadata
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Types
@@ -108,6 +118,64 @@ class (ToS (AsRes a)) => FlowArgument a where
   parseFlowArguments :: S FilePath -> Either String (IO a)
   -- |
   parameterShape :: (forall x. Result x) -> a -> AsRes a
+
+
+
+----------------------------------------------------------------
+-- SequenceOf
+----------------------------------------------------------------
+
+-- | Convenience type class for collecting list of results for passing
+--   for flow which simply accept uniform lists of parameters
+class SequenceOf x a where
+  sequenceOf :: a -> [Result x]
+
+instance SequenceOf x (Result x) where
+  sequenceOf p = [p]
+deriving via Generically (a,b)
+    instance (SequenceOf x a, SequenceOf x b) => SequenceOf x (a,b)
+deriving via Generically (a,b,c)
+    instance (SequenceOf x a, SequenceOf x b, SequenceOf x c) => SequenceOf x (a,b,c)
+deriving via Generically (a,b,c,d)
+    instance (SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
+             ) => SequenceOf x (a,b,c,d)
+deriving via Generically (a,b,c,d,e)
+    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
+             , SequenceOf x e
+             ) => SequenceOf x (a,b,c,d,e)
+deriving via Generically (a,b,c,d,e,f)
+    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
+             , SequenceOf x e, SequenceOf x f
+             ) => SequenceOf x (a,b,c,d,e,f)
+deriving via Generically (a,b,c,d,e,f,g)
+    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
+             , SequenceOf x e, SequenceOf x f, SequenceOf x g
+             ) => SequenceOf x (a,b,c,d,e,f,g)
+deriving via Generically (a,b,c,d,e,f,g,h)
+    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
+             , SequenceOf x e, SequenceOf x f, SequenceOf x g, SequenceOf x h
+             ) => SequenceOf x (a,b,c,d,e,f,g,h)
+
+
+instance (SequenceOf x a) => SequenceOf x [a] where
+  sequenceOf = concatMap sequenceOf
+
+-- | This instance could be used to derive SequenceOf instance
+--   with @DerivingVia@
+instance (Generic a, GSequenceOf x (Rep a)) => SequenceOf x (Generically a) where
+  sequenceOf (Generically a) = gsequenceOf (from a)
+
+
+class GSequenceOf x f where
+  gsequenceOf :: f p -> [Result x]
+
+deriving newtype instance GSequenceOf x f => GSequenceOf x (M1 c i f)
+
+instance (GSequenceOf x f, GSequenceOf x g) => GSequenceOf x (f :*: g) where
+  gsequenceOf (f :*: g) = gsequenceOf f <> gsequenceOf g
+
+instance (SequenceOf x a) => GSequenceOf x (K1 i a) where
+  gsequenceOf = coerce (sequenceOf @x @a)
 
 
 ----------------------------------------------------------------
@@ -224,7 +292,7 @@ liftHaskellFun
   :: (FlowArgument a, FlowOutput b, IsMeta meta, ResourceClaim res)
   => String              -- ^ Name of flow
   -> res                 -- ^ Resources required by workflow
-  -> (meta -> a -> IO b) -- ^ IO action 
+  -> (meta -> a -> IO b) -- ^ IO action
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFun name res action = basicLiftWorkflow res $ Workflow Action
   { name = name
@@ -245,7 +313,7 @@ liftHaskellFunMeta
   :: (FlowArgument a, FlowOutput b, ResourceClaim res)
   => String                  -- ^ Name of flow
   -> res                     -- ^ Resources required by workflow
-  -> (Metadata -> a -> IO b) -- ^ IO action 
+  -> (Metadata -> a -> IO b) -- ^ IO action
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFunMeta name res action = basicLiftWorkflow res $ Workflow Action
   { name = name
@@ -263,7 +331,7 @@ liftHaskellFun_
   :: (FlowArgument a, IsMeta meta, ResourceClaim res)
   => String                           -- ^ Name of flow
   -> res                              -- ^ Resources required by workflow
-  -> (FilePath -> meta -> a -> IO ()) -- ^ IO action 
+  -> (FilePath -> meta -> a -> IO ()) -- ^ IO action
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFun_ name res action = basicLiftWorkflow res $ Workflow Action
   { name = name
@@ -283,7 +351,7 @@ liftHaskellFunMeta_
   :: (FlowArgument a, ResourceClaim res)
   => String                               -- ^ Name of flow
   -> res                                  -- ^ Resources required by workflow
-  -> (FilePath -> Metadata -> a -> IO ()) -- ^ IO action 
+  -> (FilePath -> Metadata -> a -> IO ()) -- ^ IO action
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Workflow Action
   { name = name
@@ -301,17 +369,44 @@ liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Workflow Action
 -- Calling conventions
 ----------------------------------------------------------------
 
+liftExecutable
+  :: (ToS args, ResourceClaim res)
+  => String   -- ^ Name of flow
+  -> FilePath -- ^ Executable name
+  -> res      -- ^ Resources required by workflow
+  -> (forall a. ParamFlow FilePath -> (ProcessData -> IO a) -> IO a)
+  -- ^ Calling convention
+  -> (args -> Flow eff (Result b))
+liftExecutable name exe res call =
+  basicLiftWorkflow res $ WorkflowExe Executable
+    { name       = name
+    , executable = exe
+    , call       = call
+    }
 
--- $standard_exe
---
--- Standard calling conventions for external process.
+liftPhonyExecutable
+  :: (ToS args, ResourceClaim res)
+  => FilePath -- ^ Executable name
+  -> res      -- ^ Resources required by workflow
+  -> (forall a. ParamFlow FilePath -> (ProcessData -> IO a) -> IO a)
+  -- ^ Calling convention
+  -> (args -> Flow eff ())
+liftPhonyExecutable exe res call =
+  -- FIXME: I need to better define distinction between real and phony targets
+  undefined
+  -- basicLiftPhony res $ WorkflowExe Executable
+  --   { name       = name
+  --   , executable = exe
+  --   , call       = call
+  --   }
+
+-- | Standard calling conventions for external process.
 --
 --  * JSON-encoded metadata is passed to process via stdin.
 --
 --  * Arguments are passed via command line serialized as S-expression
 --
 --  * Working directory is set to output directory
-
 callStandardExe
   :: ParamFlow FilePath
   -> (ProcessData -> IO a)
@@ -322,28 +417,6 @@ callStandardExe p action = action ProcessData
   , args    = sexpToArgs p.args
   , workdir = p.out
   }
-
--- | Read metadata from stdin
-metaFromStdin :: IsMeta a => IO a
-metaFromStdin = do
-  (BL.getContents <&> JSON.eitherDecode) >>= \case
-    Left  e  -> error $ "Cannot read metadata: " ++ e
-    Right js -> evaluate $ decodeMetadata js
-
-loadParametersFromCLI :: FlowArgument a => IO a
-loadParametersFromCLI = do
-  args <- getArgs
-  s    <- case sexpFromArgs args of
-    Left  err -> error $ "loadFlowArguments: Cannot parse S-expression: " ++ err
-    Right s   -> pure s
-  case parseFlowArguments s of
-    Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-    Right ioa -> ioa
-
-
-----------------------------------------------------------------
--- Pass in enviroment
-----------------------------------------------------------------
 
 -- | Pass arguments in the environment
 callInEnvironment
@@ -369,6 +442,51 @@ callInEnvironment p action =
       , args    = []
       , workdir = p.out
       }
+
+
+-- | Call executable where all parameters are passing via command line
+--   parameters.
+--
+--  * Metadata is discarded
+--
+--  * Working dir is set to output directory
+callViaArgList
+  :: ([FilePath] -> [FilePath]) -- ^ How to transform list of store pathes
+  -> ParamFlow FilePath
+  -> (ProcessData -> IO a)
+  -> IO a
+callViaArgList transform p action = action $ ProcessData
+  { stdin   = Nothing
+  , env     = []
+  , args    = case sequenceS p.args of
+      Just args -> transform args
+      Nothing   -> error "callViaArgList: parameters could not be transformed into sequence"
+  , workdir = p.out
+  }
+
+
+----------------------------------------------------------------
+-- Defining subprocesses
+----------------------------------------------------------------
+
+-- | Read metadata from stdin
+metaFromStdin :: IsMeta a => IO a
+metaFromStdin = do
+  (BL.getContents <&> JSON.eitherDecode) >>= \case
+    Left  e  -> error $ "Cannot read metadata: " ++ e
+    Right js -> evaluate $ decodeMetadata js
+
+-- | Load arguments from CLI parameters
+loadParametersFromCLI :: FlowArgument a => IO a
+loadParametersFromCLI = do
+  args <- getArgs
+  s    <- case sexpFromArgs args of
+    Left  err -> error $ "loadFlowArguments: Cannot parse S-expression: " ++ err
+    Right s   -> pure s
+  case parseFlowArguments s of
+    Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+    Right ioa -> ioa
+
 
 ----------------------------------------------------------------
 -- Conversion
