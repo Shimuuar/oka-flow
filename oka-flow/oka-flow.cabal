@@ -72,6 +72,7 @@ Library
         OKA.Flow.Tools
         OKA.Flow.Std
   Other-modules:
+        OKA.Flow.Core.Result
         OKA.Flow.Internal.Util
         OKA.Flow.Internal.Parser
 

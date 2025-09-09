@@ -8,19 +8,14 @@ module OKA.Flow.Core.S
     S(..)
   , ToS(..)
   , sequenceS
-    -- * Flow parameters
-  , ParamFlow(..)
-  , ProcessData(..)
-  , toTypedProcess
   ) where
 
 import Data.ByteString.Lazy (ByteString)
 import Data.Monoid          (Endo(..))
-import System.Environment   (getEnvironment)
-import System.Process.Typed
 
 import OKA.Metadata
-import OKA.Flow.Core.Types
+import OKA.Flow.Core.Result
+
 
 ----------------------------------------------------------------
 -- S-expressions
@@ -87,44 +82,3 @@ instance (ToS a) => ToS (Maybe a) where
 instance (ToS a, ToS b) => ToS (Either a b) where
   toS (Left  a) = S [Atom "Left",  toS a]
   toS (Right b) = S [Atom "Right", toS b]
-
-
-
-
-----------------------------------------------------------------
--- Calling Flows
-----------------------------------------------------------------
-
--- | Parameters for a standard flow
-data ParamFlow a = ParamFlow
-  { meta :: Metadata
-  , args :: S a
-  , out  :: Maybe a
-  }
-  deriving stock (Functor,Foldable,Traversable)
-
-
--- | Data for calling external process
-data ProcessData = ProcessData
-  { stdin   :: !(Maybe ByteString)    -- ^ Data to pass stdin
-  , env     :: [(String,String)]      -- ^ Data for putting into environment
-  , args    :: [String]               -- ^ Arguments for a process
-  , workdir :: !(Maybe FilePath)      -- ^ Working directory for subprocess
-  }
-
-toTypedProcess :: FilePath -> ProcessData -> IO (ProcessConfig () () ())
-toTypedProcess exe process = do
-  env <- case process.env of
-    [] -> pure []
-    es -> do env <- getEnvironment
-             pure $ env ++ es
-  pure $ case process.workdir of
-           Nothing -> id
-           Just p  -> setWorkingDir p
-       $ case process.stdin of
-           Nothing -> id
-           Just bs -> setStdin (byteStringInput bs)
-       $ case env of
-           [] -> id
-           _  -> setEnv env
-       $ proc exe process.args

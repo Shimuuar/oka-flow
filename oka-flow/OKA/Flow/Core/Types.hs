@@ -1,29 +1,29 @@
 -- |
 module OKA.Flow.Core.Types
-  ( FunID(..)
+  ( -- * Dataflow graph handles
+    FunID(..)
   , Result(..)
+    -- * Store path
   , Hash(..)
   , StorePath(..)
   , storePath
+    -- * Flow parameters
+  , ParamFlow(..)
+  , ProcessData(..)
+  , toTypedProcess
   ) where
 
 import Data.ByteString        (ByteString)
 import Data.ByteString.Char8  qualified as BC8
+import Data.ByteString.Lazy   qualified as BL
 import Data.ByteString.Base16 qualified as Base16
 import System.FilePath        ((</>))
+import System.Environment     (getEnvironment)
+import System.Process.Typed
 
-----------------------------------------------------------------
--- Nodes in dataflow graph
-----------------------------------------------------------------
-
--- | Internal identifier of dataflow function in a graph.
-newtype FunID = FunID Int
-  deriving (Show,Eq,Ord)
-
--- | Opaque handle to result of evaluation of single dataflow
---   function. It doesn't contain any real data and in fact is just a
---   promise to evaluate result.
-newtype Result a = Result FunID
+import OKA.Metadata
+import OKA.Flow.Core.S
+import OKA.Flow.Core.Result
 
 
 
@@ -48,3 +48,41 @@ data StorePath = StorePath
 -- | Compute file name of directory in nix-like store.
 storePath :: StorePath -> FilePath
 storePath (StorePath nm (Hash hash)) = nm </> BC8.unpack (Base16.encode hash)
+
+----------------------------------------------------------------
+-- Calling Flows
+----------------------------------------------------------------
+
+-- | Parameters for a standard flow
+data ParamFlow a = ParamFlow
+  { meta :: Metadata
+  , args :: S a
+  , out  :: Maybe a
+  }
+  deriving stock (Functor,Foldable,Traversable)
+
+
+-- | Data for calling external process
+data ProcessData = ProcessData
+  { stdin   :: !(Maybe BL.ByteString) -- ^ Data to pass stdin
+  , env     :: [(String,String)]      -- ^ Data for putting into environment
+  , args    :: [String]               -- ^ Arguments for a process
+  , workdir :: !(Maybe FilePath)      -- ^ Working directory for subprocess
+  }
+
+toTypedProcess :: FilePath -> ProcessData -> IO (ProcessConfig () () ())
+toTypedProcess exe process = do
+  env <- case process.env of
+    [] -> pure []
+    es -> do env <- getEnvironment
+             pure $ env ++ es
+  pure $ case process.workdir of
+           Nothing -> id
+           Just p  -> setWorkingDir p
+       $ case process.stdin of
+           Nothing -> id
+           Just bs -> setStdin (byteStringInput bs)
+       $ case env of
+           [] -> id
+           _  -> setEnv env
+       $ proc exe process.args
