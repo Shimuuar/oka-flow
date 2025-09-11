@@ -28,6 +28,8 @@ import OKA.Flow.Core.Run
 import OKA.Flow.Core.S
 import OKA.Flow.Std
 import OKA.Flow.Core.Resources
+import OKA.Flow.Core.Flow
+import OKA.Flow.Core.Types
 import OKA.Flow.Eff.Cache
 import OKA.Flow
 
@@ -297,9 +299,9 @@ flowProduceInt
 flowProduceInt = do
   obs <- newObserve
   pure ( obs
-       , liftWorkflow (LockCoreCPU 1) $ Action
+       , basicLiftWorkflow (LockCoreCPU 1) $ Dataflow
          { name = "produce-" ++ (symbolVal (Proxy @name))
-         , run  = \_ p -> do
+         , flow = ActionIO $ HaskellIO $ \_ p -> do
              let n   = p.meta ^. metadata @(CounterMeta name) . to (.count)
                  out = fromJust p.out
              saveObservation obs out n
@@ -311,9 +313,9 @@ flowSquare :: IO (Observe Int, Result Int -> Flow eff (Result Int))
 flowSquare = do
   obs <- newObserve
   pure ( obs
-       , liftWorkflow (LockCoreCPU 1) $ Action
+       , basicLiftWorkflow (LockCoreCPU 1) $ Dataflow
          { name = "square"
-         , run  = \_ p -> do
+         , flow = ActionIO $ HaskellIO $ \_ p -> do
              let Param arg = p.args
                  out       = fromJust p.out
              n <- read @Int <$> readFile (arg </> "out.txt")
@@ -327,7 +329,7 @@ flowPhony :: IO (ObsPhony Int, Result Int -> Flow eff ())
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
-       , basicLiftPhony (LockCoreCPU 1) $ PhonyAction $ \_ p -> do
+       , basicLiftPhony (LockCoreCPU 1) $ ActionIO $ HaskellIO $ \_ p -> do
            let Param arg = p.args
            n <- read @Int <$> readFile (arg </> "out.txt")
            let n' = n * n
@@ -335,7 +337,7 @@ flowPhony = do
        )
 
 observeOutput :: IORef [String] -> FilePath -> Result a -> Flow eff ()
-observeOutput out expected = basicLiftPhony () $ PhonyAction $ \_ p -> do
+observeOutput out expected = basicLiftPhony () $ ActionIO $ HaskellIO $ \_ p -> do
   let Param arg = p.args
   let hash = last (splitPath arg)
   when (hash /= expected) $

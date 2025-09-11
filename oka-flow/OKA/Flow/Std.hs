@@ -40,10 +40,12 @@ import OKA.Flow.Tools
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.S
+import OKA.Flow.Core.Types
 import OKA.Flow.Eff
 import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Internal.Util
+
 
 ----------------------------------------------------------------
 -- Saved metadata
@@ -150,7 +152,7 @@ stdJupyter notebooks params = do
         Nothing -> "chromium"
         Just b  -> b
   basicLiftPhony ()
-    (PhonyAction $ \_ param -> do
+    (ActionIO $ HaskellIO $ \_ param -> do
       -- Figure out notebook directory. We use common prefix as
       -- heuristic.
       --
@@ -175,14 +177,14 @@ stdJupyter notebooks params = do
           createDirectory dir_config
           createDirectory dir_data
           run_jupyter <- toTypedProcess "jupyter"
-            proc_jupyter { env  = [ ("JUPYTER_DATA_DIR",   dir_data)
-                                  , ("JUPYTER_CONFIG_DIR", dir_config)
-                                  ] ++ proc_jupyter.env
-                         , args = [ "notebook"
-                                  , "--no-browser"
-                                  , "--notebook-dir=" ++ notebook_dir
-                                  ]
-                         }
+            proc_jupyter{ env  = [ ("JUPYTER_DATA_DIR",   dir_data)
+                                 , ("JUPYTER_CONFIG_DIR", dir_config)
+                                 ] ++ proc_jupyter.env
+                        , args = [ "notebook"
+                                 , "--no-browser"
+                                 , "--notebook-dir=" ++ notebook_dir
+                                 ]
+                        }
           withProcessWait_ run_jupyter $ \_ -> do
             -- Wait until server starts and launch browser.
             jp <- waitForJupyter dir_data >>= \case

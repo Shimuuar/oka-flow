@@ -29,11 +29,11 @@ module OKA.Flow
     -- * Defining workflows
   , Workflow(..)
   , Action(..)
-  , basicLiftWorkflow
-  , liftWorkflow
-  , basicLiftPhony
+  -- , basicLiftWorkflow
+  -- , liftWorkflow
+  -- , basicLiftPhony
   -- , liftPhony
-  , basicLiftExe
+  -- , basicLiftExe
     -- * Resources
   , ResourceClaim(..)
   , ResourceDef(..)
@@ -55,6 +55,7 @@ import OKA.Metadata.Meta
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.Run
+import OKA.Flow.Core.Result
 -- import OKA.Flow.Tools
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.S

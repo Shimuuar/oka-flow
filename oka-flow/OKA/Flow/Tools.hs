@@ -294,9 +294,9 @@ liftHaskellFun
   -> res                 -- ^ Resources required by workflow
   -> (meta -> a -> IO b) -- ^ IO action
   -> (AsRes a -> Flow eff (Result b))
-liftHaskellFun name res action = basicLiftWorkflow res $ Workflow Action
+liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , run  = \_ p -> do
+  , flow = ActionIO $ HaskellIO $ \_ p -> do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
@@ -315,9 +315,9 @@ liftHaskellFunMeta
   -> res                     -- ^ Resources required by workflow
   -> (Metadata -> a -> IO b) -- ^ IO action
   -> (AsRes a -> Flow eff (Result b))
-liftHaskellFunMeta name res action = basicLiftWorkflow res $ Workflow Action
+liftHaskellFunMeta name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , run  = \_ p -> do
+  , flow = ActionIO $ HaskellIO $ \_ p -> do
       a <- case parseFlowArguments p.args of
         Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
         Right ioa -> ioa
@@ -333,9 +333,9 @@ liftHaskellFun_
   -> res                              -- ^ Resources required by workflow
   -> (FilePath -> meta -> a -> IO ()) -- ^ IO action
   -> (AsRes a -> Flow eff (Result b))
-liftHaskellFun_ name res action = basicLiftWorkflow res $ Workflow Action
+liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , run  = \_ p -> do
+  , flow = ActionIO $ HaskellIO $ \_ p -> do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
@@ -353,9 +353,9 @@ liftHaskellFunMeta_
   -> res                                  -- ^ Resources required by workflow
   -> (FilePath -> Metadata -> a -> IO ()) -- ^ IO action
   -> (AsRes a -> Flow eff (Result b))
-liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Workflow Action
+liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , run  = \_ p -> do
+  , flow = ActionIO $ HaskellIO $ \_ p -> do
       a <- case parseFlowArguments p.args of
         Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
         Right ioa -> ioa
@@ -378,10 +378,9 @@ liftExecutable
   -- ^ Calling convention
   -> (args -> Flow eff (Result b))
 liftExecutable name exe res call =
-  basicLiftWorkflow res $ WorkflowExe Executable
-    { name       = name
-    , executable = exe
-    , call       = call
+  basicLiftWorkflow res $ Dataflow
+    { name = name
+    , flow = ActionExe $ Executable exe call
     }
 
 liftPhonyExecutable
@@ -392,10 +391,8 @@ liftPhonyExecutable
   -- ^ Calling convention
   -> (args -> Flow eff ())
 liftPhonyExecutable exe res call =
-  basicLiftPhonyExe res $ PhonyExecutable
-    { executable = exe
-    , call       = call
-    }
+  basicLiftPhony res $ ActionExe $ Executable exe call
+
 
 -- | Standard calling conventions for external process.
 --

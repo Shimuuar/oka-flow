@@ -10,10 +10,8 @@ module OKA.Flow.Core.S
   , sequenceS
   ) where
 
-import Data.ByteString.Lazy (ByteString)
 import Data.Monoid          (Endo(..))
 
-import OKA.Metadata
 import OKA.Flow.Core.Result
 
 
@@ -33,7 +31,7 @@ data S a
 -- | Some collection of 'Result's
 class ToS a where
   -- | Convert value to a S-expression for passing to S.
-  toS :: a -> S FunID
+  toS :: a -> S AResult
 
 -- | Convert S-expression that doesn't contain 'Atom's into list.
 sequenceS :: S a -> Maybe [a]

@@ -1,8 +1,10 @@
 -- |
 module OKA.Flow.Core.Types
   ( -- * Dataflow graph handles
-    FunID(..)
-  , Result(..)
+    Result(..)
+  , Phony(..)
+  , AResult
+  , APhony
     -- * Store path
   , Hash(..)
   , StorePath(..)
