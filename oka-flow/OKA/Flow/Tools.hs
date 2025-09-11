@@ -25,28 +25,15 @@ module OKA.Flow.Tools
   , callStandardExe
   , callInEnvironment
   , callViaArgList
+    -- * Primitives for creating flows
+  , basicLiftWorkflow
+  , basicLiftPhony
     -- * Encoding\/decoding of S-expressions
   , sexpToArgs
   , sexpFromArgs
     -- * Creating executables
   , metaFromStdin
   , loadParametersFromCLI
-
-
-    -- * Standard workflow execution
-  -- , metaFromStdin
-  -- , runFlowArguments
-  -- , flowArgumentsFromCLI
-  -- , executeStdWorkflow
-  -- , executeStdWorkflowOut
-  --   -- * Building GHC programs
-  -- , compileProgramGHC
-  -- , defGhcOpts
-  --   -- * External process
-  -- , runExternalProcess
-  -- , runExternalProcessNoMeta
-  -- , withParametersInEnv
-  -- , softKill
   ) where
 
 import Control.Applicative
@@ -371,11 +358,10 @@ liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Dataflow
 
 liftExecutable
   :: (ToS args, ResourceClaim res)
-  => String   -- ^ Name of flow
-  -> FilePath -- ^ Executable name
-  -> res      -- ^ Resources required by workflow
-  -> (forall a. ParamFlow FilePath -> (ProcessData -> IO a) -> IO a)
-  -- ^ Calling convention
+  => String      -- ^ Name of flow
+  -> FilePath    -- ^ Executable name
+  -> res         -- ^ Resources required by workflow
+  -> CallingConv -- ^ Calling convention
   -> (args -> Flow eff (Result b))
 liftExecutable name exe res call =
   basicLiftWorkflow res $ Dataflow
@@ -385,10 +371,9 @@ liftExecutable name exe res call =
 
 liftPhonyExecutable
   :: (ToS args, ResourceClaim res)
-  => FilePath -- ^ Executable name
-  -> res      -- ^ Resources required by workflow
-  -> (forall a. ParamFlow FilePath -> (ProcessData -> IO a) -> IO a)
-  -- ^ Calling convention
+  => FilePath    -- ^ Executable name
+  -> res         -- ^ Resources required by workflow
+  -> CallingConv -- ^ Calling convention
   -> (args -> Flow eff ())
 liftPhonyExecutable exe res call =
   basicLiftPhony res $ ActionExe $ Executable exe call
@@ -511,48 +496,6 @@ sexpFromArgs xs = runListParser parserS xs where
     ")" -> pure []
     _   -> fail "Expecting )"
 
-
-----------------------------------------------------------------
--- Standard tools for writing executables
-----------------------------------------------------------------
-
-
--- -- | Read arguments from using 'FlowArgument' type class.
--- runFlowArguments :: FlowArgument a => [FilePath] -> IO a
--- runFlowArguments paths = runListParserIO parserFlowArguments paths >>= \case
---   Left  e -> error $ "runFlowArguments: " ++ e
---   Right a -> pure a
-
--- -- | Parse standard arguments passed as command line parameters
--- flowArgumentsFromCLI :: FlowArgument a => IO (FilePath, a)
--- flowArgumentsFromCLI = getArgs >>= \case
---     []         -> error "flowArgumentsFromCLI: No output directory provided"
---     (out:args) -> do a <- runFlowArguments args
---                      pure (out,a)
-
-
--- -- | Execute workflow as a separate process using standard calling
--- --   conventions: metadata is written to stdin, output directory and
--- --   store paths are passed as command line parameters.
--- executeStdWorkflow
---   :: (IsMeta meta, FlowArgument a, FlowOutput b)
---   => (meta -> a -> IO b)
---   -> IO ()
--- executeStdWorkflow action = executeStdWorkflowOut $ \meta a out -> do
---   b <- action meta a
---   writeOutput out b
-
--- -- | Same as 'executeStdWorkflow' but workflow should write output directory by itself.
--- executeStdWorkflowOut
---   :: (IsMeta meta, FlowArgument a)
---   => (meta -> a -> FilePath -> IO ())
---   -> IO ()
--- executeStdWorkflowOut action = do
---   meta <- metaFromStdin
---   getArgs >>= \case
---     []         -> error "executeStdWorkflowOut: No output directory provided"
---     (out:args) -> do a <- runFlowArguments args
---                      action meta a out
 
 
 

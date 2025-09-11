@@ -15,8 +15,13 @@ module OKA.Flow.Core.Types
   , ProcessData(..)
   , CallingConv
   , toTypedProcess
+  , startSubprocessAndWait
   ) where
 
+import Control.Applicative
+import Control.Monad
+import Control.Exception
+import Control.Concurrent.STM
 import Data.ByteString        (ByteString)
 import Data.ByteString.Char8  qualified as BC8
 import Data.ByteString.Lazy   qualified as BL
@@ -24,6 +29,7 @@ import Data.ByteString.Base16 qualified as Base16
 import System.FilePath        ((</>))
 import System.Environment     (getEnvironment)
 import System.Process.Typed
+import System.Posix.Signals         (signalProcess, sigINT)
 
 import OKA.Metadata
 import OKA.Flow.Core.S
@@ -99,3 +105,29 @@ toTypedProcess exe process = do
            [] -> id
            _  -> setEnv env
        $ proc exe process.args
+
+-- | Create subprocess and wait for its completions. If execution is
+--   interrupted subprocess is killed. If process exits with nonzero
+--   exit code exception is raised.
+startSubprocessAndWait
+  :: FilePath           -- ^ Executable name
+  -> CallingConv        -- ^ Calling conventions
+  -> ParamFlow FilePath -- ^ Parameters
+  -> IO ()
+startSubprocessAndWait exe call param = 
+  call param $ \process -> do
+    run <- toTypedProcess exe process
+    withProcessWait_ run $ \pid -> do
+      _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
+      pure ()
+
+-- Kill process but allow it to die gracefully by sending SIGINT
+-- first. GHC install handler for it but not for SIGTERM
+softKill :: Process stdin stdout stderr -> IO ()
+softKill p = getPid p >>= \case
+  Nothing  -> pure ()
+  Just pid -> do
+    delay <- registerDelay 1_000_000
+    signalProcess sigINT pid
+    atomically $  (check =<< readTVar delay)
+              <|> (void $ waitExitCodeSTM p)

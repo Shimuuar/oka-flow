@@ -10,9 +10,7 @@ module OKA.Flow.Core.Run
   ) where
 
 import Control.Applicative
-import Control.Monad
 import Control.Concurrent.Async
-import Control.Concurrent.STM
 import Control.Exception
 import Control.Lens
 import Data.Aeson                   qualified as JSON
@@ -29,11 +27,9 @@ import Effectful
 import Effectful.State.Static.Local qualified as Eff
 
 import System.FilePath              ((</>))
-import System.Process.Typed
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
                                      doesDirectoryExist
                                     )
-import System.Posix.Signals         (signalProcess, sigINT)
 
 import OKA.Metadata
 import OKA.Metadata.Meta
@@ -181,51 +177,31 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
     () <- case fun.workflow of
       -- Execution of normal workflow
       WorkflowNormal dataflow -> do
-        let normalExecution action = do
-              let path = case fun.output of RunDataflow _ p -> p
-              ctx.logger.start path
-              t1 <- getCurrentTime
-              () <- withBuildDirectory ctx.root path $ \build -> do
-                BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
-                -- FIXME: I need to properly write deps.txt
-                -- writeFile    (build </> "deps.txt")  $ unlines paramP
-                action build
-              t2 <- getCurrentTime
-              ctx.logger.done path (diffUTCTime t2 t1)
-        case dataflow.flow of
-          ActionIO io  -> normalExecution $ \build ->
-            io ctx.res ParamFlow{ meta = meta
+        let path = case fun.output of RunDataflow _ p -> p
+        ctx.logger.start path
+        t1 <- getCurrentTime
+        () <- withBuildDirectory ctx.root path $ \build -> do
+          BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
+          -- FIXME: I need to properly write deps.txt
+          -- writeFile    (build </> "deps.txt")  $ unlines paramP
+          let param = ParamFlow { meta = meta
                                 , args = params
                                 , out  = Just build
                                 }
-          --
-          ActionExe exe@Executable{call} -> normalExecution $ \build -> do
-            let param = ParamFlow { meta = meta
-                                  , args = params
-                                  , out  = Just build
-                                  }
-            call param $ \process -> do
-              run <- toTypedProcess exe.executable process
-              withProcessWait_ run $ \pid -> do
-                _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
-                pure ()
+          case dataflow.flow of
+            ActionIO  io                   -> io ctx.res param
+            ActionExe exe@Executable{call} -> startSubprocessAndWait exe.executable call param
+        t2 <- getCurrentTime
+        ctx.logger.done path (diffUTCTime t2 t1)
       ----------------
-      WorkflowPhony phony -> case phony of
-        ActionIO io ->
-          io ctx.res ParamFlow{ meta = meta
-                              , args = params
-                              , out  = Nothing
-                              }
-        ActionExe exe@Executable{call} -> do
-          let param = ParamFlow { meta = meta
-                                , args = params
-                                , out  = Nothing
-                                }
-          call param $ \process -> do
-            run <- toTypedProcess exe.executable process
-            withProcessWait_ run $ \pid -> do
-              _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
-              pure ()
+      WorkflowPhony phony -> do
+        let param = ParamFlow{ meta = meta
+                             , args = params
+                             , out  = Nothing
+                             }
+        case phony of
+          ActionIO  io                   -> io ctx.res param
+          ActionExe exe@Executable{call} -> startSubprocessAndWait exe.executable call param
     -- Signal that we successfully completed execution
     case fun.output of
       RunDataflow b _ -> clearBarrier b
@@ -331,19 +307,3 @@ prepareExtMetaCache ctx gr targets = do
         Right js -> case decodeMetadataPrimEither js of
           Left  e -> throw e
           Right a -> pure a
-
-
-----------------------------------------------------------------
--- Helpers
-----------------------------------------------------------------
-
--- Kill process but allow it to die gracefully by sending SIGINT
--- first. GHC install handler for it but not for SIGTERM
-softKill :: Process stdin stdout stderr -> IO ()
-softKill p = getPid p >>= \case
-  Nothing  -> pure ()
-  Just pid -> do
-    delay <- registerDelay 1_000_000
-    signalProcess sigINT pid
-    atomically $  (check =<< readTVar delay)
-              <|> (void $ waitExitCodeSTM p)
