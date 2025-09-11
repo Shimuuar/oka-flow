@@ -152,7 +152,7 @@ stdJupyter notebooks params = do
         Nothing -> "chromium"
         Just b  -> b
   basicLiftPhony ()
-    (ActionIO $ HaskellIO $ \_ param -> do
+    (ActionIO $ \_ param -> do
       -- Figure out notebook directory. We use common prefix as
       -- heuristic.
       --

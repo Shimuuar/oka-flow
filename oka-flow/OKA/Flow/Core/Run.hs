@@ -4,10 +4,10 @@
 -- |
 -- Evaluator of dataflow graph.
 module OKA.Flow.Core.Run
-{-  ( FlowCtx(..)
+  ( FlowCtx(..)
   , FlowLogger(..)
   , runFlow
-  )-} where
+  ) where
 
 import Control.Applicative
 import Control.Monad
@@ -194,10 +194,10 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
               ctx.logger.done path (diffUTCTime t2 t1)
         case dataflow.flow of
           ActionIO io  -> normalExecution $ \build ->
-            io.run ctx.res ParamFlow{ meta = meta
-                                    , args = params
-                                    , out  = Just build
-                                    }
+            io ctx.res ParamFlow{ meta = meta
+                                , args = params
+                                , out  = Just build
+                                }
           --
           ActionExe exe@Executable{call} -> normalExecution $ \build -> do
             let param = ParamFlow { meta = meta
@@ -212,11 +212,10 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
       ----------------
       WorkflowPhony phony -> case phony of
         ActionIO io ->
-          io.run ctx.res ParamFlow{ meta = meta
-                                  , args = params
-                                  , out  = Nothing
-                                  }
-
+          io ctx.res ParamFlow{ meta = meta
+                              , args = params
+                              , out  = Nothing
+                              }
         ActionExe exe@Executable{call} -> do
           let param = ParamFlow { meta = meta
                                 , args = params

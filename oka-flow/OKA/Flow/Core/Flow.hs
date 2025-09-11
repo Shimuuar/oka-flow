@@ -24,10 +24,8 @@ module OKA.Flow.Core.Flow
 
 import Control.Applicative
 import Control.Lens
-import Control.Monad
 import Control.Monad.State.Strict
 import Data.Foldable                (toList)
-import Data.Map.Strict              ((!))
 import Data.Map.Strict              qualified as Map
 import Data.Set                     qualified as Set
 import Data.Proxy
@@ -99,7 +97,7 @@ restrictMeta action = scopeMeta $ do
 -- Defining effects
 ----------------------------------------------------------------
 
--- | We want given workflow evaluated
+-- | Make sure that all workflows passed as parameters are evaluated.
 want :: ToS a => a -> Flow eff ()
 want a = Flow $ Eff.modify $ stGraphL . flowTgtL %~ (<> (Set.fromList . toList . toS) a)
 

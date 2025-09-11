@@ -1,4 +1,5 @@
 -- |
+-- Basic data types sued for definition of dataflow graph.
 module OKA.Flow.Core.Types
   ( -- * Dataflow graph handles
     Result(..)
@@ -12,6 +13,7 @@ module OKA.Flow.Core.Types
     -- * Flow parameters
   , ParamFlow(..)
   , ProcessData(..)
+  , CallingConv
   , toTypedProcess
   ) where
 
@@ -63,16 +65,25 @@ data ParamFlow a = ParamFlow
   }
   deriving stock (Functor,Foldable,Traversable)
 
-
 -- | Data for calling external process
 data ProcessData = ProcessData
   { stdin   :: !(Maybe BL.ByteString) -- ^ Data to pass stdin
-  , env     :: [(String,String)]      -- ^ Data for putting into environment
+  , env     :: [(String,String)]      -- ^ Data for putting into environment. Otherwise environment
+                                      --   is inherited.
   , args    :: [String]               -- ^ Arguments for a process
-  , workdir :: !(Maybe FilePath)      -- ^ Working directory for subprocess
+  , workdir :: !(Maybe FilePath)      -- ^ Working directory for subprocess.
   }
 
-toTypedProcess :: FilePath -> ProcessData -> IO (ProcessConfig () () ())
+
+-- | Bracket for passing parameters to a subprocess
+type CallingConv = forall a. (ParamFlow FilePath -> (ProcessData -> IO a) -> IO a)
+
+-- | Convert dictionary into data structure for calling external
+--   process using @typed-process@
+toTypedProcess
+  :: FilePath    -- ^ Executable name
+  -> ProcessData -- ^ Parameters
+  -> IO (ProcessConfig () () ())
 toTypedProcess exe process = do
   env <- case process.env of
     [] -> pure []

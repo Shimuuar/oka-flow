@@ -11,8 +11,8 @@ module OKA.Flow.Core.Graph
   , APhony
   , Result
   , Phony
+  , CallingConv
     -- ** Single dataflow description 
-  , HaskellIO(..)
   , Executable(..)
   , Action(..)
   , Dataflow(..)
@@ -70,27 +70,21 @@ import OKA.Flow.Core.S
 -- Dataflow graph definition
 ----------------------------------------------------------------
 
--- | Single action to be performed. This is just wrapper haskell
---   action.
-newtype HaskellIO = HaskellIO
-  { run  :: ResourceSet -> ParamFlow FilePath -> IO ()
-    -- ^ Execute action on store
-  }
 
 -- | Action which runs executable. It should be used if one want to
 --   call external executable. This way executor can correctly pass
 --   metadata to it.
 data Executable = Executable
-  { executable :: FilePath
-    -- ^ Executable to start
-  , call       :: forall a. ParamFlow FilePath -> (ProcessData -> IO a) -> IO a
-    -- ^ IO action which could be executed to prepare program.
+  { executable :: FilePath    -- ^ Executable to start
+  , call       :: CallingConv -- ^ IO action which could be executed to prepare program.
   }
 
 -- | Action to be execute by dataflow either normal or phony.
 data Action
-  = ActionIO  HaskellIO  -- ^ Some haskell function 
-  | ActionExe Executable -- ^ Run executable
+  = ActionIO  (ResourceSet -> ParamFlow FilePath -> IO ())
+    -- ^ Some haskell function 
+  | ActionExe Executable
+    -- ^ Run executable
 
 -- | Dataflow which produces output in the store.
 data Dataflow = Dataflow

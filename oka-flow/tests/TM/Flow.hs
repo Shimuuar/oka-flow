@@ -301,7 +301,7 @@ flowProduceInt = do
   pure ( obs
        , basicLiftWorkflow (LockCoreCPU 1) $ Dataflow
          { name = "produce-" ++ (symbolVal (Proxy @name))
-         , flow = ActionIO $ HaskellIO $ \_ p -> do
+         , flow = ActionIO $ \_ p -> do
              let n   = p.meta ^. metadata @(CounterMeta name) . to (.count)
                  out = fromJust p.out
              saveObservation obs out n
@@ -315,7 +315,7 @@ flowSquare = do
   pure ( obs
        , basicLiftWorkflow (LockCoreCPU 1) $ Dataflow
          { name = "square"
-         , flow = ActionIO $ HaskellIO $ \_ p -> do
+         , flow = ActionIO $ \_ p -> do
              let Param arg = p.args
                  out       = fromJust p.out
              n <- read @Int <$> readFile (arg </> "out.txt")
@@ -329,7 +329,7 @@ flowPhony :: IO (ObsPhony Int, Result Int -> Flow eff ())
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
-       , basicLiftPhony (LockCoreCPU 1) $ ActionIO $ HaskellIO $ \_ p -> do
+       , basicLiftPhony (LockCoreCPU 1) $ ActionIO $ \_ p -> do
            let Param arg = p.args
            n <- read @Int <$> readFile (arg </> "out.txt")
            let n' = n * n
@@ -337,7 +337,7 @@ flowPhony = do
        )
 
 observeOutput :: IORef [String] -> FilePath -> Result a -> Flow eff ()
-observeOutput out expected = basicLiftPhony () $ ActionIO $ HaskellIO $ \_ p -> do
+observeOutput out expected = basicLiftPhony () $ ActionIO $ \_ p -> do
   let Param arg = p.args
   let hash = last (splitPath arg)
   when (hash /= expected) $

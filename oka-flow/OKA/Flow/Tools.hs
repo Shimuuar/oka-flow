@@ -296,7 +296,7 @@ liftHaskellFun
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , flow = ActionIO $ HaskellIO $ \_ p -> do
+  , flow = ActionIO $ \_ p -> do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
@@ -317,7 +317,7 @@ liftHaskellFunMeta
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFunMeta name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , flow = ActionIO $ HaskellIO $ \_ p -> do
+  , flow = ActionIO $ \_ p -> do
       a <- case parseFlowArguments p.args of
         Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
         Right ioa -> ioa
@@ -335,7 +335,7 @@ liftHaskellFun_
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , flow = ActionIO $ HaskellIO $ \_ p -> do
+  , flow = ActionIO $ \_ p -> do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
@@ -355,7 +355,7 @@ liftHaskellFunMeta_
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , flow = ActionIO $ HaskellIO $ \_ p -> do
+  , flow = ActionIO $ \_ p -> do
       a <- case parseFlowArguments p.args of
         Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
         Right ioa -> ioa
