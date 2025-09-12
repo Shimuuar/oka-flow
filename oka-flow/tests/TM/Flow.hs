@@ -23,13 +23,8 @@ import GHC.Generics     (Generic)
 import GHC.TypeLits
 
 import OKA.Metadata
-import OKA.Flow.Core.Graph
-import OKA.Flow.Core.Run
-import OKA.Flow.Core.S
 import OKA.Flow.Std
 import OKA.Flow.Core.Resources
-import OKA.Flow.Core.Flow
-import OKA.Flow.Core.Types
 import OKA.Flow.Eff.Cache
 import OKA.Flow.Tools
 import OKA.Flow
@@ -216,7 +211,7 @@ tests = testGroup "Run flow"
         let memoized :: (CacheE :> eff, IOE :> eff) => Int -> Flow eff Int
             memoized = memoize (Proxy @MemoKey) $ \i -> do
               assertFlowEq "memoized" Nothing
-                =<< lookupMeta @(Maybe (CounterMeta "A"))
+                =<< (use (metadata @(Maybe (CounterMeta "A"))))
               appendMeta (CounterMeta 200 :: CounterMeta "A")
               liftEff $ liftIO $ modifyIORef' cnt succ
               pure i

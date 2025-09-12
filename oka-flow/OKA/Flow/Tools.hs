@@ -8,9 +8,14 @@ module OKA.Flow.Tools
     -- $store
     FlowOutput(..)
   , FlowInput(..)
-  , AsMetaEncoded(..)
+  , Action(..)
+  , Dataflow(..)
+  , ParamFlow(..)
+  , S(..)
     -- ** Argument reading
   , FlowArgument(..)
+    -- ** Deriving via
+  , AsMetaEncoded(..)
   , AsFlowInput(..)
     -- * Class for polymorphic parameters
   , SequenceOf(..)
@@ -275,6 +280,8 @@ instance (FlowArgument a, FlowArgument b, FlowArgument c, FlowArgument d
 -- FIXME: How to properly encode result of b? Is Result OK?
 ----------------------------------------------------------------
 
+-- | Convert haskell function into dataflow. Arguments are loaded and
+--   stored using type classes methods.
 liftHaskellFun
   :: (FlowArgument a, FlowOutput b, IsMeta meta, ResourceClaim res)
   => String              -- ^ Name of flow
@@ -296,6 +303,7 @@ liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
         Nothing  -> error "liftHaskellFun: output is required"
   }
 
+-- | Same as 'liftHaskellFun' but passes noninterpreted metadata.
 liftHaskellFunMeta
   :: (FlowArgument a, FlowOutput b, ResourceClaim res)
   => String                  -- ^ Name of flow
@@ -314,6 +322,11 @@ liftHaskellFunMeta name res action = basicLiftWorkflow res $ Dataflow
         Nothing  -> error "liftHaskellFun: output is required"
   }
 
+
+-- | Convert haskell function into dataflow. Arguments are loaded
+--   using type 'FlowArgument' type class and provided action takes
+--   output directory as first argument and is responsible for writing
+--   outputs.
 liftHaskellFun_
   :: (FlowArgument a, IsMeta meta, ResourceClaim res)
   => String                           -- ^ Name of flow
@@ -334,6 +347,7 @@ liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
         Nothing  -> error "liftHaskellFun: output is required"
   }
 
+-- | Same as 'liftHaskellFun_' but passes noninterpreted metadata.
 liftHaskellFunMeta_
   :: (FlowArgument a, ResourceClaim res)
   => String                               -- ^ Name of flow
