@@ -11,7 +11,6 @@ module OKA.Flow.Std
   , narrowSavedMeta
     -- * Reports
   , ReportPDF
-  , CollectReports(..)
   , runPdfReader
   , stdConcatPDF
     -- * Jupyter
@@ -34,19 +33,19 @@ import System.FilePath            ((</>), splitFileName,splitPath,joinPath)
 import System.Directory           (createFileLink,createDirectory,canonicalizePath,listDirectory)
 import System.Process.Typed
 import System.IO.Temp
-import System.Environment         (getEnvironment)
 import GHC.Generics
 import GHC.Exts                   (proxy#)
 
 import OKA.Flow.Tools
-import OKA.Flow.Parser
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
-import OKA.Flow.Types
+import OKA.Flow.Core.S
+import OKA.Flow.Core.Types
 import OKA.Flow.Eff
 import OKA.Metadata
 import OKA.Metadata.Meta
-import OKA.Flow.Util
+import OKA.Flow.Internal.Util
+
 
 ----------------------------------------------------------------
 -- Saved metadata
@@ -58,34 +57,31 @@ import OKA.Flow.Util
 --   as well) is used in order to allow other flows to generate
 --   compatible outputs.
 data SavedMeta a = SavedMeta a
-  deriving FlowArgument via AsFlowOutput (SavedMeta a)
+  deriving FlowArgument via AsFlowInput (SavedMeta a)
 
 instance (IsMeta a) => FlowInput (SavedMeta a) where
   readOutput path = SavedMeta <$> readMetadata (path </> "saved.json")
 
+instance (IsMeta a) => FlowOutput (SavedMeta a) where
+  writeOutput path (SavedMeta a)
+    = BL.writeFile (path </> "saved.json")
+    $ JSON.encode $ encodeToMetadata a
+
 -- | Save metadata value so it could be passed as parameter.
 stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
-stdSaveMeta a = scopeMeta $ do
-  put $ toMetadata a
-  liftWorkflow () Action
-    { name = "std.SavedMeta"
-    , run  = \_ _meta args out -> do
-        case args of [] -> pure ()
-                     _  -> error "stdSaveMeta does not take any arguments"
-        createFileLink "meta.json" (out </> "saved.json")
-    } ()
+stdSaveMeta meta = scopeMeta $ do
+  put $ toMetadata meta
+  liftHaskellFun "std.SavedMeta" ()
+    (\(a::a) () -> pure $ SavedMeta a)
+    ()
 
 -- | Save metadata value so it could be passed as parameter.
 stdSaveSomeMeta :: Metadata -> Flow eff (Result (SavedMeta Metadata))
 stdSaveSomeMeta meta = scopeMeta $ do
   put $ absurd <$> meta
-  liftWorkflow () Action
-    { name = "std.SavedMeta"
-    , run  = \_ _meta args out -> do
-        case args of [] -> pure ()
-                     _  -> error "stdSaveMeta does not take any arguments"
-        createFileLink "meta.json" (out </> "saved.json")
-    } ()
+  liftHaskellFunMeta_ "std.SavedMeta" ()
+    (\out _ () -> createFileLink "meta.json" (out </> "saved.json"))
+    ()
 
 -- | Convert one saved metadata to another which possibly uses less
 --   data.
@@ -100,86 +96,32 @@ narrowSavedMeta r
     keysA = metadataKeySet (proxy# @a)
     keysB = metadataKeySet (proxy# @b)
 
-
 ----------------------------------------------------------------
--- Report PDF
+-- PDF reports
 ----------------------------------------------------------------
 
 -- | Type tag for outputs which contains @report.pdf@
 data ReportPDF
 
--- | Convenience type class for collecting list of reports from tuples
---   and lists of parameters.
-class CollectReports a where
-  collectReports :: a -> [Result ReportPDF]
-
-instance CollectReports (Result ReportPDF) where
-  collectReports p = [p]
-deriving via Generically (a,b)
-    instance (CollectReports a, CollectReports b) => CollectReports (a,b)
-deriving via Generically (a,b,c)
-    instance (CollectReports a, CollectReports b, CollectReports c) => CollectReports (a,b,c)
-deriving via Generically (a,b,c,d)
-    instance (CollectReports a, CollectReports b, CollectReports c, CollectReports d
-             ) => CollectReports (a,b,c,d)
-deriving via Generically (a,b,c,d,e)
-    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
-             , CollectReports e
-             ) => CollectReports (a,b,c,d,e)
-deriving via Generically (a,b,c,d,e,f)
-    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
-             , CollectReports e, CollectReports f
-             ) => CollectReports (a,b,c,d,e,f)
-deriving via Generically (a,b,c,d,e,f,g)
-    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
-             , CollectReports e, CollectReports f, CollectReports g
-             ) => CollectReports (a,b,c,d,e,f,g)
-deriving via Generically (a,b,c,d,e,f,g,h)
-    instance ( CollectReports a, CollectReports b, CollectReports c, CollectReports d
-             , CollectReports e, CollectReports f, CollectReports g, CollectReports h
-             ) => CollectReports (a,b,c,d,e,f,g,h)
-
-
-instance (CollectReports a) => CollectReports [a] where
-  collectReports = concatMap collectReports
-
--- | This instance could be used to derive CollectReports instance
---   with @DerivingVia@
-instance (Generic a, GCollectReports (Rep a)) => CollectReports (Generically a) where
-  collectReports (Generically a) = gcollectReports (from a)
-
-
-class GCollectReports f where
-  gcollectReports :: f p -> [Result ReportPDF]
-
-deriving newtype instance GCollectReports f => GCollectReports (M1 c i f)
-
-instance (GCollectReports f, GCollectReports g) => GCollectReports (f :*: g) where
-  gcollectReports (f :*: g) = gcollectReports f <> gcollectReports g
-
-instance (CollectReports a) => GCollectReports (K1 i a) where
-  gcollectReports = coerce (collectReports @a)
-
 
 -- | Run PDF viewer as phony workflow. Reader is picked from runtime
 --   configuration.
-runPdfReader :: (CollectReports a, ProgConfigE :> eff) => a -> Flow eff ()
-runPdfReader a = do
+runPdfReader :: (SequenceOf ReportPDF a, ProgConfigE :> eff) => a -> Flow eff ()
+runPdfReader a = do 
   pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
-  basicLiftPhony ()
-    (\_ _ paths -> runExternalProcessNoMeta pdf [p </> "report.pdf" | p <- paths])
-    (collectReports a)
-
+  liftPhonyExecutable pdf ()
+    (callViaArgList $ \args -> [p </> "report.pdf" | p <- args])
+    (sequenceOf @ReportPDF a)
 
 -- | Concatenate PDFs using @pdftk@ program
-stdConcatPDF :: CollectReports a => a -> Flow eff (Result ReportPDF)
+stdConcatPDF :: SequenceOf ReportPDF a => a -> Flow eff (Result ReportPDF)
 stdConcatPDF reports = restrictMeta @() $ do
-  liftWorkflow () Action
-    { name = "std.pdftk.concat"
-    , run  = \_res _meta args out -> do
-        runExternalProcessNoMeta "pdftk"
-          ([a</>"report.pdf" | a <- args] ++ ["cat", "output", out</>"report.pdf"])
-    } (collectReports reports)
+  liftExecutable "std.pdftk.concat" "pdftk" ()
+    (callViaArgList $ \args ->
+        [a</>"report.pdf" | a <- args] ++ ["cat", "output", "report.pdf"]
+        )
+    (sequenceOf @ReportPDF reports)
+
 
 
 ----------------------------------------------------------------
@@ -190,7 +132,7 @@ stdConcatPDF reports = restrictMeta @() $ do
 -- | Run jupyter notebook. Metadata and parameters are passed in
 --   environment variables.
 stdJupyter
-  :: (ResultSet p, ProgConfigE :> eff)
+  :: (ToS p, ProgConfigE :> eff)
   => [FilePath] -- ^ Notebooks' names
   -> p          -- ^ Parameters to pass to notebook.
   -> Flow eff ()
@@ -210,7 +152,7 @@ stdJupyter notebooks params = do
         Nothing -> "chromium"
         Just b  -> b
   basicLiftPhony ()
-    (\_ meta param -> do
+    (ActionIO $ \_ param -> do
       -- Figure out notebook directory. We use common prefix as
       -- heuristic.
       --
@@ -228,22 +170,22 @@ stdJupyter notebooks params = do
       let notebooks_rel = case traverse (stripPrefix notebook_dir) notebooks_abs of
             Just s  -> s
             Nothing -> error "Error during processing notebooks"
-      -- Now we can start jupyter
-      withParametersInEnv meta param $ \env_param -> do
+      callInEnvironment param $ \proc_jupyter -> do
         withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
           let dir_config  = tmp </> "config"
               dir_data    = tmp </> "data"
           createDirectory dir_config
           createDirectory dir_data
-          env <- getEnvironment
-          let run = setEnv ([ ("JUPYTER_DATA_DIR",   dir_data)
-                            , ("JUPYTER_CONFIG_DIR", dir_config)
-                            ] ++ env_param ++ env)
-                  $ proc "jupyter" [ "notebook"
-                                   , "--no-browser"
-                                   , "--notebook-dir=" ++ notebook_dir
-                                   ]
-          withProcessWait_ run $ \_ -> do
+          run_jupyter <- toTypedProcess "jupyter"
+            proc_jupyter{ env  = [ ("JUPYTER_DATA_DIR",   dir_data)
+                                 , ("JUPYTER_CONFIG_DIR", dir_config)
+                                 ] ++ proc_jupyter.env
+                        , args = [ "notebook"
+                                 , "--no-browser"
+                                 , "--notebook-dir=" ++ notebook_dir
+                                 ]
+                        }
+          withProcessWait_ run_jupyter $ \_ -> do
             -- Wait until server starts and launch browser.
             jp <- waitForJupyter dir_data >>= \case
               Nothing -> error "stdJupyter: can't find server config"
@@ -324,3 +266,4 @@ data JupyterConfig = JupyterConfig
   }
   deriving stock (Show,Generic)
   deriving anyclass (JSON.FromJSON)
+

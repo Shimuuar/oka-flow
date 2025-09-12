@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds       #-}
+{-# LANGUAGE MonoLocalBinds  #-}
 {-# LANGUAGE RecordWildCards #-}
 -- |
 -- Evaluator of dataflow graph.
@@ -8,11 +9,10 @@ module OKA.Flow.Core.Run
   , runFlow
   ) where
 
+import Control.Applicative
 import Control.Concurrent.Async
-import Control.Concurrent.MVar
 import Control.Exception
 import Control.Lens
-import Control.Monad.STM
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
@@ -36,10 +36,9 @@ import OKA.Metadata.Meta
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.Resources
-import OKA.Flow.Types
-import OKA.Flow.Tools
+import OKA.Flow.Core.S
 import OKA.Flow.Core.Types
-
+import OKA.Flow.Internal.Util
 
 ----------------------------------------------------------------
 --
@@ -88,120 +87,142 @@ data FlowCtx eff = FlowCtx
   }
 
 
+data OutputRun f where
+  RunDataflow :: Barrier -> StorePath -> OutputRun Result
+  RunPhony    ::                         OutputRun Phony
+
+
 ----------------------------------------------------------------
 -- Execution
 ----------------------------------------------------------------
 
 -- | Execute dataflow program
 runFlow
-  :: (ResultSet r)
+  :: (ToS r)
   => FlowCtx eff -- ^ Evaluation context
   -> Metadata    -- ^ Metadata for program
   -> Flow eff r  -- ^ Dataflow program
   -> IO ()
 runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
   -- Evaluate dataflow graph
-  gr <- fmap (deduplicateGraph . hashFlowGraph)
-      $ runEff
-      $ runEffect
-      $ fmap (\(r,st) -> addTargets r st.graph)
-      $ Eff.runState FlowSt{ meta  = absurd <$> meta
-                           , graph = FlowGraph mempty mempty
-                           }
-      $ m
-  -- Prepare graph for evaluation
-  targets <- shakeFlowGraph targetExists gr
-  gr_exe  <- addMVars targets gr
-  let getStorePath fids = concat [ gr ^.. flowGraphL . at fid . _Just . to (.output) . _Just
-                                 | fid <- toList fids
-                                 ]
-  ctx.logger.init (getStorePath targets.exists)
-                  (getStorePath targets.wanted)
+  (r,gr_state) <- runEff
+                $ runEffect
+                $ Eff.runState FlowSt{ meta  = absurd <$> meta
+                                     , graph = FlowGraph mempty mempty mempty
+                                     } m
+  -- Hashing and deduplication
+  let graph = deduplicateGraph
+            $ hashFlowGraph gr_state.graph
+  -- Find which nodes we want to evaluate
+  targets <- shakeFlowGraph targetExists
+           $ addTargets r graph
+  gr_exe  <- addMVars targets graph
+  --
+  do let getStorePath fids = [ p
+                             | fid            <- toList fids
+                             , PathDataflow p <- graph ^.. flowGraphL . at fid . _Just . to (.output)
+                             ]
+     ctx.logger.init (getStorePath targets.exists)
+                     (getStorePath targets.wanted)
+
   -- Prepare dictionary of external metadata which is loaded from
   -- store path
   ext_meta <- prepareExtMetaCache ctx gr_exe targets
   -- Evaluator
   mapConcurrently_ id
-    [ prepareFun ctx gr_exe ext_meta (gr_exe.graph ! i)
-    | i <- Set.toList targets.wanted
-    ]
+    $ [ prepareFun ctx gr_exe ext_meta f
+      | f <- toList gr_exe.phony
+      ]
+   ++ [ prepareFun ctx gr_exe ext_meta (gr_exe.graph ! i)
+      | i <- Set.toList targets.wanted
+      ]
   where
-    addTargets r = flowTgtL %~ mappend (Set.fromList (toResultSet r))
+    addTargets r = flowTgtL %~ mappend ((Set.fromList . toList . toS) r)
     targetExists path = doesDirectoryExist (ctx.root </> storePath path)
-
-
+  
 -- Add MVars to each node of graph. They are used to block evaluator
 -- until all dependencies are ready
-addMVars :: FIDSet -> FlowGraph a -> IO (FlowGraph (MVar (), a))
-addMVars FIDSet{exists}
-  = traverseOf flowGraphL
-  $ Map.traverseWithKey $ \fid fun -> do
-      v <- if | fid `Set.member` exists -> newMVar ()
-              | otherwise               -> newEmptyMVar
-      pure ((v,) <$> fun)
-
+addMVars
+  :: FIDSet
+  -> FlowGraph OutputPath
+  -> IO (FlowGraph OutputRun)
+addMVars FIDSet{exists,wanted} gr = do
+  graph <- Map.traverseWithKey
+    (\fid fun -> do
+        v <- if | fid `Set.member` exists -> newOpenBarrier
+                | fid `Set.member` wanted -> newBarrier
+                | otherwise               -> newBarrier -- FIXME: I want barrier which marks flow which will not execute
+        pure $ (\(PathDataflow p) -> RunDataflow v p) <$> fun
+    ) gr.graph
+  pure gr{ graph = graph
+         , phony = (fmap . fmap) (\PathPhony -> RunPhony) gr.phony
+         }
+    
 -- Prepare functixon for evaluation
 prepareFun
-  :: FlowCtx eff                          -- Evaluation context
-  -> FlowGraph (MVar (), Maybe StorePath) -- Full dataflow graph
-  -> ExtMetaCache                         -- External metadata
-  -> Fun FunID (MVar (), Maybe StorePath) -- Function to evaluate
+  :: FlowCtx eff                        -- Evaluation context
+  -> FlowGraph OutputRun                -- Full dataflow graph
+  -> ExtMetaCache                       -- External metadata
+  -> Fun r (OutputRun r)                -- Function to evaluate
   -> IO ()
 prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ do
   -- Check that all function parameters are already evaluated:
-  for_ fun.param $ \fid -> readMVar (fst $ outputOf fid)
+  for_ fun.param $ \fid -> case outputOf fid of
+    RunDataflow b _ -> checkBarrier b
   -- Compute metadata which should be passed to the workflow by
   -- applying data loaded from
   meta <- traverseMetadata (lookupExtCache ext_meta) fun.metadata
   -- Request resources & run action
   withResources ctx.res fun.resources $ do
-    case fun.workflow of
-      -- Prepare normal action. We first create output directory and
-      -- write everything there. After we're done we rename it.
-      Workflow (Action _ act) -> prepareNormal meta (act ctx.res)
-      WorkflowExe exe         -> prepareExe    meta exe
-      -- Execute phony action. We don't need to bother with setting up output
-      Phony    act            -> act.run ctx.res meta params
+    () <- case fun.workflow of
+      -- Execution of normal workflow
+      WorkflowNormal dataflow -> do
+        let path = case fun.output of RunDataflow _ p -> p
+        ctx.logger.start path
+        t1 <- getCurrentTime
+        () <- withBuildDirectory ctx.root path $ \build -> do
+          BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
+          -- FIXME: I need to properly write deps.txt
+          -- writeFile    (build </> "deps.txt")  $ unlines paramP
+          let param = ParamFlow { meta = meta
+                                , args = params
+                                , out  = Just build
+                                }
+          case dataflow.flow of
+            ActionIO  io                   -> io ctx.res param
+            ActionExe exe@Executable{call} -> startSubprocessAndWait exe.executable call param
+        t2 <- getCurrentTime
+        ctx.logger.done path (diffUTCTime t2 t1)
+      ----------------
+      WorkflowPhony phony -> do
+        let param = ParamFlow{ meta = meta
+                             , args = params
+                             , out  = Nothing
+                             }
+        case phony of
+          ActionIO  io                   -> io ctx.res param
+          ActionExe exe@Executable{call} -> startSubprocessAndWait exe.executable call param
     -- Signal that we successfully completed execution
-    putMVar (fst fun.output) ()
+    case fun.output of
+      RunDataflow b _ -> clearBarrier b
+      RunPhony        -> pure ()
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output
       Nothing -> error "INTERNAL ERROR: inconsistent flow graph"
     --
-    paramP = toPath . outputOf <$> fun.param  -- Parameters relative to store
-    params = [ ctx.root </> p | p <- paramP ] -- Parameters as real path
-    --
-    toPath (_,Just path) = storePath path
-    toPath (_,Nothing  ) = error "INTERNAL ERROR: dependence on PHONY node"
-    -- Execution of haskell action
-    prepareNormal meta action = normalExecution meta $ \build -> do
-      action meta params build
-    -- Execution of an external executable
-    prepareExe meta exe@Executable{} = normalExecution meta $ \build -> do
-      exe.io ctx.res
-      runExternalProcess exe.executable meta (build:params)
-    -- Standard wrapper for execution of workflows that create outputs
-    normalExecution meta action = do
-      let path  = case fun.output of
-            (_, Just p) -> p
-            _           -> error "INTERNAL ERROR: phony node treated as normal"
-      ctx.logger.start path
-      t1 <- getCurrentTime
-      withBuildDirectory ctx.root path $ \build -> do
-        BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
-        writeFile    (build </> "deps.txt")  $ unlines paramP
-        () <- action build
-        pure ()
-      t2 <- getCurrentTime
-      ctx.logger.done path (diffUTCTime t2 t1)
-
+    paramP = toPath . outputOf      <$> fun.param  -- Parameters relative to store
+    params = (\p -> ctx.root </> p) <$> paramP     -- Parameters as real path
+    toPath :: OutputRun Result -> FilePath
+    toPath (RunDataflow _ p) = storePath p
 
 
 -- Report crash in case of exception
-crashReport :: FlowLogger -> Fun i (a, Maybe StorePath) -> IO x -> IO x
+crashReport :: FlowLogger -> Fun r (OutputRun r) -> IO x -> IO x
 crashReport logger fun = handle $ \e0@(SomeException e) -> do
-  let path = snd fun.output
+  let path = case fun.output of
+               RunDataflow _ p -> Just p
+               RunPhony        -> Nothing
   if | Just AsyncCancelled <- cast e
        -> pure ()
      | Just (SomeAsyncException e') <- cast e
@@ -229,12 +250,12 @@ withBuildDirectory root path action = do
 ----------------------------------------------------------------
 
 
-newtype ExtMetaCache = ExtMetaCache (Map (TypeRep, FunID) SomeExtMeta)
+newtype ExtMetaCache = ExtMetaCache (Map (TypeRep, AResult) SomeExtMeta)
 
 data SomeExtMeta where
   SomeExtMeta :: IsMetaPrim a => IO a -> SomeExtMeta
 
-lookupExtCache :: forall a. Typeable a => ExtMetaCache -> FunID -> IO a
+lookupExtCache :: forall a. Typeable a => ExtMetaCache -> AResult -> IO a
 lookupExtCache (ExtMetaCache cache) fid = 
   case Map.lookup (ty, fid) cache of
     Nothing -> error "INTERNAL ERROR: missing entry in cache"
@@ -249,7 +270,7 @@ lookupExtCache (ExtMetaCache cache) fid =
 
 prepareExtMetaCache
   :: FlowCtx eff
-  -> FlowGraph (MVar (), Maybe StorePath)
+  -> FlowGraph OutputRun
   -> FIDSet
   -> IO ExtMetaCache
 prepareExtMetaCache ctx gr targets = do
@@ -261,23 +282,23 @@ prepareExtMetaCache ctx gr targets = do
            gr.graph
   pure $ ExtMetaCache cache
   where
-    toCache :: forall a. IsMetaPrim a => FunID -> Const (Endo [((TypeRep, FunID), SomeExtMeta)]) a
+    toCache :: forall a. IsMetaPrim a => AResult -> Const (Endo [((TypeRep, AResult), SomeExtMeta)]) a
     toCache fid
       = Const
       $ Endo
       ( ( (typeRep (Proxy @a), fid)
         , SomeExtMeta $ if
             | fid `Set.member` targets.wanted ->
-                 do readMVar (fst $ (gr.graph ! fid).output)
-                    readMeta @a path
+                case (gr.graph ! fid).output of
+                  RunDataflow b _ -> do checkBarrier b
+                                        readMeta @a path
             | otherwise ->
                 do readMeta @a path
         )
       :)
       where
         path = case (gr.graph ! fid).output of
-          (_,Just p)  -> ctx.root </> storePath p </> "saved.json"
-          (_,Nothing) -> error "Dependence on PHONY target"
+          RunDataflow _ p -> ctx.root </> storePath p </> "saved.json"
     --
     readMeta :: IsMetaPrim a => FilePath -> IO a
     readMeta path = do
@@ -286,14 +307,3 @@ prepareExtMetaCache ctx gr targets = do
         Right js -> case decodeMetadataPrimEither js of
           Left  e -> throw e
           Right a -> pure a
-
--- | Return action that will perform action exactly once
-once :: IO a -> IO (IO a)
-once action = do
-  cache <- newMVar Nothing
-  return $ readMVar cache >>= \case
-    Just a  -> pure a
-    Nothing -> modifyMVar cache $ \case
-      Just a  -> return (Just a, a)
-      Nothing -> do a <- action
-                    return (Just a, a)

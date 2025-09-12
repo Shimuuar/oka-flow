@@ -64,17 +64,17 @@ Library
         OKA.Flow.Core.Types
         OKA.Flow.Core.Flow
         OKA.Flow.Core.Run
+        OKA.Flow.Core.S
         --
         OKA.Flow
-        OKA.Flow.Types
         OKA.Flow.Eff
         OKA.Flow.Eff.Cache
-        OKA.Flow.Parser
         OKA.Flow.Tools
         OKA.Flow.Std
   Other-modules:
-        OKA.Flow.Util
-
+        OKA.Flow.Core.Result
+        OKA.Flow.Internal.Util
+        OKA.Flow.Internal.Parser
 
 executable oka-flow
   import:           extensions
@@ -118,4 +118,6 @@ Test-suite oka-flow-tests
                   , tasty-hunit
   hs-source-dirs: tests
   main-is:        Main.hs
-  other-modules:  TM.Flow
+  other-modules:
+      TM.Flow
+      TM.Serialization

@@ -15,9 +15,7 @@ module OKA.Flow.Core.Flow
     -- * Defining workflows
   , want
   , basicLiftWorkflow
-  , liftWorkflow
   , basicLiftPhony
-  , basicLiftExe
     -- * Lens
   , stMetaL
   , stGraphL
@@ -26,19 +24,19 @@ module OKA.Flow.Core.Flow
 
 import Control.Applicative
 import Control.Lens
-import Control.Monad
 import Control.Monad.State.Strict
-import Data.Map.Strict              ((!))
+import Data.Foldable                (toList)
 import Data.Map.Strict              qualified as Map
 import Data.Set                     qualified as Set
+import Data.Proxy
 import Effectful
 import Effectful.State.Static.Local qualified as Eff
 
 import OKA.Metadata
-import OKA.Flow.Types
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Resources
-
+import OKA.Flow.Core.Result
+import OKA.Flow.Core.S
 
 ----------------------------------------------------------------
 -- Flow monad and primitives
@@ -52,7 +50,7 @@ newtype Flow eff a = Flow
 -- | State of 'Flow' monad
 data FlowSt = FlowSt
   { meta  :: !MetadataFlow
-  , graph :: !(FlowGraph ())
+  , graph :: !(FlowGraph Proxy)
   }
 
 instance MonadFail (Flow eff) where
@@ -99,77 +97,69 @@ restrictMeta action = scopeMeta $ do
 -- Defining effects
 ----------------------------------------------------------------
 
--- | We want given workflow evaluated
-want :: ResultSet a => a -> Flow eff ()
-want a = Flow $ Eff.modify $ stGraphL . flowTgtL %~ (<> Set.fromList (toResultSet a))
+-- | Make sure that all workflows passed as parameters are evaluated.
+want :: ToS a => a -> Flow eff ()
+want a = Flow $ Eff.modify $ stGraphL . flowTgtL %~ (<> (Set.fromList . toList . toS) a)
 
 -- | Basic primitive for creating workflows. It doesn't offer any type
 --   safety so it's better to use other tools
 basicLiftWorkflow
-  :: (ResultSet params, ResourceClaim res)
+  :: (ToS params, ResourceClaim res)
   => res      -- ^ Resource required by workflow
-  -> Workflow -- ^ Workflow to be executed
+  -> Dataflow -- ^ Workflow to be executed
   -> params   -- ^ Parameters of workflow
   -> Flow eff (Result a)
 basicLiftWorkflow resource exe p = Flow $ do
-  st  <- Eff.get @FlowSt
-  -- Allocate new ID
-  let fid = case Map.lookupMax st.graph.graph of
-              Just (FunID i, _) -> FunID (i + 1)
-              Nothing           -> FunID 0
-  -- Dependence on function without result is an error
-  let res = toResultSet p
-      phonyDep i = isPhony $ (st.graph.graph ! i).workflow
-  when (any phonyDep res) $ do
-    error "Depending on phony target"
-  -- Add workflow to graph
+  st <- Eff.get @FlowSt
+  let fid = AResult $ freshFunID st.graph
   Eff.modify $ stGraphL . flowGraphL . at fid .~ Just Fun
-    { workflow  = exe
+    { workflow  = WorkflowNormal exe
     , metadata  = st.meta
-    , output    = ()
+    , output    = Proxy
     , resources = claimResource resource
-    , param     = res
+    , param     = toS p
     }
   return $ Result fid
 
--- | Create new primitive workflow.
---
---   This function does not provide any type safety by itself!
-liftWorkflow
-  :: (ResultSet params, ResourceClaim res)
-  => res    -- ^ Resources required by workflow
-  -> Action -- ^ Action to execute
-  -> params -- ^ Parameters
-  -> Flow eff (Result a)
-liftWorkflow res action p = basicLiftWorkflow res (Workflow action) p
-
 -- | Lift phony workflow (not checked)
 basicLiftPhony
-  :: (ResultSet params, ResourceClaim res)
+  :: (ToS params, ResourceClaim res)
   => res
      -- ^ Resources required by workflow
-  -> (ResourceSet -> Metadata -> [FilePath] -> IO ())
+  -> Action
      -- ^ Action to execute
   -> params
      -- ^ Parameters to pass to workflow
   -> Flow eff ()
-basicLiftPhony res exe p = want =<< basicLiftWorkflow res (Phony (PhonyAction exe)) p
+basicLiftPhony resource exe p = Flow $ do
+  st <- Eff.get @FlowSt
+  let fid = APhony $ freshFunID st.graph
+  Eff.modify $ stGraphL . flowPhonyL . at fid .~ Just Fun
+    { workflow  = WorkflowPhony exe
+    , metadata  = st.meta
+    , output    = Proxy
+    , resources = claimResource resource
+    , param     = toS p
+    }
+   
 
--- | Lift executable into workflow
-basicLiftExe
-  :: (ResultSet params, ResourceClaim res)
-  => res
-     -- ^ Resources required by workflow
-  -> Executable
-     -- ^ Action to execute
-  -> params
-     -- ^ Parameters to pass to workflow
-  -> Flow eff (Result a)
-basicLiftExe res exe p = basicLiftWorkflow res (WorkflowExe exe) p
+freshFunID :: FlowGraph f -> FunID
+freshFunID gr = max
+  (case Map.lookupMax gr.graph of
+      Just (AResult (FunID i), _) -> FunID (i + 1)
+      Nothing                     -> FunID 0
+  )
+  (case Map.lookupMax gr.phony of
+      Just (APhony (FunID i), _) -> FunID (i + 1)
+      Nothing                    -> FunID 0
+  )
 
+----------------------------------------------------------------
+-- Lens
+----------------------------------------------------------------
 
 stMetaL :: Lens' FlowSt MetadataFlow
 stMetaL = lens (.meta) (\FlowSt{..} x -> FlowSt{meta=x, ..})
 
-stGraphL :: Lens' FlowSt (FlowGraph ())
+stGraphL :: Lens' FlowSt (FlowGraph Proxy)
 stGraphL = lens (.graph) (\FlowSt{..} x -> FlowSt{graph=x, ..})

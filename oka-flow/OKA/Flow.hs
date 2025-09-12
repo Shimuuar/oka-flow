@@ -16,24 +16,18 @@ module OKA.Flow
   ( -- * Flow monad
     Flow
   , MetadataFlow
-  , lookupMeta
+  , Result
+  , S(..)
+  , ToS(..)
+  , FlowArgument(..)
+    -- ** Primitives
   , appendMeta
   , scopeMeta
   , withEmptyMeta
   , restrictMeta
-  , Result
-  , ResultSet(..)
   , want
   , liftEff
   , addExtMeta
-    -- * Defining workflows
-  , Workflow(..)
-  , Action(..)
-  , basicLiftWorkflow
-  , liftWorkflow
-  , basicLiftPhony
-  , liftPhony
-  , basicLiftExe
     -- * Resources
   , ResourceClaim(..)
   , ResourceDef(..)
@@ -46,7 +40,6 @@ module OKA.Flow
   ) where
 
 import Control.Lens
-import Control.Monad.State
 import Effectful
 import Effectful.State.Static.Local qualified as Eff
 
@@ -54,12 +47,12 @@ import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
-import OKA.Flow.Types
 import OKA.Flow.Core.Run
+import OKA.Flow.Core.Result
 import OKA.Flow.Tools
 import OKA.Flow.Core.Resources
+import OKA.Flow.Core.S
 import OKA.Flow.Std
-import OKA.Flow.Util
 
 
 ----------------------------------------------------------------
@@ -76,29 +69,3 @@ addExtMeta
   => Result (SavedMeta a) -> Flow eff ()
 addExtMeta (Result fid) = Flow $ do
   Eff.modify $ stMetaL %~ storeExternal @a fid
-
-
--- | Lift phony action using standard tools
-liftPhony
-  :: (ResourceClaim res, FlowArgument args)
-  => res
-     -- ^ Resources required by workflow
-  -> (Metadata -> args -> IO ())
-  -> AsRes args
-  -> Flow eff ()
-liftPhony res exe = basicLiftPhony res $ \_ meta args -> do
-  a <- runFlowArguments args
-  exe meta a
-
--- | Lookup metadata. Unlike 'metadata' lens. This function only
---   requires 'IsFromMeta' and not full 'IsMeta'.
-lookupMeta :: forall a eff. (IsMeta a) => Flow eff a
-lookupMeta = do
-  meta <- get
-  case runMetaParserWith parseMetadata failK meta of
-    Right Nothing  -> error $ "Failed to look up type " ++ typeName @a
-    Right (Just a) -> pure a
-    Left  e        -> error e
-  where
-    failK :: forall x k. IsMetaPrim x => k -> Either String (Maybe x)
-    failK _ = Left $ "Encountered external metadata for "++typeName @a++". Cannot load"

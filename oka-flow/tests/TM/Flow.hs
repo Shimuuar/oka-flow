@@ -1,7 +1,8 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE DeriveAnyClass      #-}
-{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE AllowAmbiguousTypes  #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE DeriveAnyClass       #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE UndecidableInstances #-}
 -- |
 module TM.Flow (tests) where
 
@@ -15,18 +16,17 @@ import Data.Map.Strict  qualified as Map
 import Data.Map.Strict  (Map)
 import Effectful
 import System.IO.Temp   (withSystemTempDirectory)
-import System.FilePath  ((</>), splitPath)
+import System.FilePath  (splitPath)
 import Test.Tasty
 import Test.Tasty.HUnit
 import GHC.Generics     (Generic)
 import GHC.TypeLits
 
 import OKA.Metadata
-import OKA.Flow.Core.Graph
-import OKA.Flow.Core.Run
 import OKA.Flow.Std
 import OKA.Flow.Core.Resources
 import OKA.Flow.Eff.Cache
+import OKA.Flow.Tools
 import OKA.Flow
 
 tests :: TestTree
@@ -76,10 +76,10 @@ tests = testGroup "Run flow"
                     b  <- flowB ()
                     rA <- flowS a
                     rB <- flowS b
-                    observeOutput obs "2ce8145a17fa081de5a64ed24aad309e3427d6ec" a
-                    observeOutput obs "b9f4743bd0b54831ed1f47d1b76d4e0ae2fdbfe5" b
-                    observeOutput obs "c7ee03f8064e3ee578d7e8a429015ebfe90045f0" rA
-                    observeOutput obs "893a77f6800b6514e83965630ef2bb7ea44a006e" rB
+                    observeOutput obs "a2cd17720b4b99db295d163503f2f964c56fa212" a
+                    observeOutput obs "81f0aaa39ae1659e8f28a8e4e30fb4fde1769b4b" b
+                    observeOutput obs "5593eb1a59553d6de638c48fbd06cd36324064c9" rA
+                    observeOutput obs "6d44756d6dc99dc79ded6a84052f6002f3cc75a7" rB
       runFlow ctx meta flow
       readIORef obs >>= \case
         [] -> pure ()
@@ -211,7 +211,7 @@ tests = testGroup "Run flow"
         let memoized :: (CacheE :> eff, IOE :> eff) => Int -> Flow eff Int
             memoized = memoize (Proxy @MemoKey) $ \i -> do
               assertFlowEq "memoized" Nothing
-                =<< lookupMeta @(Maybe (CounterMeta "A"))
+                =<< (use (metadata @(Maybe (CounterMeta "A"))))
               appendMeta (CounterMeta 200 :: CounterMeta "A")
               liftEff $ liftIO $ modifyIORef' cnt succ
               pure i
@@ -244,6 +244,15 @@ data CounterMeta (a :: Symbol) = CounterMeta
   deriving stock (Show,Eq,Generic)
   deriving MetaEncoding        via AsRecord    (CounterMeta a)
   deriving (IsMetaPrim,IsMeta) via AsMeta '[a] (CounterMeta a)
+
+newtype Number = Number Int
+  deriving stock   (Show)
+  deriving newtype (Num,Eq,Ord)
+  deriving (FlowOutput,FlowInput) via AsMetaEncoded Int
+  deriving (FlowArgument)         via AsFlowInput   Number
+
+
+
 
 -- Tool for observation of execution of normal flows
 newtype Observe a = Observe (IORef (Map FilePath a))
@@ -289,47 +298,49 @@ assertFlowEq msg expected got
 
 data MemoKey
 
+
+
 flowProduceInt
   :: forall name eff. (KnownSymbol name)
-  => IO (Observe Int, () -> Flow eff (Result Int))
+  => IO (Observe Number, () -> Flow eff (Result Number))
 flowProduceInt = do
   obs <- newObserve
   pure ( obs
-       , liftWorkflow (LockCoreCPU 1) $ Action
-         { name = "produce-" ++ (symbolVal (Proxy @name))
-         , run  = \_ meta [] out -> do
-             let n = meta ^. metadata @(CounterMeta name) . to (.count)
-             saveObservation obs out n
-             writeFile (out </> "out.txt") (show n)
-         }
+       , liftHaskellFun_
+           ("produce-" ++ (symbolVal (Proxy @name)))
+           (LockCoreCPU 1)
+           (\out (meta :: CounterMeta name) () -> do
+               saveObservation obs out (Number meta.count)
+               writeOutput out $ Number meta.count
+           )
        )
 
-flowSquare :: IO (Observe Int, Result Int -> Flow eff (Result Int))
+flowSquare :: IO (Observe Number, Result Number -> Flow eff (Result Number))
 flowSquare = do
   obs <- newObserve
   pure ( obs
-       , liftWorkflow (LockCoreCPU 1) $ Action
-         { name = "square"
-         , run  = \_ _ [p] out -> do
-             n <- read @Int <$> readFile (p </> "out.txt")
-             let n' = n * n
+       , liftHaskellFun_ "square" ()
+           (\out () (n :: Number) -> do
+             let n' = n*n
              saveObservation obs out n'
-             writeFile (out </> "out.txt") (show n')
-         }
+             writeOutput out n'
+           )
        )
 
-flowPhony :: IO (ObsPhony Int, Result Int -> Flow eff ())
+flowPhony :: IO (ObsPhony Number, Result Number -> Flow eff ())
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
-       , basicLiftPhony (LockCoreCPU 1) $ \_ _ [p] -> do
-           n <- read @Int <$> readFile (p </> "out.txt")
+       , basicLiftPhony (LockCoreCPU 1) $ ActionIO $ \_ p -> do
+           let Param arg = p.args
+           n <- readOutput arg
            let n' = n * n
            saveObsPhony obs n'
        )
 
 observeOutput :: IORef [String] -> FilePath -> Result a -> Flow eff ()
-observeOutput out expected = basicLiftPhony () $ \_ _ [arg] -> do
+observeOutput out expected = basicLiftPhony () $ ActionIO $ \_ p -> do
+  let Param arg = p.args
   let hash = last (splitPath arg)
   when (hash /= expected) $
     atomicModifyIORef' out $ \e ->
