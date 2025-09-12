@@ -1,7 +1,8 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE DeriveAnyClass      #-}
-{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE AllowAmbiguousTypes  #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE DeriveAnyClass       #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE UndecidableInstances #-}
 -- |
 module TM.Flow (tests) where
 
@@ -9,14 +10,13 @@ import Control.Lens
 import Control.Monad
 import Data.IORef
 import Data.Proxy
-import Data.Maybe
 import Data.Foldable
 import Data.List        (sort)
 import Data.Map.Strict  qualified as Map
 import Data.Map.Strict  (Map)
 import Effectful
 import System.IO.Temp   (withSystemTempDirectory)
-import System.FilePath  ((</>), splitPath)
+import System.FilePath  (splitPath)
 import Test.Tasty
 import Test.Tasty.HUnit
 import GHC.Generics     (Generic)
@@ -31,6 +31,7 @@ import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.Types
 import OKA.Flow.Eff.Cache
+import OKA.Flow.Tools
 import OKA.Flow
 
 tests :: TestTree
@@ -249,6 +250,15 @@ data CounterMeta (a :: Symbol) = CounterMeta
   deriving MetaEncoding        via AsRecord    (CounterMeta a)
   deriving (IsMetaPrim,IsMeta) via AsMeta '[a] (CounterMeta a)
 
+newtype Number = Number Int
+  deriving stock   (Show)
+  deriving newtype (Num,Eq,Ord)
+  deriving (FlowOutput,FlowInput) via AsMetaEncoded Int
+  deriving (FlowArgument)         via AsFlowInput   Number
+
+
+
+
 -- Tool for observation of execution of normal flows
 newtype Observe a = Observe (IORef (Map FilePath a))
 
@@ -293,45 +303,42 @@ assertFlowEq msg expected got
 
 data MemoKey
 
+
+
 flowProduceInt
   :: forall name eff. (KnownSymbol name)
-  => IO (Observe Int, () -> Flow eff (Result Int))
+  => IO (Observe Number, () -> Flow eff (Result Number))
 flowProduceInt = do
   obs <- newObserve
   pure ( obs
-       , basicLiftWorkflow (LockCoreCPU 1) $ Dataflow
-         { name = "produce-" ++ (symbolVal (Proxy @name))
-         , flow = ActionIO $ \_ p -> do
-             let n   = p.meta ^. metadata @(CounterMeta name) . to (.count)
-                 out = fromJust p.out
-             saveObservation obs out n
-             writeFile (out </> "out.txt") (show n)
-         }
+       , liftHaskellFun_
+           ("produce-" ++ (symbolVal (Proxy @name)))
+           (LockCoreCPU 1)
+           (\out (meta :: CounterMeta name) () -> do
+               saveObservation obs out (Number meta.count)
+               writeOutput out $ Number meta.count
+           )
        )
 
-flowSquare :: IO (Observe Int, Result Int -> Flow eff (Result Int))
+flowSquare :: IO (Observe Number, Result Number -> Flow eff (Result Number))
 flowSquare = do
   obs <- newObserve
   pure ( obs
-       , basicLiftWorkflow (LockCoreCPU 1) $ Dataflow
-         { name = "square"
-         , flow = ActionIO $ \_ p -> do
-             let Param arg = p.args
-                 out       = fromJust p.out
-             n <- read @Int <$> readFile (arg </> "out.txt")
-             let n' = n * n
+       , liftHaskellFun_ "square" ()
+           (\out () (n :: Number) -> do
+             let n' = n*n
              saveObservation obs out n'
-             writeFile (out </> "out.txt") (show n')
-         }
+             writeOutput out n'
+           )
        )
 
-flowPhony :: IO (ObsPhony Int, Result Int -> Flow eff ())
+flowPhony :: IO (ObsPhony Number, Result Number -> Flow eff ())
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
        , basicLiftPhony (LockCoreCPU 1) $ ActionIO $ \_ p -> do
            let Param arg = p.args
-           n <- read @Int <$> readFile (arg </> "out.txt")
+           n <- readOutput arg
            let n' = n * n
            saveObsPhony obs n'
        )
