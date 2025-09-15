@@ -63,7 +63,6 @@ import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Types
-import OKA.Flow.Core.Result
 import OKA.Flow.Core.S
 
 ----------------------------------------------------------------
