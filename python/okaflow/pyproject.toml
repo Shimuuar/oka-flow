@@ -18,6 +18,8 @@ classifiers = [
 ]
 license = "BSD-3-Clause"
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
 
 #[project.urls]
 #Homepage =
