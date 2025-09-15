@@ -2,7 +2,7 @@
 Simple and hopefully pythonic parser of
 """
 
-from typing import Optional,Callable,TypeVar,Generic,Any,Protocol
+from typing import Optional,Callable,TypeVar,Generic,Any,Protocol,TypeAlias
 import itertools
 import sys
 import os
@@ -11,10 +11,55 @@ from dataclasses import dataclass
 from . import metadata
 
 __all__ = [
-    'Args', 'Parser', 'ParserState', 'Path', 'PathSavedMeta', 'Many', 'parse'
+    'Args', 'S', 'Parser', 'Path', 'PathSavedMeta', 'Many', 'Some', 'Maybe', 'parse'
 ]
 
 T = TypeVar('T', bound=metadata.IsMetaModel)
+
+## ================================================================
+## S expressions
+## ================================================================
+
+@dataclass
+class Atom:
+    atom: str
+
+S: TypeAlias = None | str | Atom | list
+
+
+def parseS(args: list[str]) -> S:
+    """
+    Parse S expression from list of arguments
+    """
+    def step(xs: list[str]) -> tuple[S, list[str]]:
+        # Consume single S-expression from list and return it and rest of list
+        print(xs)
+        match xs:
+            case ["-", *rest]:
+                return None, []
+            case ["(", *rest]:
+                acc: list[S] = []
+                while True:
+                    match rest:
+                        case [")", *rest]: return acc,rest
+                        case _:
+                            S,rest = step(rest)
+                            acc.append(S)
+            case [str() as s, *rest] if s.startswith("!"):
+                return Atom(s[1:]), rest
+            case [str() as s, *rest]:
+                return s, rest
+        raise Exception("Cannot parse S expression")
+    #--
+    match args:
+        case []: return None
+        case _:
+            match step(args):
+                case s,[]: return s
+                case _:  raise Exception("Cannot pasre S exception")
+
+
+
 
 ## ================================================================
 ## Argument list
@@ -27,24 +72,21 @@ class Args:
     """
     out:  Optional[str]
     "Output directory. Not set when run as phony script"
-    args: list[str]
+    args: S
     "Parameters passed to a script"
 
     @staticmethod
     def fromArgs() -> "Args":
         "Create argument list from command line parameters"
         param = sys.argv[1:]
-        for f in param:
-            if not os.path.isdir(f):
-                raise Exception(f"Parameter is not a directory: '{f}'")
-        match param:
-            case (out, *args): return Args(out=out, args=args)
-            case _: raise Exception("Empty argument list")
+        S     = parseS(param)
+        return Args(out=os.getcwd(), args=S)
 
     @staticmethod
     def fromEnv() -> "Args":
+        out = os.environ.get('OKA_OUT')
         "Create argument list from environment"
-        args = []
+        args: list[str] = []
         for i in itertools.count(1):
             match os.environ.get(f'OKA_ARG_{i}'):
                 case None:
@@ -53,7 +95,7 @@ class Args:
                     if not os.path.isdir(arg):
                         raise Exception(f"Parameter is not a directory: '{arg}'")
                     args.append(arg)
-        return Args(out=None, args=args)
+        return Args(out=out, args=parseS(args))
 
     def setCWD(self) -> None:
         "Set working directory to output directory"
@@ -70,17 +112,9 @@ class ParseError(Exception):
     def __init__(self, msg: str):
         super().__init__(msg)
 
-@dataclass
-class ParserState:
-    off:  int
-    args: list[str]
-
-    def done(self) -> bool:
-        return self.off >= len(self.args)
-
 class Parser(Protocol):
     "Base class for parsing sequences of store path"
-    def parse(self, p: ParserState) -> Any:
+    def parse(self, s: S) -> Any:
         pass
 
 @dataclass
@@ -90,14 +124,13 @@ class Path(Parser):
     """
     path: Optional[str] = None
 
-    def parse(self, st: ParserState) -> Any:
-        if st.done():
-            raise ParseError("Not enough items")
-        s       = st.args[st.off]
-        st.off += 1
-        match self.path:
-            case None: return s
-            case name: return os.path.join(s,name)
+    def parse(self, s: S) -> Any:
+        match s:
+            case str():
+                match self.path:
+                    case None: return s
+                    case name: return os.path.join(s,name)
+        raise ParseError("Expecting single parameter")
 
 
 @dataclass
@@ -107,56 +140,62 @@ class PathSavedMeta(Parser, Generic[T]):
     """
     ty: type[T]
 
-    def parse(self, st: ParserState) -> T:
-        if st.done():
-            raise ParseError("Not enough items")
-        s       = st.args[st.off]
-        st.off += 1
-        meta = metadata.fromSavedMeta(s)
-        return self.ty.fromMeta(meta)
+    def parse(self, s: S) -> T:
+        match s:
+            case str():
+                meta = metadata.fromSavedMeta(s)
+                return self.ty.fromMeta(meta)
+        raise ParseError("Expecting single parameter")
 
+@dataclass
+class Maybe(Parser):
+    "Parse optional entry"
+    parser: Parser|tuple
+
+    def parse(self, s: S) -> Any:
+        match s:
+            case None: return None
+            case _:    return _parse(s, self.parser)
 
 @dataclass
 class Many(Parser):
     "Parse many entries"
     parser: Parser|tuple
 
-    def parse(self, st: ParserState) -> list[Any]:
-        acc: list[Any] = []
-        while True:
-            if st.done():
-                return acc
-            acc.append(_parse(st, self.parser))
+    def parse(self, s0: S) -> list[Any]:
+        match s0:
+            case list():
+                return [_parse(s, self.parser) for s in s0]
+        raise ParseError("Expecting list parameter")
 
 @dataclass
 class Some(Parser):
     "Parse many entries"
     parser: Parser|tuple
 
-    def parse(self, st: ParserState) -> list[Any]:
-        acc: list[Any] = []
-        while True:
-            if st.done():
-                if not acc:
-                    raise ParseError("Some: at least one element should be parsed")
-                return acc
-            acc.append(_parse(st, self.parser))
+    def parse(self, s0: S) -> list[Any]:
+        match s0:
+            case []:
+                raise ParseError("Expecting nonempty list parameter")
+            case list():
+                return [_parse(s, self.parser) for s in s0]
+        raise ParseError("Expecting list parameter")
 
 
-
-def _parse(st: ParserState, p: Parser|tuple|None) -> Any:
+def _parse(s: S, p: Parser|tuple|None) -> Any:
     match p:
         case None:
             return None
         case tuple():
-            return tuple((_parse(st, q) for q in p))
+            match s:
+                case list() as xs:
+                    if len(xs) != len(p):
+                        raise ParseError(
+                            f"Exception: invalid length of list in S-expression. Got {len(xs)} expected {len(p)}")
+                    return tuple((_parse(s, q) for s,q in zip(xs,p)))
         case _:
-            return p.parse(st)
+            return p.parse(s)
 
 def parse(p: Parser|tuple, args: Args) -> Any:
     "Parse list of parameters"
-    st = ParserState(off=0, args=args.args)
-    x  = _parse(st, p)
-    if not st.done():
-        raise ParseError(f"Not all arguments are consumed: {st.off} of {len(st.args)}")
-    return x
+    return _parse(args.args, p)

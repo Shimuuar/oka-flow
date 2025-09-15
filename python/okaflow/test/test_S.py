@@ -3,7 +3,17 @@
 
 import sys
 import pytest
-import okaflow.args as S
+from okaflow.args import parseS,Atom
 
 def test_S():
-    pass
+    assert parseS([]) == None
+    assert parseS(["-"]) == None
+    assert parseS(["!atom"]) == Atom("atom")
+    assert parseS(["/path"]) == "/path"
+    # Lists
+    assert parseS(["(",")"]) == []
+    assert parseS(["(","AA","BB",")"]) == ["AA","BB"]
+    assert parseS(["(","!AA","BB",")"]) == [Atom("AA"),"BB"]
+    # Nested lists
+    assert parseS(["(","AA","(","BB",")",")"]) == ["AA",["BB"]]
+    assert parseS(["(","(","!AA",")","BB","(",")",")"]) == [[Atom("AA")],"BB",[]]
