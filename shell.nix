@@ -44,7 +44,12 @@ let
     yaml
   ]);
   pkgs_py = pkgs.python3.withPackages (ps: with ps;
-    [ pip build pydantic jsbeautifier mypy
+    [ pip
+      build
+      pydantic
+      jsbeautifier
+      mypy
+      pytest
     ]);
 in
 pkgs.mkShell {
