@@ -33,7 +33,6 @@ def parseS(args: list[str]) -> S:
     """
     def step(xs: list[str]) -> tuple[S, list[str]]:
         # Consume single S-expression from list and return it and rest of list
-        print(xs)
         match xs:
             case ["-", *rest]:
                 return None, []
@@ -92,8 +91,6 @@ class Args:
                 case None:
                     break
                 case str() as arg:
-                    if not os.path.isdir(arg):
-                        raise Exception(f"Parameter is not a directory: '{arg}'")
                     args.append(arg)
         return Args(out=out, args=parseS(args))
 
