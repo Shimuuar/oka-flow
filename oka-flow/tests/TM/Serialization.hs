@@ -12,7 +12,8 @@ import OKA.Flow.Tools
 
 tests :: TestTree
 tests = testGroup "Serialization"
-  [ testProperty "rountrip args" args_roundtrip
+  [ testProperty "roundtrip S args" args_roundtrip
+  , testProperty "roundtrip S JSON" json_roundtrip
   ]
 
 
@@ -20,25 +21,31 @@ args_roundtrip :: S FilePath -> Bool
 args_roundtrip s
   = Right s == (sexpFromArgs . sexpToArgs) s
 
+json_roundtrip :: S Int -> Bool
+json_roundtrip s
+  = Right s == (sFromJSON . sToJSON) s
+
 ----------------------------------------------------------------
 -- Orphans
 ----------------------------------------------------------------
 
-instance Arbitrary (S String) where
-  arbitrary = sized $ \case
+instance Arbitrary1 S where
+  liftArbitrary gen = sized $ \case
     n | n <= 1    -> oneof leaves
       | otherwise -> resize (n-1)
                    $ oneof (sexp : leaves)
     where
       leaves = [ pure Nil
                , Atom  <$> atom
-               , Param <$> filepath
+               , Param <$> gen
                ]
       sexp = do n <- choose (0,4)
-                S <$> vector n
+                S <$> vectorOf n (liftArbitrary gen)
 
-filepath :: Gen FilePath
-filepath = vectorOf 10 (choose ('a', 'z'))
+instance Arbitrary (S FilePath) where
+  arbitrary = liftArbitrary $ vectorOf 10 (choose ('a', 'z'))
+instance Arbitrary (S Int) where
+  arbitrary = liftArbitrary arbitrary
 
 atom :: Gen FilePath
 atom = vectorOf 8 (choose ('a', 'z'))

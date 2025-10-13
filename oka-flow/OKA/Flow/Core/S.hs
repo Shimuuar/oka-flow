@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- |
 -- We need to pass possibly nested data types as parameters to flows.
 -- We also need to be able to hash set of parameters. To do so we need
@@ -8,9 +9,19 @@ module OKA.Flow.Core.S
     S(..)
   , ToS(..)
   , sequenceS
+    -- * JSON serialization
+  , sToJSON
+  , sFromJSON
+  , parseJSONtoS
   ) where
 
-import Data.Monoid          (Endo(..))
+import Data.Aeson        qualified as JSON
+import Data.Aeson.Types  qualified as JSON
+import Data.Aeson        (FromJSON,ToJSON,Value(..),(.=))
+import Data.Aeson.KeyMap qualified as KM
+import Data.Monoid       (Endo(..))
+import Data.Vector       qualified as V
+import Data.Text         qualified as T
 
 import OKA.Flow.Core.Result
 
@@ -80,3 +91,31 @@ instance (ToS a) => ToS (Maybe a) where
 instance (ToS a, ToS b) => ToS (Either a b) where
   toS (Left  a) = S [Atom "Left",  toS a]
   toS (Right b) = S [Atom "Right", toS b]
+
+
+----------------------------------------------------------------
+-- JSON serialization
+----------------------------------------------------------------
+
+sToJSON :: ToJSON a => S a -> Value
+sToJSON = \case
+  Nil     -> Null
+  S xs    -> JSON.toJSON (sToJSON <$> xs)
+  Atom  a -> JSON.toJSON a
+  Param p -> JSON.object [ "v"  .= p ]
+
+sFromJSON :: FromJSON a => Value -> Either String (S a)
+sFromJSON js = case JSON.parse parseJSONtoS js of
+  JSON.Success a -> Right a
+  JSON.Error   e -> Left  e
+
+parseJSONtoS :: FromJSON a => Value -> JSON.Parser (S a)
+parseJSONtoS = \case
+  Null     -> pure Nil
+  Array xs -> S <$> traverse parseJSONtoS (V.toList xs)
+  String s -> pure $ Atom $ T.unpack s
+  Object o -> case KM.toList o of
+    [("v",v)] -> Param <$> JSON.parseJSON v
+    _         -> fail "Cannot interpret object as S-expression leaf"
+  Number{} -> fail "Bare number encountered in S-expression"
+  Bool{}   -> fail "Bare Bool encountered in S-expression"
