@@ -9,7 +9,7 @@ let
     oka-nix.overlay
   ];
   #---
-  hask = pkgs.oka.haskell94.ghcWithPackages (p: with p; [
+  hask = pkgs.oka.haskell98.ghcWithPackages (p: with p; [
     aeson
     async
     base16-bytestring

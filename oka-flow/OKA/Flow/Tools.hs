@@ -45,8 +45,6 @@ import Control.Applicative
 -- import Control.Concurrent.STM
 import Control.Exception
 import Control.Lens                 ((^?))
--- import Control.Monad
--- import Control.Monad.IO.Class
 import Data.Coerce
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
