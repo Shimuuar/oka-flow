@@ -31,7 +31,6 @@ module OKA.Flow.Core.Resources
   , LockMemGB(..)
   ) where
 
-import Control.Applicative
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
