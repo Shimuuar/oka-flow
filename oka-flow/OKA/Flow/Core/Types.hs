@@ -26,10 +26,11 @@ import Data.ByteString        (ByteString)
 import Data.ByteString.Char8  qualified as BC8
 import Data.ByteString.Lazy   qualified as BL
 import Data.ByteString.Base16 qualified as Base16
-import System.FilePath        ((</>))
+import System.FilePath        ((</>),pathSeparator)
+import System.Directory       (makeAbsolute)
 import System.Environment     (getEnvironment)
 import System.Process.Typed
-import System.Posix.Signals         (signalProcess, sigINT)
+import System.Posix.Signals   (signalProcess, sigINT)
 
 import OKA.Metadata
 import OKA.Flow.Core.S
@@ -87,10 +88,19 @@ type CallingConv = forall a. (ParamFlow FilePath -> (ProcessData -> IO a) -> IO 
 -- | Convert dictionary into data structure for calling external
 --   process using @typed-process@
 toTypedProcess
-  :: FilePath    -- ^ Executable name
+  :: FilePath    -- ^ Executable name. If it contains path separators
+                 --   it will be converted to absolute path relative
+                 --   to current working dir.
   -> ProcessData -- ^ Parameters
   -> IO (ProcessConfig () () ())
 toTypedProcess exe process = do
+  -- Executable is searched relative to the working directory of
+  -- process. We need to convert executable to absolute path when
+  -- setting working dir. At the same we don't want to convert to
+  -- absolute path executables from PATH.
+  exe' <- if
+    | pathSeparator `elem` exe -> makeAbsolute exe
+    | otherwise                -> pure exe
   env <- case process.env of
     [] -> pure []
     es -> do env <- getEnvironment
@@ -104,7 +114,7 @@ toTypedProcess exe process = do
        $ case env of
            [] -> id
            _  -> setEnv env
-       $ proc exe process.args
+       $ proc exe' process.args
 
 -- | Create subprocess and wait for its completions. If execution is
 --   interrupted subprocess is killed. If process exits with nonzero
@@ -114,7 +124,7 @@ startSubprocessAndWait
   -> CallingConv        -- ^ Calling conventions
   -> ParamFlow FilePath -- ^ Parameters
   -> IO ()
-startSubprocessAndWait exe call param = 
+startSubprocessAndWait exe call param =
   call param $ \process -> do
     run <- toTypedProcess exe process
     withProcessWait_ run $ \pid -> do
