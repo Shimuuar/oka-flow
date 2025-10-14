@@ -33,6 +33,8 @@ module OKA.Flow.Tools
     -- * Primitives for creating flows
   , basicLiftWorkflow
   , basicLiftPhony
+  , liftHaskellPhonyFun
+  , liftHaskellPhonyFunMeta
     -- * Encoding\/decoding of S-expressions
   , sexpToArgs
   , sexpFromArgs
@@ -389,6 +391,36 @@ liftPhonyExecutable
   -> (args -> Flow eff ())
 liftPhonyExecutable exe res call =
   basicLiftPhony res $ ActionExe $ Executable exe call
+
+
+-- | Convert haskell function into dataflow. Arguments are loaded and
+--   stored using type classes methods.
+liftHaskellPhonyFun
+  :: (FlowArgument a, IsMeta meta, ResourceClaim res)
+  => res                  -- ^ Resources required by workflow
+  -> (meta -> a -> IO ()) -- ^ IO action
+  -> (AsRes a -> Flow eff ())
+liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \_ p -> do
+  meta <- case p.meta ^? metadata of
+    Just m  -> pure m
+    Nothing -> error $ "loadFlowArguments: Cannot get metadata"
+  a    <- case parseFlowArguments p.args of
+    Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+    Right ioa -> ioa
+  action meta a
+
+
+-- | Same as 'liftHaskellFun' but passes noninterpreted metadata.
+liftHaskellPhonyFunMeta
+  :: (FlowArgument a, ResourceClaim res)
+  => res                      -- ^ Resources required by workflow
+  -> (Metadata -> a -> IO ()) -- ^ IO action
+  -> (AsRes a -> Flow eff ())
+liftHaskellPhonyFunMeta res action = basicLiftPhony res $ ActionIO $ \_ p -> do
+  a <- case parseFlowArguments p.args of
+    Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+    Right ioa -> ioa
+  action p.meta a
 
 
 -- | Standard calling conventions for external process.
