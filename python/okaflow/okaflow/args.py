@@ -2,7 +2,7 @@
 Simple and hopefully pythonic parser of
 """
 
-from typing import Optional,Callable,TypeVar,Generic,Any,Protocol,TypeAlias
+from typing import Optional,Callable,TypeVar,Generic,Any,Protocol,TypeAlias,Iterator
 import itertools
 import sys
 import os
@@ -82,17 +82,20 @@ class Args:
         return Args(out=os.getcwd(), args=S)
 
     @staticmethod
-    def fromEnv() -> "Args":
-        out = os.environ.get('OKA_OUT')
-        "Create argument list from environment"
-        args: list[str] = []
+    def argListFromEnv() -> Iterator[str]:
         for i in itertools.count(1):
             match os.environ.get(f'OKA_ARG_{i}'):
                 case None:
-                    break
+                    return
                 case str() as arg:
-                    args.append(arg)
-        return Args(out=out, args=parseS(args))
+                    yield arg
+
+
+    @staticmethod
+    def fromEnv() -> "Args":
+        "Create argument list from environment"
+        out = os.environ.get('OKA_OUT')
+        return Args(out=out, args=parseS(list(Args.argListFromEnv())))
 
     def setCWD(self) -> None:
         "Set working directory to output directory"
