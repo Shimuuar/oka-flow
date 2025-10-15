@@ -35,7 +35,7 @@ def parseS(args: list[str]) -> S:
         # Consume single S-expression from list and return it and rest of list
         match xs:
             case ["-", *rest]:
-                return None, []
+                return None, rest
             case ["(", *rest]:
                 acc: list[S] = []
                 while True:

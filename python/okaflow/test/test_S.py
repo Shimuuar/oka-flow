@@ -1,3 +1,4 @@
+
 """
 """
 
@@ -17,3 +18,8 @@ def test_S():
     # Nested lists
     assert parseS(["(","AA","(","BB",")",")"]) == ["AA",["BB"]]
     assert parseS(["(","(","!AA",")","BB","(",")",")"]) == [[Atom("AA")],"BB",[]]
+
+
+def test_regressions_S():
+    assert parseS(['(', '-', ')']) == [None]
+    assert parseS(['(', '(','/A','/B','/C',')', '/D', '-', ')']) == [['/A','/B','/C'], '/D', None]
