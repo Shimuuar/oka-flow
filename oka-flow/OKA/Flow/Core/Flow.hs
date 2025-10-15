@@ -21,6 +21,7 @@ module OKA.Flow.Core.Flow
   , stGraphL
   ) where
 
+import Control.Applicative          (liftA2)
 import Control.Lens
 import Control.Monad.State.Strict
 import Data.Foldable                (toList)
