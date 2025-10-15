@@ -474,16 +474,14 @@ callInEnvironment p action =
 --
 --  * Working dir is set to output directory
 callViaArgList
-  :: ([FilePath] -> [FilePath]) -- ^ How to transform list of store pathes
+  :: (S FilePath -> [FilePath]) -- ^ How to transform list of store pathes
   -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
 callViaArgList transform p action = action $ ProcessData
   { stdin   = Nothing
   , env     = []
-  , args    = case sequenceS p.args of
-      Just args -> transform args
-      Nothing   -> error "callViaArgList: parameters could not be transformed into sequence"
+  , args    = transform p.args
   , workdir = p.out
   }
 

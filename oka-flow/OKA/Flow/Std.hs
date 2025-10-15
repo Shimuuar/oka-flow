@@ -110,15 +110,20 @@ runPdfReader :: (SequenceOf ReportPDF a, ProgConfigE :> eff) => a -> Flow eff ()
 runPdfReader a = do 
   pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
   liftPhonyExecutable pdf ()
-    (callViaArgList $ \args -> [p </> "report.pdf" | p <- args])
+    -- FIXME: We need way to generalize SequenceOf!
+    (callViaArgList $ \s -> [p </> "report.pdf" | Just args <- [sequenceS s]
+                                                , p         <- args
+                                                ])
     (sequenceOf @ReportPDF a)
 
 -- | Concatenate PDFs using @pdftk@ program
 stdConcatPDF :: SequenceOf ReportPDF a => a -> Flow eff (Result ReportPDF)
 stdConcatPDF reports = restrictMeta @() $ do
   liftExecutable "std.pdftk.concat" "pdftk" ()
-    (callViaArgList $ \args ->
-        [a</>"report.pdf" | a <- args] ++ ["cat", "output", "report.pdf"]
+    (callViaArgList $ \s ->
+        [a</>"report.pdf" | Just args <- [sequenceS s]
+                          , a <- args
+                          ] ++ ["cat", "output", "report.pdf"]
         )
     (sequenceOf @ReportPDF reports)
 
