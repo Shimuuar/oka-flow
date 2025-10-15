@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards      #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
 -- |
@@ -24,17 +25,21 @@ module OKA.Flow.Tools
   , liftHaskellFunMeta
   , liftHaskellFun_
   , liftHaskellFunMeta_
+  , liftHaskellPhonyFun
+  , liftHaskellPhonyFunMeta
     -- * Calling of external executables
   , liftExecutable
   , liftPhonyExecutable
+    -- ** Calling conventions
   , callStandardExe
   , callInEnvironment
   , callViaArgList
+  , ccPrependRelPaths
+  , ccPrependArgs
+  , ccAddEnv
     -- * Primitives for creating flows
   , basicLiftWorkflow
   , basicLiftPhony
-  , liftHaskellPhonyFun
-  , liftHaskellPhonyFunMeta
     -- * Encoding\/decoding of S-expressions
   , sexpToArgs
   , sexpFromArgs
@@ -54,6 +59,7 @@ import Data.ByteString.Lazy         qualified as BL
 import Data.Monoid                  (Endo(..))
 import Data.Functor
 import System.FilePath              ((</>))
+import System.Directory             (makeAbsolute)
 import System.IO.Temp
 import System.IO                    (hClose)
 import System.Environment           (getArgs)
@@ -484,6 +490,24 @@ callViaArgList transform p action = action $ ProcessData
   , args    = transform p.args
   , workdir = p.out
   }
+
+-- | Prepend path relative to flow working directory. It will be
+--   converted to absolute path.
+ccPrependRelPaths :: [FilePath] -> CallingConv -> CallingConv
+ccPrependRelPaths paths call p action = call p $ \ProcessData{..} -> do
+  paths' <- traverse makeAbsolute paths
+  action ProcessData{args = paths' ++ args, ..}
+
+-- | Prepend arguments to list being passed to flow. They are not
+--   modified.
+ccPrependArgs :: [FilePath] -> CallingConv -> CallingConv
+ccPrependArgs xs call p action = call p $ \ProcessData{..} -> do
+  action ProcessData{args = xs ++ args, ..}
+
+-- | Add values to environment variables
+ccAddEnv :: [(String,String)] -> CallingConv -> CallingConv
+ccAddEnv xs cc p action =
+  cc p (\ProcessData{..} -> action ProcessData{env = xs ++ env, ..})
 
 
 ----------------------------------------------------------------
