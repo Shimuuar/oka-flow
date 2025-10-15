@@ -155,7 +155,7 @@ class Maybe(Parser):
     def parse(self, s: S) -> Any:
         match s:
             case None: return None
-            case _:    return _parse(s, self.parser)
+            case _:    return parseArgsS(self.parser, s)
 
 @dataclass
 class Many(Parser):
@@ -165,7 +165,7 @@ class Many(Parser):
     def parse(self, s0: S) -> list[Any]:
         match s0:
             case list():
-                return [_parse(s, self.parser) for s in s0]
+                return [parseArgsS(self.parser, s) for s in s0]
         raise ParseError("Expecting list parameter")
 
 @dataclass
@@ -178,11 +178,11 @@ class Some(Parser):
             case []:
                 raise ParseError("Expecting nonempty list parameter")
             case list():
-                return [_parse(s, self.parser) for s in s0]
+                return [parseArgsS(self.parser, s) for s in s0]
         raise ParseError("Expecting list parameter")
 
 
-def _parse(s: S, p: Parser|tuple|None) -> Any:
+def parseArgsS(p: Parser|tuple|None, s: S) -> Any:
     match p:
         case None:
             return None
@@ -192,10 +192,10 @@ def _parse(s: S, p: Parser|tuple|None) -> Any:
                     if len(xs) != len(p):
                         raise ParseError(
                             f"Exception: invalid length of list in S-expression. Got {len(xs)} expected {len(p)}")
-                    return tuple((_parse(s, q) for s,q in zip(xs,p)))
+                    return tuple((parseArgsS(q, s) for s,q in zip(xs,p)))
         case _:
             return p.parse(s)
 
 def parse(p: Parser|tuple, args: Args) -> Any:
     "Parse list of parameters"
-    return _parse(args.args, p)
+    return parseArgsS(p, args.args)
