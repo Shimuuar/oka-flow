@@ -51,6 +51,7 @@ import Data.Attoparsec.Text        qualified as Atto
 import Data.Coerce
 import Data.Functor.Compose
 import Data.Int
+import Data.Maybe
 import Data.Text                   (Text)
 import Data.Text                   qualified as T
 import Data.Vector                 qualified as V
@@ -84,8 +85,14 @@ import OKA.Metadata.Util
 --   basically same as @FromJSON/ToJSON@ pair but we define top level
 --   type class to allow different encodings and to provide better
 --   error messages.
+--
+--   By conventions we don't encode missing values in records instead
+--   of representing them as @null@s. This allows to add optional
+--   fields without changing hashes of existing values.
 class Typeable a => MetaEncoding a where
+  -- | Parser for JSON values.
   parseMeta  :: JSON.Value -> JSON.Parser a
+  -- | Encode value to JSON.
   metaToJson :: a -> JSON.Value
 
 
@@ -224,15 +231,17 @@ metaObject parser
   = JSON.prependFailure ("While parsing " ++ show (typeOf (undefined :: a)) ++ "\n")
   . metaWithObject (runObjParser parser)
 
--- | Lookup mandatory field in the object
+-- | Lookup mandatory field in the object. Missing fields are
+--   interpreted as null fields.
 metaField :: MetaEncoding a => Text -> ObjParser a
 metaField k = ObjParser $ do
-  (v, o) <- popFromMap k =<< get
+  (v, o) <- popFromMapM k =<< get
   put o
   lift $ JSON.prependFailure (" - key: " ++ T.unpack k ++ "\n")
-       $ parseMeta v
+       $ parseMeta (fromMaybe Null v)
 
--- | Lookup optional field in the object
+
+-- | Lookup field in the object. Missing fields are returned as @Nothing@.
 metaFieldM :: MetaEncoding a => Text -> ObjParser (Maybe a)
 metaFieldM k = ObjParser $ do
   (v, o) <- popFromMapM k =<< get
@@ -242,11 +251,6 @@ metaFieldM k = ObjParser $ do
            Nothing -> pure Nothing
            Just x  -> parseMeta x
 
-popFromMap :: MonadFail m => Text -> JSON.Object -> m (JSON.Value, JSON.Object)
-popFromMap k o = getCompose $ KM.alterF go (JSON.fromText k) o
-  where
-    go Nothing  = Compose $ fail $ "No such key: " ++ T.unpack k
-    go (Just v) = Compose $ pure (v, Nothing)
 
 
 popFromMapM :: MonadFail m => Text -> JSON.Object -> m (Maybe JSON.Value, JSON.Object)
@@ -316,24 +320,20 @@ deriving newtype instance GRecParse f => GRecParse (M1 D i f)
 deriving newtype instance GRecParse f => GRecParse (M1 C i f)
 instance (GRecParse f, GRecParse g) => GRecParse (f :*: g) where
   grecParse = (:*:) <$> grecParse <*> grecParse
-instance {-# OVERLAPPABLE #-} (MetaEncoding a, KnownSymbol fld
+instance ( MetaEncoding a, KnownSymbol fld
          ) => GRecParse (M1 S ('MetaSel ('Just fld) u s d) (K1 i a)) where
   grecParse = M1 . K1 <$> metaField (fieldName @fld)
-instance {-# OVERLAPPING #-} (MetaEncoding a, KnownSymbol fld
-         ) => GRecParse (M1 S ('MetaSel ('Just fld) u s d) (K1 i (Maybe a))) where
-  grecParse = M1 . K1 <$> metaFieldM (fieldName @fld)
+ 
 
 deriving newtype instance GRecToMeta f => GRecToMeta (M1 D i f)
 deriving newtype instance GRecToMeta f => GRecToMeta (M1 C i f)
 instance (GRecToMeta f, GRecToMeta g) => GRecToMeta (f :*: g) where
   grecToMeta (f :*: g) = grecToMeta f <> grecToMeta g
-instance {-# OVERLAPPABLE #-} (MetaEncoding a, KnownSymbol fld
+instance (MetaEncoding a, KnownSymbol fld
          ) => GRecToMeta (M1 S ('MetaSel ('Just fld) u s d) (K1 i a)) where
-  grecToMeta (M1 (K1 a)) = [fieldName @fld .== a]
-instance {-# OVERLAPPING #-} (MetaEncoding a, KnownSymbol fld
-         ) => GRecToMeta (M1 S ('MetaSel ('Just fld) u s d) (K1 i (Maybe a))) where
-  grecToMeta (M1 (K1 (Just a))) = [fieldName @fld .== a]
-  grecToMeta (M1 (K1 Nothing )) = []
+  grecToMeta (M1 (K1 a)) = case metaToJson a of
+    Null -> []
+    js   -> [fieldName @fld .== js]
 
 
 
@@ -450,10 +450,12 @@ instance (MetaEncoding a, MetaEncoding b, MetaEncoding c) => MetaEncoding (a,b,c
   metaToJson (a,b,c) = Array $ V.fromList [metaToJson a, metaToJson b, metaToJson c]
 
 instance (MetaEncoding a) => MetaEncoding (Maybe a) where
-  parseMeta Null  = pure Nothing
-  parseMeta o     = Just <$> parseMeta o
-  metaToJson Nothing  = Null
-  metaToJson (Just x) = metaToJson x
+  parseMeta = \case
+    Null  -> pure Nothing
+    o     -> Just <$> parseMeta o
+  metaToJson = \case
+    Nothing -> Null
+    Just x  -> metaToJson x
 
 instance (MetaEncoding a) => MetaEncoding [a] where
   parseMeta  = fmap V.toList . parseMeta

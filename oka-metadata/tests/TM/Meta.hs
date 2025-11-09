@@ -51,6 +51,8 @@ tests = testGroup "Metadata"
     , testSerialise @ENUM
     , testSerialise @Record
     , testSerialise @Record2
+    , testSerialise @(RecordPoly Int)
+    , testSerialise @(RecordPoly (Maybe Int))
     , testSerialise @SSum
     ]
   , testGroup "Roundtrip IsMeta"
@@ -191,6 +193,19 @@ data Record8 = Record8 { foo8 :: Int }
   deriving MetaEncoding        via AsRecord          Record8
   deriving (IsMetaPrim,IsMeta) via AsMeta '["rec8"]  Record8
   deriving Arbitrary           via GenericArbitrary  Record8
+
+
+data RecordPoly a = RecordPoly
+  { poly1 :: Int
+  , poly2 :: a
+  , poly3 :: [a]
+  }
+  deriving stock (Show,Read,Eq,Generic)
+  deriving MetaEncoding via AsRecord (RecordPoly a)
+
+deriving via GenericArbitrary (RecordPoly a)
+    instance (Arg (RecordPoly a) a, Arbitrary a) => Arbitrary (RecordPoly a)
+
 
 
 data SSum
