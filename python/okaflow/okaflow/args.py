@@ -95,7 +95,13 @@ class Args:
     def fromEnv() -> "Args":
         "Create argument list from environment"
         out = os.environ.get('OKA_OUT')
-        return Args(out=out, args=parseS(list(Args.argListFromEnv())))
+        match os.environ.get(f'OKA_ARGS'):
+            case None:
+                args = parseS(list(Args.argListFromEnv()))
+            case str() as path:
+                with open(path) as f:
+                    args = parseS(f.readlines())
+        return Args(out=out, args=args)
 
     def setCWD(self) -> None:
         "Set working directory to output directory"
