@@ -33,6 +33,7 @@ module OKA.Flow.Tools
     -- ** Calling conventions
   , callStandardExe
   , callInEnvironment
+  , callInEnvironmentF
   , callViaArgList
   , ccPrependRelPaths
   , ccPrependArgs
@@ -61,7 +62,7 @@ import Data.Functor
 import System.FilePath              ((</>))
 import System.Directory             (makeAbsolute)
 import System.IO.Temp
-import System.IO                    (hClose)
+import System.IO                    (hClose,hPutStr)
 import System.Environment           (getArgs)
 
 import GHC.Generics hiding (S)
@@ -474,6 +475,43 @@ callInEnvironment p action =
             : [ ("OKA_ARG_" ++ show i, arg)
               | (i,arg) <- [1::Int ..] `zip` sexpToArgs p.args
               ]
+    action ProcessData
+      { stdin   = Nothing
+      , env     = env
+      , args    = []
+      , workdir = p.out
+      }
+
+-- | Pass arguments in the environment.
+--
+-- * Metadata is written in temporary file. It's stored in
+--   @OKA_META@ environment variable.
+--
+-- * Arguments are written into temporary file one value on each line.
+--   File name is stored in @OKA_ARGS@ environment variable.
+--
+-- * Working directory is set to output directory. Additionally it's
+--   stored in @OKA_OUT@ environment variable.
+callInEnvironmentF
+  :: ParamFlow FilePath
+  -> (ProcessData -> IO a)
+  -> IO a
+callInEnvironmentF p action =
+  withSystemTempFile "oka-flow-metadata-" $ \file_meta h_meta ->
+  withSystemTempFile "oka-flow-metadata-" $ \file_args h_args -> do
+    -- Write metadata to temporary file
+    BL.hPutStr h_meta $ JSON.encode $ encodeMetadata p.meta
+    hClose h_args
+    -- Write arguments to temporary file
+    hPutStr h_args $ unlines $ sexpToArgs p.args
+    hClose h_args
+    -- Populate environment
+    let env = case p.out of
+                Nothing -> id
+                Just d  -> (("OKA_OUT", d):)
+            $ ("OKA_META", file_meta)
+            : ("OKA_ARGS", file_args)
+            : []
     action ProcessData
       { stdin   = Nothing
       , env     = env
