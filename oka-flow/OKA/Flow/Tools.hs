@@ -38,6 +38,10 @@ module OKA.Flow.Tools
   , ccPrependRelPaths
   , ccPrependArgs
   , ccAddEnv
+  , ccStdinBS
+  , ccStdinBL
+  , ccStdinText
+  , ccStdinString
     -- * Primitives for creating flows
   , basicLiftWorkflow
   , basicLiftPhony
@@ -56,9 +60,13 @@ import Control.Lens                 ((^?))
 import Data.Coerce
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
+import Data.ByteString              qualified as BS
 import Data.ByteString.Lazy         qualified as BL
 import Data.Monoid                  (Endo(..))
 import Data.Functor
+import Data.Text                    (Text)
+import Data.Text                    qualified as T
+import Data.Text.Encoding           qualified as T
 import System.FilePath              ((</>))
 import System.Directory             (makeAbsolute)
 import System.IO.Temp
@@ -556,6 +564,22 @@ ccAddEnv :: [(String,String)] -> CallingConv -> CallingConv
 ccAddEnv xs cc p action =
   cc p (\ProcessData{..} -> action ProcessData{env = xs ++ env, ..})
 
+-- | Pass strict bytestring to process's stdin.
+ccStdinBL :: BL.ByteString -> CallingConv -> CallingConv
+ccStdinBL dat call p action = call p $ \ProcessData{..} ->
+  action ProcessData{stdin = Just dat, ..}
+
+-- | Pass lazy bytestring to process's stdin.
+ccStdinBS :: BS.ByteString -> CallingConv -> CallingConv
+ccStdinBS dat = ccStdinBL (BL.fromStrict dat)
+
+-- | Pass strict text to process's stdin. It will be UTF8 encoded.
+ccStdinText :: Text -> CallingConv -> CallingConv
+ccStdinText dat = ccStdinBS (T.encodeUtf8 dat)
+
+-- | Pass string to process's stdin. It will be UTF8 encoded.
+ccStdinString :: String -> CallingConv -> CallingConv
+ccStdinString dat = ccStdinText (T.pack dat)
 
 ----------------------------------------------------------------
 -- Defining subprocesses
