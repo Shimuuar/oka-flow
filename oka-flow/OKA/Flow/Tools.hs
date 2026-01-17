@@ -447,7 +447,16 @@ callStandardExe p action = action ProcessData
   , workdir = p.out
   }
 
--- | Pass arguments in the environment
+-- | Pass arguments in the environment.
+--
+-- * Metadata is written in temporary file. It's stored in
+--   @OKA_META@ environment variable.
+--
+-- * Arguments are passed in the same way as in 'callStandardExe' but
+--   in environment variables @OKA_ARG_1@, @OKA_ARG_2@, etc.
+--
+-- * Working directory is set to output directory. Additionally it's
+--   stored in @OKA_OUT@ environment variable.
 callInEnvironment
   :: ParamFlow FilePath
   -> (ProcessData -> IO a)
