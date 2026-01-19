@@ -103,7 +103,55 @@ instance (ResourceDef a, ResourceDef b, ResourceDef c, ResourceDef d
     rd <- createResource d
     pure $ ra <> rb <> rc <> rd
 
-  
+instance (ResourceDef a, ResourceDef b, ResourceDef c, ResourceDef d, ResourceDef e
+         ) => ResourceDef (a,b,c,d,e) where
+  createResource (a,b,c,d,e) = do
+    ra <- createResource a
+    rb <- createResource b
+    rc <- createResource c
+    rd <- createResource d
+    re <- createResource e
+    pure $ ra <> rb <> rc <> rd <> re
+
+instance ( ResourceDef a, ResourceDef b, ResourceDef c, ResourceDef d, ResourceDef e
+         , ResourceDef f
+         ) => ResourceDef (a,b,c,d,e,f) where
+  createResource (a,b,c,d,e,f) = do
+    ra <- createResource a
+    rb <- createResource b
+    rc <- createResource c
+    rd <- createResource d
+    re <- createResource e
+    rf <- createResource f
+    pure $ ra <> rb <> rc <> rd <> re <> rf
+
+instance ( ResourceDef a, ResourceDef b, ResourceDef c, ResourceDef d, ResourceDef e
+         , ResourceDef f, ResourceDef g
+         ) => ResourceDef (a,b,c,d,e,f,g) where
+  createResource (a,b,c,d,e,f,g) = do
+    ra <- createResource a
+    rb <- createResource b
+    rc <- createResource c
+    rd <- createResource d
+    re <- createResource e
+    rf <- createResource f
+    rg <- createResource g
+    pure $ ra <> rb <> rc <> rd <> re <> rf <> rg
+
+instance ( ResourceDef a, ResourceDef b, ResourceDef c, ResourceDef d, ResourceDef e
+         , ResourceDef f, ResourceDef g, ResourceDef h
+         ) => ResourceDef (a,b,c,d,e,f,g,h) where
+  createResource (a,b,c,d,e,f,g,h) = do
+    ra <- createResource a
+    rb <- createResource b
+    rc <- createResource c
+    rd <- createResource d
+    re <- createResource e
+    rf <- createResource f
+    rg <- createResource g
+    rh <- createResource h
+    pure $ ra <> rb <> rc <> rd <> re <> rf <> rg <> rh
+
 
 
 instance ResourceClaim Claim where
@@ -113,19 +161,44 @@ instance ResourceClaim () where
   claimResource = mempty
 
 instance (ResourceClaim a, ResourceClaim b) => ResourceClaim (a,b) where
-  claimResource (a,b) = 
-    claimResource a <> claimResource b
+  claimResource (a,b) = claimResource a <> claimResource b
 
 instance (ResourceClaim a, ResourceClaim b, ResourceClaim c) => ResourceClaim (a,b,c) where
-  claimResource (a,b,c) = 
-    claimResource a <> claimResource b <> claimResource c
+  claimResource (a,b,c)
+    = claimResource a <> claimResource b <> claimResource c
 
 instance (ResourceClaim a, ResourceClaim b, ResourceClaim c, ResourceClaim d
          ) => ResourceClaim (a,b,c,d) where
-  claimResource (a,b,c,d) = 
-    claimResource a <> claimResource b <> claimResource c <> claimResource d
+  claimResource (a,b,c,d)
+    = claimResource a <> claimResource b <> claimResource c <> claimResource d
 
+instance ( ResourceClaim a, ResourceClaim b, ResourceClaim c, ResourceClaim d
+         , ResourceClaim e
+         ) => ResourceClaim (a,b,c,d,e) where
+  claimResource (a,b,c,d,e)
+    = claimResource a <> claimResource b <> claimResource c <> claimResource d
+   <> claimResource e
 
+instance ( ResourceClaim a, ResourceClaim b, ResourceClaim c, ResourceClaim d
+         , ResourceClaim e, ResourceClaim f
+         ) => ResourceClaim (a,b,c,d,e,f) where
+  claimResource (a,b,c,d,e,f)
+    = claimResource a <> claimResource b <> claimResource c <> claimResource d
+   <> claimResource e <> claimResource f
+
+instance ( ResourceClaim a, ResourceClaim b, ResourceClaim c, ResourceClaim d
+         , ResourceClaim e, ResourceClaim f, ResourceClaim g
+         ) => ResourceClaim (a,b,c,d,e,f,g) where
+  claimResource (a,b,c,d,e,f,g)
+    = claimResource a <> claimResource b <> claimResource c <> claimResource d
+   <> claimResource e <> claimResource f <> claimResource g
+
+instance ( ResourceClaim a, ResourceClaim b, ResourceClaim c, ResourceClaim d
+         , ResourceClaim e, ResourceClaim f, ResourceClaim g, ResourceClaim h
+         ) => ResourceClaim (a,b,c,d,e,f,g,h) where
+  claimResource (a,b,c,d,e,f,g,h)
+    = claimResource a <> claimResource b <> claimResource c <> claimResource d
+   <> claimResource e <> claimResource f <> claimResource g <> claimResource h
 
 
 
