@@ -56,7 +56,7 @@ Library
                   , vector               >=0.13
                   , effectful-core       >=2.3
                   , yaml
-                  , random               >=1.2 && <1.3
+                  , random               >=1.2 && <1.4
   Exposed-modules:
         -- Core modules
         OKA.Flow.Core.Graph
