@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE CPP                 #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE GADTs               #-}
@@ -220,4 +221,10 @@ instance (PrngE :> eff) => StatefulGen PRNG (Flow eff) where
   uniformWord64    _ = Flow $ stateStaticRep @PrngE $ coerce (genWord64  @StdGen)
   uniformWord32R n _ = Flow $ stateStaticRep @PrngE $ coerce (genWord32R @StdGen n)
   uniformWord64R n _ = Flow $ stateStaticRep @PrngE $ coerce (genWord64R @StdGen n)
+#if MIN_VERSION_random(1,3,0)
+  uniformShortByteString = uniformShortByteStringM
+  uniformByteArrayM isPinned n _
+    = Flow $ stateStaticRep @PrngE $ coerce (uniformByteArray @StdGen isPinned n)
+#else
   uniformShortByteString n _ = Flow $ stateStaticRep @PrngE $ coerce (genShortByteString @StdGen n)
+#endif
