@@ -33,10 +33,15 @@ module OKA.Flow.Tools
     -- ** Calling conventions
   , callStandardExe
   , callInEnvironment
+  , callInEnvironmentF
   , callViaArgList
   , ccPrependRelPaths
   , ccPrependArgs
   , ccAddEnv
+  , ccStdinBS
+  , ccStdinBL
+  , ccStdinText
+  , ccStdinString
     -- * Primitives for creating flows
   , basicLiftWorkflow
   , basicLiftPhony
@@ -55,13 +60,17 @@ import Control.Lens                 ((^?))
 import Data.Coerce
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
+import Data.ByteString              qualified as BS
 import Data.ByteString.Lazy         qualified as BL
 import Data.Monoid                  (Endo(..))
 import Data.Functor
+import Data.Text                    (Text)
+import Data.Text                    qualified as T
+import Data.Text.Encoding           qualified as T
 import System.FilePath              ((</>))
 import System.Directory             (makeAbsolute)
 import System.IO.Temp
-import System.IO                    (hClose)
+import System.IO                    (hClose,hPutStr)
 import System.Environment           (getArgs)
 
 import GHC.Generics hiding (S)
@@ -447,7 +456,16 @@ callStandardExe p action = action ProcessData
   , workdir = p.out
   }
 
--- | Pass arguments in the environment
+-- | Pass arguments in the environment.
+--
+-- * Metadata is written in temporary file. It's stored in
+--   @OKA_META@ environment variable.
+--
+-- * Arguments are passed in the same way as in 'callStandardExe' but
+--   in environment variables @OKA_ARG_1@, @OKA_ARG_2@, etc.
+--
+-- * Working directory is set to output directory. Additionally it's
+--   stored in @OKA_OUT@ environment variable.
 callInEnvironment
   :: ParamFlow FilePath
   -> (ProcessData -> IO a)
@@ -465,6 +483,43 @@ callInEnvironment p action =
             : [ ("OKA_ARG_" ++ show i, arg)
               | (i,arg) <- [1::Int ..] `zip` sexpToArgs p.args
               ]
+    action ProcessData
+      { stdin   = Nothing
+      , env     = env
+      , args    = []
+      , workdir = p.out
+      }
+
+-- | Pass arguments in the environment.
+--
+-- * Metadata is written in temporary file. It's stored in
+--   @OKA_META@ environment variable.
+--
+-- * Arguments are written into temporary file one value on each line.
+--   File name is stored in @OKA_ARGS@ environment variable.
+--
+-- * Working directory is set to output directory. Additionally it's
+--   stored in @OKA_OUT@ environment variable.
+callInEnvironmentF
+  :: ParamFlow FilePath
+  -> (ProcessData -> IO a)
+  -> IO a
+callInEnvironmentF p action =
+  withSystemTempFile "oka-flow-metadata-" $ \file_meta h_meta ->
+  withSystemTempFile "oka-flow-metadata-" $ \file_args h_args -> do
+    -- Write metadata to temporary file
+    BL.hPutStr h_meta $ JSON.encode $ encodeMetadata p.meta
+    hClose h_args
+    -- Write arguments to temporary file
+    hPutStr h_args $ unlines $ sexpToArgs p.args
+    hClose h_args
+    -- Populate environment
+    let env = case p.out of
+                Nothing -> id
+                Just d  -> (("OKA_OUT", d):)
+            $ ("OKA_META", file_meta)
+            : ("OKA_ARGS", file_args)
+            : []
     action ProcessData
       { stdin   = Nothing
       , env     = env
@@ -509,6 +564,22 @@ ccAddEnv :: [(String,String)] -> CallingConv -> CallingConv
 ccAddEnv xs cc p action =
   cc p (\ProcessData{..} -> action ProcessData{env = xs ++ env, ..})
 
+-- | Pass strict bytestring to process's stdin.
+ccStdinBL :: BL.ByteString -> CallingConv -> CallingConv
+ccStdinBL dat call p action = call p $ \ProcessData{..} ->
+  action ProcessData{stdin = Just dat, ..}
+
+-- | Pass lazy bytestring to process's stdin.
+ccStdinBS :: BS.ByteString -> CallingConv -> CallingConv
+ccStdinBS dat = ccStdinBL (BL.fromStrict dat)
+
+-- | Pass strict text to process's stdin. It will be UTF8 encoded.
+ccStdinText :: Text -> CallingConv -> CallingConv
+ccStdinText dat = ccStdinBS (T.encodeUtf8 dat)
+
+-- | Pass string to process's stdin. It will be UTF8 encoded.
+ccStdinString :: String -> CallingConv -> CallingConv
+ccStdinString dat = ccStdinText (T.pack dat)
 
 ----------------------------------------------------------------
 -- Defining subprocesses
