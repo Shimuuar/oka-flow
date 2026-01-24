@@ -96,6 +96,11 @@ class Typeable a => MetaEncoding a where
   -- | Encode value to JSON.
   metaToJson :: a -> JSON.Value
 
+  parseMetaList :: JSON.Value -> JSON.Parser [a]
+  parseMetaList  = fmap V.toList . parseMeta
+
+  metaListToJSON :: [a] -> JSON.Value
+  metaListToJSON = Array . V.fromList . map metaToJson
 
 ----------------------------------------------------------------
 -- Manual instances writing
@@ -418,7 +423,13 @@ instance (MetaEncoding a) => GSExpEncode (K1 i a) where
 -- Instances
 ----------------------------------------------------------------
 
-deriving via AsAeson Char   instance MetaEncoding Char
+instance MetaEncoding Char where
+  parseMeta      = JSON.parseJSON
+  metaToJson     = JSON.toJSON
+  parseMetaList  = JSON.parseJSONList
+  metaListToJSON = JSON.toJSONList
+
+
 deriving via AsAeson Value  instance MetaEncoding Value
 deriving via AsAeson Text   instance MetaEncoding Text
 deriving via AsAeson Bool   instance MetaEncoding Bool
@@ -459,8 +470,8 @@ instance (MetaEncoding a) => MetaEncoding (Maybe a) where
     Just x  -> metaToJson x
 
 instance (MetaEncoding a) => MetaEncoding [a] where
-  parseMeta  = fmap V.toList . parseMeta
-  metaToJson = Array . V.fromList . map metaToJson
+  parseMeta  = parseMetaList
+  metaToJson = metaListToJSON
 
 instance (MetaEncoding a, VU.Unbox a) => MetaEncoding (VU.Vector a) where
   parseMeta  = fmap VU.convert . parseMeta @(V.Vector a)

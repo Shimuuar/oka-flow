@@ -39,6 +39,7 @@ tests = testGroup "Metadata"
   [ testGroup "Roundtrip MetaEncoding"
     [ testSerialise @Int
     , testSerialise @[Int]
+    , testSerialise @String
     , testSerialise @(Int,Double)
     , testSerialise @(Int,Double,(Int,Int))
     , testSerialise @(Maybe [Int])
@@ -78,6 +79,10 @@ tests = testGroup "Metadata"
     [ testProperty "Lookup"        $ optionalLookup  @Record
     , testProperty "Lookup tuple"  $ optionalLookup  @(Record, Record2)
     , testProperty "Lookup tuple2" $ optionalLookup2 @Record @Record2
+    ]
+  , testGroup "Special cases"
+    [ testCase "String" $ JSON.String "ABC" @=? metaToJson ("ABC"::String)
+
     ]
   ]
 
