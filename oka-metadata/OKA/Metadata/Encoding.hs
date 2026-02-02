@@ -23,6 +23,8 @@ module OKA.Metadata.Encoding
     -- *** Fixed-vectors
   , parseFixedVec
   , fixedVecToMeta
+  , parseFixedVecMono
+  , fixedVecToMetaMono
     -- ** Exhaustive parser
   , ObjParser
   , runObjParser
@@ -66,6 +68,7 @@ import Data.Vector.Fixed.Strict    qualified as FF
 import Data.Vector.Fixed.Boxed     qualified as FB
 import Data.Vector.Fixed.Storable  qualified as FS
 import Data.Vector.Fixed.Primitive qualified as FP
+import Data.Vector.Fixed.Mono      qualified as FM
 import Data.Map.Strict             qualified as Map
 import Data.IntMap.Strict          qualified as IntMap
 import Data.Typeable
@@ -191,24 +194,36 @@ metaSExp3With con mk pA pB pC val
 
 -- | Parser for fixed vectors
 parseFixedVec :: forall a v. (MetaEncoding a, F.Vector v a) => Value -> JSON.Parser (v a)
-parseFixedVec
+parseFixedVec js = do
+  F.ViaFixed v <- parseFixedVecMono js
+  pure v
+
+-- | Encoder for fixed vectors
+fixedVecToMeta :: (MetaEncoding a, F.Vector v a) => v a -> Value
+fixedVecToMeta = fixedVecToMetaMono . F.ViaFixed
+
+
+parseFixedVecMono :: forall a v. (MetaEncoding a, FM.Vector a v) => Value -> JSON.Parser v
+parseFixedVecMono
   = JSON.prependFailure " - traversing Array\n"
   . JSON.withArray "Vec"
     (\v -> do
         let n   = V.length v
             dim = FC.peanoToInt (proxy# @(F.Dim v))
         when (n /= dim) $ fail $ printf "Array length mismatch: expected %i but got %i" dim n
-        F.generateM $ \i -> JSON.prependFailure (" - index " <> show i)
-                          $ parseMeta (v ! i)
+        FM.generateM $ \i -> JSON.prependFailure (" - index " <> show i)
+                     $ parseMeta (v ! i)
     )
 
--- | Encoder for fixed vectors
-fixedVecToMeta :: (MetaEncoding a, F.Vector v a) => v a -> Value
-fixedVecToMeta = Array . V.fromList . map metaToJson . F.toList
+fixedVecToMetaMono :: (MetaEncoding a, FM.Vector a v) => v -> Value
+fixedVecToMetaMono = Array . V.fromList . map metaToJson . FM.toList
 
 instance (MetaEncoding a, Typeable v, F.Vector v a) => MetaEncoding (F.ViaFixed v a) where
   parseMeta  = parseFixedVec
   metaToJson = fixedVecToMeta
+instance (MetaEncoding a, Typeable v, FM.Prod a v) => MetaEncoding (FM.ViaFixed a v) where
+  parseMeta  = parseFixedVecMono
+  metaToJson = fixedVecToMetaMono
 
 
 ----------------------------------------------------------------

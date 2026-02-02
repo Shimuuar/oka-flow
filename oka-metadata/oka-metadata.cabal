@@ -38,7 +38,7 @@ Library
                   , text
                   , containers          >=0.5
                   , vector              >=0.13
-                  , fixed-vector        >=2.0
+                  , fixed-vector        >=2.1
                   , these               >=1
                   , lens                >=5
                   , yaml
