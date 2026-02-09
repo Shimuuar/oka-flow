@@ -12,6 +12,7 @@ module OKA.Flow.Core.Types
   , storePath
     -- * Flow parameters
   , ParamFlow(..)
+  , Stdin(..)
   , ProcessData(..)
   , CallingConv
   , toTypedProcess
@@ -30,6 +31,7 @@ import System.FilePath        ((</>),pathSeparator)
 import System.Directory       (makeAbsolute)
 import System.Environment     (getEnvironment)
 import System.Process.Typed
+import System.IO              (openFile,IOMode(..))
 import System.Posix.Signals   (signalProcess, sigINT)
 
 import OKA.Metadata
@@ -72,13 +74,20 @@ data ParamFlow a = ParamFlow
   }
   deriving stock (Functor,Foldable,Traversable)
 
+-- | What to do with stdin of subprocess
+data Stdin
+  = DevNull                  -- ^ Close @stdin@ of  subprocess
+  | StdinBS   !BL.ByteString -- ^ Write lazy bytestring to stdin
+  | StdinFile !FilePath      -- ^ Read stdin from file
+  deriving stock (Show,Eq)
+
 -- | Data for calling external process
 data ProcessData = ProcessData
-  { stdin   :: !(Maybe BL.ByteString) -- ^ Data to pass stdin
-  , env     :: [(String,String)]      -- ^ Data for putting into environment. Otherwise environment
-                                      --   is inherited.
-  , args    :: [String]               -- ^ Arguments for a process
-  , workdir :: !(Maybe FilePath)      -- ^ Working directory for subprocess.
+  { stdin   :: !Stdin            -- ^ Data to pass to stdin
+  , env     :: [(String,String)] -- ^ Data for putting into environment. Otherwise environment
+                                 --   is inherited.
+  , args    :: [String]          -- ^ Arguments for a process
+  , workdir :: !(Maybe FilePath) -- ^ Working directory for subprocess.
   }
 
 
@@ -105,16 +114,20 @@ toTypedProcess exe process = do
     [] -> pure []
     es -> do env <- getEnvironment
              pure $ env ++ es
-  pure $ case process.workdir of
-           Nothing -> id
-           Just p  -> setWorkingDir p
-       $ case process.stdin of
-           Nothing -> id
-           Just bs -> setStdin (byteStringInput bs)
-       $ case env of
-           [] -> id
-           _  -> setEnv env
-       $ proc exe' process.args
+  --
+  let set_stdin p = case process.stdin of
+        DevNull        -> pure $ setStdin nullStream           p
+        StdinBS   bs   -> pure $ setStdin (byteStringInput bs) p
+        StdinFile path -> do h <- openFile path ReadMode
+                             pure $ setStdin (useHandleClose h) p
+  id $ set_stdin
+     $ case process.workdir of
+         Nothing -> id
+         Just p  -> setWorkingDir p
+     $ case env of
+         [] -> id
+         _  -> setEnv env
+     $ proc exe' process.args
 
 -- | Create subprocess and wait for its completions. If execution is
 --   interrupted subprocess is killed. If process exits with nonzero

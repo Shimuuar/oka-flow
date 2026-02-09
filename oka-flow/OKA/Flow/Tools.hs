@@ -450,7 +450,7 @@ callStandardExe
   -> (ProcessData -> IO a)
   -> IO a
 callStandardExe p action = action ProcessData
-  { stdin   = Just $ JSON.encode $ encodeMetadata p.meta
+  { stdin   = StdinBS $ JSON.encode $ encodeMetadata p.meta
   , env     = []
   , args    = sexpToArgs p.args
   , workdir = p.out
@@ -484,7 +484,7 @@ callInEnvironment p action =
               | (i,arg) <- [1::Int ..] `zip` sexpToArgs p.args
               ]
     action ProcessData
-      { stdin   = Nothing
+      { stdin   = DevNull
       , env     = env
       , args    = []
       , workdir = p.out
@@ -521,7 +521,7 @@ callInEnvironmentF p action =
             : ("OKA_ARGS", file_args)
             : []
     action ProcessData
-      { stdin   = Nothing
+      { stdin   = DevNull
       , env     = env
       , args    = []
       , workdir = p.out
@@ -540,7 +540,7 @@ callViaArgList
   -> (ProcessData -> IO a)
   -> IO a
 callViaArgList transform p action = action $ ProcessData
-  { stdin   = Nothing
+  { stdin   = DevNull
   , env     = []
   , args    = transform p.args
   , workdir = p.out
@@ -567,7 +567,7 @@ ccAddEnv xs cc p action =
 -- | Pass strict bytestring to process's stdin.
 ccStdinBL :: BL.ByteString -> CallingConv -> CallingConv
 ccStdinBL dat call p action = call p $ \ProcessData{..} ->
-  action ProcessData{stdin = Just dat, ..}
+  action ProcessData{stdin = StdinBS dat, ..}
 
 -- | Pass lazy bytestring to process's stdin.
 ccStdinBS :: BS.ByteString -> CallingConv -> CallingConv
