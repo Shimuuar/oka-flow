@@ -172,9 +172,11 @@ class IsMetaModel(pydantic.BaseModel):
         "Construct data type from metadata"
         m = meta
         for key in cls.meta_location:
-            assert key in m
+            if key not in m:
+                raise ValueError(f"Key '{key}' is not in metadata dictionary")
             v = m[key]
-            assert isinstance(v,Meta)
+            if not isinstance(v,Meta):
+                raise ValueError("Value should be instance of Meta")
             m = v
         return cls(**m._dct)
 
