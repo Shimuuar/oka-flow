@@ -56,7 +56,7 @@ module OKA.Flow.Tools
 import Control.Applicative
 -- import Control.Concurrent.STM
 import Control.Exception
-import Control.Lens                 ((^?))
+import Control.Lens hiding (sequenceOf,from)--                 ((^?))
 import Data.Coerce
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
@@ -452,7 +452,7 @@ callStandardExe
 callStandardExe p action = action ProcessData
   { stdin   = StdinBS $ JSON.encode $ encodeMetadata p.meta
   , env     = []
-  , args    = sexpToArgs p.args
+  , args    = CmdArg <$> sexpToArgs p.args
   , workdir = p.out
   }
 
@@ -535,7 +535,7 @@ callInEnvironmentF p action =
 --
 --  * Working dir is set to output directory
 callViaArgList
-  :: (S FilePath -> [FilePath]) -- ^ How to transform list of store pathes
+  :: (S FilePath -> [CmdArg]) -- ^ How to transform list of store pathes
   -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
@@ -550,14 +550,13 @@ callViaArgList transform p action = action $ ProcessData
 --   converted to absolute path.
 ccPrependRelPaths :: [FilePath] -> CallingConv -> CallingConv
 ccPrependRelPaths paths call p action = call p $ \ProcessData{..} -> do
-  paths' <- traverse makeAbsolute paths
-  action ProcessData{args = paths' ++ args, ..}
+  action ProcessData{args = (PathA <$> paths) ++ args, ..}
 
 -- | Prepend arguments to list being passed to flow. They are not
 --   modified.
 ccPrependArgs :: [FilePath] -> CallingConv -> CallingConv
 ccPrependArgs xs call p action = call p $ \ProcessData{..} -> do
-  action ProcessData{args = xs ++ args, ..}
+  action ProcessData{args = (CmdArg <$> xs) ++ args, ..}
 
 -- | Add values to environment variables
 ccAddEnv :: [(String,String)] -> CallingConv -> CallingConv
@@ -580,6 +579,7 @@ ccStdinText dat = ccStdinBS (T.encodeUtf8 dat)
 -- | Pass string to process's stdin. It will be UTF8 encoded.
 ccStdinString :: String -> CallingConv -> CallingConv
 ccStdinString dat = ccStdinText (T.pack dat)
+
 
 ----------------------------------------------------------------
 -- Defining subprocesses
@@ -660,3 +660,7 @@ sexpFromArgs xs = runListParser parserS xs where
 --              , "-threaded"
 --              , "-with-rtsopts=-T -A8m"
 --              ]
+
+
+-- foo :: Setter' CallingConv ProcessData
+-- foo = undefined

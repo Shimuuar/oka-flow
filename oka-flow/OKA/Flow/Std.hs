@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveAnyClass       #-}
 {-# LANGUAGE MagicHash            #-}
+{-# LANGUAGE OverloadedStrings    #-}
 {-# LANGUAGE UndecidableInstances #-}
 -- |
 -- Standard workflows
@@ -111,9 +112,9 @@ runPdfReader a = do
   pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
   liftPhonyExecutable pdf ()
     -- FIXME: We need way to generalize SequenceOf!
-    (callViaArgList $ \s -> [p </> "report.pdf" | Just args <- [sequenceS s]
-                                                , p         <- args
-                                                ])
+    (callViaArgList $ \s -> [CmdArg $ p </> "report.pdf" | Just args <- [sequenceS s]
+                                                         , p         <- args
+                                                         ])
     (sequenceOf @ReportPDF a)
 
 -- | Concatenate PDFs using @pdftk@ program
@@ -121,9 +122,10 @@ stdConcatPDF :: SequenceOf ReportPDF a => a -> Flow eff (Result ReportPDF)
 stdConcatPDF reports = restrictMeta @() $ do
   liftExecutable "std.pdftk.concat" "pdftk" ()
     (callViaArgList $ \s ->
-        [a</>"report.pdf" | Just args <- [sequenceS s]
-                          , a <- args
-                          ] ++ ["cat", "output", "report.pdf"]
+        [CmdArg $ a</>"report.pdf" | Just args <- [sequenceS s]
+                                   , a <- args
+                                   ] ++
+        ["cat", "output", "report.pdf"]
         )
     (sequenceOf @ReportPDF reports)
 
@@ -187,7 +189,7 @@ stdJupyter notebooks params = do
                                  ] ++ proc_jupyter.env
                         , args = [ "notebook"
                                  , "--no-browser"
-                                 , "--notebook-dir=" ++ notebook_dir
+                                 , CmdArg $ "--notebook-dir=" ++ notebook_dir
                                  ]
                         }
           withProcessWait_ run_jupyter $ \_ -> do

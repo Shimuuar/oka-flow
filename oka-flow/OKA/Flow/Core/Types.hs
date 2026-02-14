@@ -13,6 +13,7 @@ module OKA.Flow.Core.Types
     -- * Flow parameters
   , ParamFlow(..)
   , Stdin(..)
+  , CmdArg(..)
   , ProcessData(..)
   , CallingConv
   , toTypedProcess
@@ -27,6 +28,8 @@ import Data.ByteString        (ByteString)
 import Data.ByteString.Char8  qualified as BC8
 import Data.ByteString.Lazy   qualified as BL
 import Data.ByteString.Base16 qualified as Base16
+import Data.String
+import Data.Traversable
 import System.FilePath        ((</>),pathSeparator)
 import System.Directory       (makeAbsolute)
 import System.Environment     (getEnvironment)
@@ -81,12 +84,28 @@ data Stdin
   | StdinFile !FilePath      -- ^ Read stdin from file
   deriving stock (Show,Eq)
 
+-- | Command line argument. We need to distinguish between relative
+--   path and command line arguments. We need to convert former to
+--   absolute paths since we don't know working dir of subprocess.
+--   Note that paths from store are already absolute there's little
+--   reason to represent them as @Path@.
+data CmdArg
+  = CmdArg !FilePath -- ^ Command line argument which is
+  | PathA  !FilePath -- ^ Path relative to working directory of workflow manager.
+  | PathO  !FilePath -- ^ Path relative to working directory of store
+                     --   output of corresponding subprocess.
+  deriving stock (Show,Eq)
+
+instance IsString CmdArg where
+  fromString = CmdArg
+
+
 -- | Data for calling external process
 data ProcessData = ProcessData
   { stdin   :: !Stdin            -- ^ Data to pass to stdin
   , env     :: [(String,String)] -- ^ Data for putting into environment. Otherwise environment
                                  --   is inherited.
-  , args    :: [String]          -- ^ Arguments for a process
+  , args    :: [CmdArg]          -- ^ Arguments for a process
   , workdir :: !(Maybe FilePath) -- ^ Working directory for subprocess.
   }
 
@@ -115,6 +134,12 @@ toTypedProcess exe process = do
     es -> do env <- getEnvironment
              pure $ env ++ es
   --
+  args <- for process.args $ \case
+    CmdArg p -> pure p
+    PathA  p -> makeAbsolute p
+    PathO  p -> case process.workdir of
+      Nothing -> error "Workdir for subprocess is not set. Path relative to output is not defined"
+      Just _  -> pure p
   let set_stdin p = case process.stdin of
         DevNull        -> pure $ setStdin nullStream           p
         StdinBS   bs   -> pure $ setStdin (byteStringInput bs) p
@@ -127,7 +152,7 @@ toTypedProcess exe process = do
      $ case env of
          [] -> id
          _  -> setEnv env
-     $ proc exe' process.args
+     $ proc exe' args
 
 -- | Create subprocess and wait for its completions. If execution is
 --   interrupted subprocess is killed. If process exits with nonzero
