@@ -203,6 +203,10 @@ class IsMetaModel(pydantic.BaseModel):
             meta = {k:meta}
         return meta
 
+    def _repr_pretty_(self, p: Any, _cycle: bool=False) -> str:
+        return Meta(self.model_dump())._repr_pretty_(p,_cycle)
+
+
 def IsMeta(*prefix: str) -> type[IsMetaModel]:
     """Generate base model for a pyndatic class which will look up
     data in the given path"""
