@@ -196,6 +196,12 @@ class IsMetaModel(pydantic.BaseModel):
         "Construct data type from saved metadata"
         return cls.fromMeta(fromSavedMeta(path))
 
+    def toJson(self) -> dict:
+        "Convert data type into its metadata representation"
+        meta = self.model_dump()
+        for k in reversed(self.meta_location):
+            meta = {k:meta}
+        return meta
 
 def IsMeta(*prefix: str) -> type[IsMetaModel]:
     """Generate base model for a pyndatic class which will look up
