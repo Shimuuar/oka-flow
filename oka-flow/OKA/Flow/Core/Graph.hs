@@ -74,8 +74,7 @@ import OKA.Flow.Core.S
 --   call external executable. This way executor can correctly pass
 --   metadata to it.
 data Executable = Executable
-  { executable :: FilePath    -- ^ Executable to start
-  , call       :: CallingConv -- ^ IO action which could be executed to prepare program.
+  { call :: CallingConv -- ^ IO action which could be executed to prepare program.
   }
 
 -- | Action to be execute by dataflow either normal or phony.

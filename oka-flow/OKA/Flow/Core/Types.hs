@@ -116,12 +116,13 @@ instance IsString CmdArg where
 
 -- | Data for calling external process
 data ProcessData = ProcessData
-  { stdin   :: !Stdin            -- ^ Data to pass to stdin
-  , stdout  :: !Stdout           -- ^ Stdout treatment
-  , env     :: [(String,String)] -- ^ Data for putting into environment. Otherwise environment
-                                 --   is inherited.
-  , args    :: [CmdArg]          -- ^ Arguments for a process
-  , workdir :: !(Maybe FilePath) -- ^ Working directory for subprocess.
+  { executable :: !FilePath         -- ^ Executable name. If it contains path separators
+                                    --   it will be converted to absolute path relative
+  , stdin      :: !Stdin            -- ^ Data to pass to stdin
+  , stdout     :: !Stdout           -- ^ Stdout treatment
+  , env        :: [(String,String)] -- ^ Data for adding to process environment
+  , args       :: [CmdArg]          -- ^ Arguments for a process
+  , workdir    :: !(Maybe FilePath) -- ^ Working directory for subprocess.
   }
 
 
@@ -131,19 +132,16 @@ type CallingConv = forall a. (ParamFlow FilePath -> (ProcessData -> IO a) -> IO 
 -- | Convert dictionary into data structure for calling external
 --   process using @typed-process@
 toTypedProcess
-  :: FilePath    -- ^ Executable name. If it contains path separators
-                 --   it will be converted to absolute path relative
-                 --   to current working dir.
-  -> ProcessData -- ^ Parameters
+  :: ProcessData -- ^ Parameters
   -> IO (ProcessConfig () () ())
-toTypedProcess exe process = do
+toTypedProcess process = do
   -- Executable is searched relative to the working directory of
   -- process. We need to convert executable to absolute path when
   -- setting working dir. At the same we don't want to convert to
   -- absolute path executables from PATH.
-  exe' <- if
-    | pathSeparator `elem` exe -> makeAbsolute exe
-    | otherwise                -> pure exe
+  exe <- if
+    | pathSeparator `elem` process.executable -> makeAbsolute process.executable
+    | otherwise                               -> pure process.executable
   env <- case process.env of
     [] -> pure []
     es -> do env <- getEnvironment
@@ -177,19 +175,18 @@ toTypedProcess exe process = do
      $ case env of
          [] -> id
          _  -> setEnv env
-     $ proc exe' args
+     $ proc exe args
 
 -- | Create subprocess and wait for its completions. If execution is
 --   interrupted subprocess is killed. If process exits with nonzero
 --   exit code exception is raised.
 startSubprocessAndWait
-  :: FilePath           -- ^ Executable name
-  -> CallingConv        -- ^ Calling conventions
+  :: CallingConv        -- ^ Calling conventions
   -> ParamFlow FilePath -- ^ Parameters
   -> IO ()
-startSubprocessAndWait exe call param =
+startSubprocessAndWait call param =
   call param $ \process -> do
-    run <- toTypedProcess exe process
+    run <- toTypedProcess process
     withProcessWait_ run $ \pid -> do
       _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
       pure ()
