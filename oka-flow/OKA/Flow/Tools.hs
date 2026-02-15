@@ -54,21 +54,18 @@ module OKA.Flow.Tools
   ) where
 
 import Control.Applicative
--- import Control.Concurrent.STM
 import Control.Exception
-import Control.Lens hiding (sequenceOf,from)--                 ((^?))
+import Control.Lens                 ((<&>),(^?))
 import Data.Coerce
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
 import Data.ByteString              qualified as BS
 import Data.ByteString.Lazy         qualified as BL
 import Data.Monoid                  (Endo(..))
-import Data.Functor
 import Data.Text                    (Text)
 import Data.Text                    qualified as T
 import Data.Text.Encoding           qualified as T
 import System.FilePath              ((</>))
-import System.Directory             (makeAbsolute)
 import System.IO.Temp
 import System.IO                    (hClose,hPutStr)
 import System.Environment           (getArgs)
@@ -542,11 +539,11 @@ callViaArgList
   -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
-callViaArgList transform p action = action $ ProcessData
+callViaArgList fun p action = action $ ProcessData
   { stdin   = DevNullIn
   , stdout  = Inherit
   , env     = []
-  , args    = transform p.args
+  , args    = fun p.args
   , workdir = p.out
   }
 
