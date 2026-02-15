@@ -451,6 +451,7 @@ callStandardExe
   -> IO a
 callStandardExe p action = action ProcessData
   { stdin   = StdinBS $ JSON.encode $ encodeMetadata p.meta
+  , stdout  = Inherit
   , env     = []
   , args    = CmdArg <$> sexpToArgs p.args
   , workdir = p.out
@@ -484,7 +485,8 @@ callInEnvironment p action =
               | (i,arg) <- [1::Int ..] `zip` sexpToArgs p.args
               ]
     action ProcessData
-      { stdin   = DevNull
+      { stdin   = DevNullIn
+      , stdout  = Inherit
       , env     = env
       , args    = []
       , workdir = p.out
@@ -521,7 +523,8 @@ callInEnvironmentF p action =
             : ("OKA_ARGS", file_args)
             : []
     action ProcessData
-      { stdin   = DevNull
+      { stdin   = DevNullIn
+      , stdout  = Inherit
       , env     = env
       , args    = []
       , workdir = p.out
@@ -540,7 +543,8 @@ callViaArgList
   -> (ProcessData -> IO a)
   -> IO a
 callViaArgList transform p action = action $ ProcessData
-  { stdin   = DevNull
+  { stdin   = DevNullIn
+  , stdout  = Inherit
   , env     = []
   , args    = transform p.args
   , workdir = p.out

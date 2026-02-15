@@ -13,6 +13,7 @@ module OKA.Flow.Core.Types
     -- * Flow parameters
   , ParamFlow(..)
   , Stdin(..)
+  , Stdout(..)
   , CmdArg(..)
   , ProcessData(..)
   , CallingConv
@@ -33,7 +34,10 @@ import Data.Traversable
 import System.FilePath        ((</>),pathSeparator)
 import System.Directory       (makeAbsolute)
 import System.Environment     (getEnvironment)
-import System.Process.Typed
+import System.Process.Typed   (ProcessConfig,Process,proc,setStdin,setStdout,setWorkingDir,setEnv,
+                               nullStream,byteStringInput,useHandleClose,withProcessWait_,waitExitCodeSTM,
+                               getPid
+                              )
 import System.IO              (openFile,IOMode(..))
 import System.Posix.Signals   (signalProcess, sigINT)
 
@@ -79,12 +83,19 @@ data ParamFlow a = ParamFlow
 
 -- | What to do with stdin of subprocess
 data Stdin
-  = DevNull                   -- ^ Close @stdin@ of  subprocess
+  = DevNullIn                 -- ^ Close @stdin@ of  subprocess
   | StdinBS    !BL.ByteString -- ^ Write lazy bytestring to stdin
   | StdinFileA !FilePath      -- ^ Read stdin from file. File path is
                               --   relative to workdir of dataflow manager
   | StdinFileO !FilePath      -- ^ Read stdin from file. File path is relative to
                               --   output directory.
+  deriving stock (Show,Eq)
+
+-- | What to do with stdout of subprocess
+data Stdout
+  = Inherit              -- ^ Inherit @stdout@
+  | DevNullOut           -- ^ Close @std
+  | StdoutFile !FilePath -- ^ Write stdout to file
   deriving stock (Show,Eq)
 
 -- | Command line argument. We need to distinguish between relative
@@ -106,6 +117,7 @@ instance IsString CmdArg where
 -- | Data for calling external process
 data ProcessData = ProcessData
   { stdin   :: !Stdin            -- ^ Data to pass to stdin
+  , stdout  :: !Stdout           -- ^ Stdout treatment
   , env     :: [(String,String)] -- ^ Data for putting into environment. Otherwise environment
                                  --   is inherited.
   , args    :: [CmdArg]          -- ^ Arguments for a process
@@ -144,14 +156,21 @@ toTypedProcess exe process = do
       Nothing -> error "Workdir for subprocess is not set. Path relative to output is not defined"
       Just _  -> pure p
   let set_stdin p = case process.stdin of
-        DevNull         -> pure $ setStdin nullStream           p
+        DevNullIn       -> pure $ setStdin nullStream           p
         StdinBS    bs   -> pure $ setStdin (byteStringInput bs) p
         StdinFileA path -> do path' <- makeAbsolute path
                               h     <- openFile path' ReadMode
                               pure $ setStdin (useHandleClose h) p
         StdinFileO path -> do h <- openFile path ReadMode
                               pure $ setStdin (useHandleClose h) p
-  id $ set_stdin
+  let set_stdout p = case process.stdout of
+        Inherit         -> pure p
+        DevNullOut      -> pure $ setStdout nullStream p
+        StdoutFile path -> case process.workdir of
+          Nothing -> error "Workdir for subprocess is not set. Path relative to output is not defined"
+          Just _  -> do h <- openFile path ReadMode
+                        pure $ setStdout (useHandleClose h) p
+  id $ set_stdout <=< set_stdin
      $ case process.workdir of
          Nothing -> id
          Just p  -> setWorkingDir p
