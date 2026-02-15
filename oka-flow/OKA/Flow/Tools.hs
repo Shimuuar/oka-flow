@@ -35,8 +35,8 @@ module OKA.Flow.Tools
   , callInEnvironment
   , callInEnvironmentF
   , callViaArgList
-  , ccPrependRelPaths
-  , ccPrependArgs
+  , ccModifyArgs
+  , ccSetArgs
   , ccAddEnv
   , ccStdinBS
   , ccStdinBL
@@ -553,17 +553,17 @@ callViaArgList exe fun p action = action $ ProcessData
   , workdir    = p.out
   }
 
--- | Prepend path relative to flow working directory. It will be
---   converted to absolute path.
-ccPrependRelPaths :: [FilePath] -> CallExe -> CallExe
-ccPrependRelPaths paths call p action = call p $ \ProcessData{..} -> do
-  action ProcessData{args = (PathA <$> paths) ++ args, ..}
+
+-- | Modify argument list of a program
+ccModifyArgs :: ([CmdArg] -> [CmdArg]) -> CallExe -> CallExe
+ccModifyArgs fun call p action = call p $ \ProcessData{..} -> do
+  action ProcessData{args = fun args, ..}
 
 -- | Prepend arguments to list being passed to flow. They are not
 --   modified.
-ccPrependArgs :: [FilePath] -> CallExe -> CallExe
-ccPrependArgs xs call p action = call p $ \ProcessData{..} -> do
-  action ProcessData{args = (CmdArg <$> xs) ++ args, ..}
+ccSetArgs :: [CmdArg] -> CallExe -> CallExe
+ccSetArgs xs call p action = call p $ \ProcessData{..} -> do
+  action ProcessData{args = xs, ..}
 
 -- | Add values to environment variables
 ccAddEnv :: [(String,String)] -> CallExe -> CallExe
