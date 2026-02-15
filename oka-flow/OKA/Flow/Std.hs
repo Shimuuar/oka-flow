@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveAnyClass       #-}
 {-# LANGUAGE MagicHash            #-}
+{-# LANGUAGE OverloadedStrings    #-}
 {-# LANGUAGE UndecidableInstances #-}
 -- |
 -- Standard workflows
@@ -109,22 +110,23 @@ data ReportPDF
 runPdfReader :: (SequenceOf ReportPDF a, ProgConfigE :> eff) => a -> Flow eff ()
 runPdfReader a = do 
   pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
-  liftPhonyExecutable pdf ()
+  liftPhonyExecutable ()
     -- FIXME: We need way to generalize SequenceOf!
-    (callViaArgList $ \s -> [p </> "report.pdf" | Just args <- [sequenceS s]
-                                                , p         <- args
-                                                ])
+    (callViaArgList pdf $ \s -> [CmdArg $ p </> "report.pdf" | Just args <- [sequenceS s]
+                                                             , p         <- args
+                                                             ])
     (sequenceOf @ReportPDF a)
 
 -- | Concatenate PDFs using @pdftk@ program
 stdConcatPDF :: SequenceOf ReportPDF a => a -> Flow eff (Result ReportPDF)
 stdConcatPDF reports = restrictMeta @() $ do
-  liftExecutable "std.pdftk.concat" "pdftk" ()
-    (callViaArgList $ \s ->
-        [a</>"report.pdf" | Just args <- [sequenceS s]
-                          , a <- args
-                          ] ++ ["cat", "output", "report.pdf"]
-        )
+  liftExecutable "std.pdftk.concat" ()
+    (callViaArgList "pdftk" $ \s ->
+        [CmdArg $ a</>"report.pdf" | Just args <- [sequenceS s]
+                                   , a <- args
+                                   ] ++
+        ["cat", "output", "report.pdf"]
+    )
     (sequenceOf @ReportPDF reports)
 
 
@@ -175,21 +177,21 @@ stdJupyter notebooks params = do
       let notebooks_rel = case traverse (stripPrefix notebook_dir) notebooks_abs of
             Just s  -> s
             Nothing -> error "Error during processing notebooks"
-      callInEnvironment param $ \proc_jupyter -> do
+      callInEnvironment "jupyter" param $ \proc_jupyter -> do
         withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
           let dir_config  = tmp </> "config"
               dir_data    = tmp </> "data"
           createDirectory dir_config
           createDirectory dir_data
-          run_jupyter <- toTypedProcess "jupyter"
-            proc_jupyter{ env  = [ ("JUPYTER_DATA_DIR",   dir_data)
-                                 , ("JUPYTER_CONFIG_DIR", dir_config)
-                                 ] ++ proc_jupyter.env
-                        , args = [ "notebook"
-                                 , "--no-browser"
-                                 , "--notebook-dir=" ++ notebook_dir
-                                 ]
-                        }
+          run_jupyter <- toTypedProcess proc_jupyter
+            { env  = [ ("JUPYTER_DATA_DIR",   dir_data)
+                     , ("JUPYTER_CONFIG_DIR", dir_config)
+                     ] ++ proc_jupyter.env
+            , args = [ "notebook"
+                     , "--no-browser"
+                     , CmdArg $ "--notebook-dir=" ++ notebook_dir
+                     ]
+            }
           withProcessWait_ run_jupyter $ \_ -> do
             -- Wait until server starts and launch browser.
             jp <- waitForJupyter dir_data >>= \case

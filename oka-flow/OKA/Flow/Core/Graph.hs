@@ -11,7 +11,7 @@ module OKA.Flow.Core.Graph
   , APhony
   , Result
   , Phony
-  , CallingConv
+  , CallExe
     -- ** Single dataflow description 
   , Executable(..)
   , Action(..)
@@ -73,9 +73,8 @@ import OKA.Flow.Core.S
 -- | Action which runs executable. It should be used if one want to
 --   call external executable. This way executor can correctly pass
 --   metadata to it.
-data Executable = Executable
-  { executable :: FilePath    -- ^ Executable to start
-  , call       :: CallingConv -- ^ IO action which could be executed to prepare program.
+newtype Executable = Executable
+  { call :: CallExe -- ^ IO action which could be executed to prepare program.
   }
 
 -- | Action to be execute by dataflow either normal or phony.

@@ -35,8 +35,8 @@ module OKA.Flow.Tools
   , callInEnvironment
   , callInEnvironmentF
   , callViaArgList
-  , ccPrependRelPaths
-  , ccPrependArgs
+  , ccModifyArgs
+  , ccSetArgs
   , ccAddEnv
   , ccStdinBS
   , ccStdinBL
@@ -54,21 +54,18 @@ module OKA.Flow.Tools
   ) where
 
 import Control.Applicative
--- import Control.Concurrent.STM
 import Control.Exception
-import Control.Lens                 ((^?))
+import Control.Lens                 ((<&>),(^?))
 import Data.Coerce
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
 import Data.ByteString              qualified as BS
 import Data.ByteString.Lazy         qualified as BL
 import Data.Monoid                  (Endo(..))
-import Data.Functor
 import Data.Text                    (Text)
 import Data.Text                    qualified as T
 import Data.Text.Encoding           qualified as T
 import System.FilePath              ((</>))
-import System.Directory             (makeAbsolute)
 import System.IO.Temp
 import System.IO                    (hClose,hPutStr)
 import System.Environment           (getArgs)
@@ -387,25 +384,23 @@ liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Dataflow
 
 liftExecutable
   :: (ToS args, ResourceClaim res)
-  => String      -- ^ Name of flow
-  -> FilePath    -- ^ Executable name
-  -> res         -- ^ Resources required by workflow
-  -> CallingConv -- ^ Calling convention
+  => String  -- ^ Name of flow
+  -> res     -- ^ Resources required by workflow
+  -> CallExe -- ^ Calling convention
   -> (args -> Flow eff (Result b))
-liftExecutable name exe res call =
+liftExecutable name res call =
   basicLiftWorkflow res $ Dataflow
     { name = name
-    , flow = ActionExe $ Executable exe call
+    , flow = ActionExe $ Executable call
     }
 
 liftPhonyExecutable
   :: (ToS args, ResourceClaim res)
-  => FilePath    -- ^ Executable name
-  -> res         -- ^ Resources required by workflow
-  -> CallingConv -- ^ Calling convention
+  => res     -- ^ Resources required by workflow
+  -> CallExe -- ^ Calling convention
   -> (args -> Flow eff ())
-liftPhonyExecutable exe res call =
-  basicLiftPhony res $ ActionExe $ Executable exe call
+liftPhonyExecutable res call =
+  basicLiftPhony res $ ActionExe $ Executable call
 
 
 -- | Convert haskell function into dataflow. Arguments are loaded and
@@ -446,14 +441,17 @@ liftHaskellPhonyFunMeta res action = basicLiftPhony res $ ActionIO $ \_ p -> do
 --
 --  * Working directory is set to output directory
 callStandardExe
-  :: ParamFlow FilePath
+  :: FilePath
+  -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
-callStandardExe p action = action ProcessData
-  { stdin   = Just $ JSON.encode $ encodeMetadata p.meta
-  , env     = []
-  , args    = sexpToArgs p.args
-  , workdir = p.out
+callStandardExe exe p action = action ProcessData
+  { executable = exe
+  , stdin      = StdinBS $ JSON.encode $ encodeMetadata p.meta
+  , stdout     = Inherit
+  , env        = []
+  , args       = CmdArg <$> sexpToArgs p.args
+  , workdir    = p.out
   }
 
 -- | Pass arguments in the environment.
@@ -467,10 +465,11 @@ callStandardExe p action = action ProcessData
 -- * Working directory is set to output directory. Additionally it's
 --   stored in @OKA_OUT@ environment variable.
 callInEnvironment
-  :: ParamFlow FilePath
+  :: FilePath
+  -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
-callInEnvironment p action =
+callInEnvironment exe p action =
   withSystemTempFile "oka-flow-metadata-" $ \file_meta h -> do
     -- Write metadata to temporary file
     BL.hPutStr h $ JSON.encode $ encodeMetadata p.meta
@@ -484,10 +483,12 @@ callInEnvironment p action =
               | (i,arg) <- [1::Int ..] `zip` sexpToArgs p.args
               ]
     action ProcessData
-      { stdin   = Nothing
-      , env     = env
-      , args    = []
-      , workdir = p.out
+      { executable = exe
+      , stdin      = DevNullIn
+      , stdout     = Inherit
+      , env        = env
+      , args       = []
+      , workdir    = p.out
       }
 
 -- | Pass arguments in the environment.
@@ -501,10 +502,11 @@ callInEnvironment p action =
 -- * Working directory is set to output directory. Additionally it's
 --   stored in @OKA_OUT@ environment variable.
 callInEnvironmentF
-  :: ParamFlow FilePath
+  :: FilePath
+  -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
-callInEnvironmentF p action =
+callInEnvironmentF exe p action =
   withSystemTempFile "oka-flow-metadata-" $ \file_meta h_meta ->
   withSystemTempFile "oka-flow-metadata-" $ \file_args h_args -> do
     -- Write metadata to temporary file
@@ -521,10 +523,12 @@ callInEnvironmentF p action =
             : ("OKA_ARGS", file_args)
             : []
     action ProcessData
-      { stdin   = Nothing
-      , env     = env
-      , args    = []
-      , workdir = p.out
+      { executable = exe
+      , stdin      = DevNullIn
+      , stdout     = Inherit
+      , env        = env
+      , args       = []
+      , workdir    = p.out
       }
 
 
@@ -535,51 +539,54 @@ callInEnvironmentF p action =
 --
 --  * Working dir is set to output directory
 callViaArgList
-  :: (S FilePath -> [FilePath]) -- ^ How to transform list of store pathes
+  :: FilePath                 -- ^ Executable
+  -> (S FilePath -> [CmdArg]) -- ^ How to transform list of store pathes
   -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
-callViaArgList transform p action = action $ ProcessData
-  { stdin   = Nothing
-  , env     = []
-  , args    = transform p.args
-  , workdir = p.out
+callViaArgList exe fun p action = action $ ProcessData
+  { executable = exe
+  , stdin      = DevNullIn
+  , stdout     = Inherit
+  , env        = []
+  , args       = fun p.args
+  , workdir    = p.out
   }
 
--- | Prepend path relative to flow working directory. It will be
---   converted to absolute path.
-ccPrependRelPaths :: [FilePath] -> CallingConv -> CallingConv
-ccPrependRelPaths paths call p action = call p $ \ProcessData{..} -> do
-  paths' <- traverse makeAbsolute paths
-  action ProcessData{args = paths' ++ args, ..}
+
+-- | Modify argument list of a program
+ccModifyArgs :: ([CmdArg] -> [CmdArg]) -> CallExe -> CallExe
+ccModifyArgs fun call p action = call p $ \ProcessData{..} -> do
+  action ProcessData{args = fun args, ..}
 
 -- | Prepend arguments to list being passed to flow. They are not
 --   modified.
-ccPrependArgs :: [FilePath] -> CallingConv -> CallingConv
-ccPrependArgs xs call p action = call p $ \ProcessData{..} -> do
-  action ProcessData{args = xs ++ args, ..}
+ccSetArgs :: [CmdArg] -> CallExe -> CallExe
+ccSetArgs xs call p action = call p $ \ProcessData{..} -> do
+  action ProcessData{args = xs, ..}
 
 -- | Add values to environment variables
-ccAddEnv :: [(String,String)] -> CallingConv -> CallingConv
+ccAddEnv :: [(String,String)] -> CallExe -> CallExe
 ccAddEnv xs cc p action =
   cc p (\ProcessData{..} -> action ProcessData{env = xs ++ env, ..})
 
 -- | Pass strict bytestring to process's stdin.
-ccStdinBL :: BL.ByteString -> CallingConv -> CallingConv
+ccStdinBL :: BL.ByteString -> CallExe -> CallExe
 ccStdinBL dat call p action = call p $ \ProcessData{..} ->
-  action ProcessData{stdin = Just dat, ..}
+  action ProcessData{stdin = StdinBS dat, ..}
 
 -- | Pass lazy bytestring to process's stdin.
-ccStdinBS :: BS.ByteString -> CallingConv -> CallingConv
+ccStdinBS :: BS.ByteString -> CallExe -> CallExe
 ccStdinBS dat = ccStdinBL (BL.fromStrict dat)
 
 -- | Pass strict text to process's stdin. It will be UTF8 encoded.
-ccStdinText :: Text -> CallingConv -> CallingConv
+ccStdinText :: Text -> CallExe -> CallExe
 ccStdinText dat = ccStdinBS (T.encodeUtf8 dat)
 
 -- | Pass string to process's stdin. It will be UTF8 encoded.
-ccStdinString :: String -> CallingConv -> CallingConv
+ccStdinString :: String -> CallExe -> CallExe
 ccStdinString dat = ccStdinText (T.pack dat)
+
 
 ----------------------------------------------------------------
 -- Defining subprocesses
@@ -660,3 +667,7 @@ sexpFromArgs xs = runListParser parserS xs where
 --              , "-threaded"
 --              , "-with-rtsopts=-T -A8m"
 --              ]
+
+
+-- foo :: Setter' CallExe ProcessData
+-- foo = undefined
