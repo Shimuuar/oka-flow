@@ -16,7 +16,7 @@ module OKA.Flow.Core.Types
   , Stdout(..)
   , CmdArg(..)
   , ProcessData(..)
-  , CallingConv
+  , CallExe
   , toTypedProcess
   , startSubprocessAndWait
   ) where
@@ -127,7 +127,7 @@ data ProcessData = ProcessData
 
 
 -- | Bracket for passing parameters to a subprocess
-type CallingConv = forall a. (ParamFlow FilePath -> (ProcessData -> IO a) -> IO a)
+type CallExe = forall a. (ParamFlow FilePath -> (ProcessData -> IO a) -> IO a)
 
 -- | Convert dictionary into data structure for calling external
 --   process using @typed-process@
@@ -181,7 +181,7 @@ toTypedProcess process = do
 --   interrupted subprocess is killed. If process exits with nonzero
 --   exit code exception is raised.
 startSubprocessAndWait
-  :: CallingConv        -- ^ Calling conventions
+  :: CallExe            -- ^ Calling conventions
   -> ParamFlow FilePath -- ^ Parameters
   -> IO ()
 startSubprocessAndWait call param =

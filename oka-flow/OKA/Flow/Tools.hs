@@ -384,9 +384,9 @@ liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Dataflow
 
 liftExecutable
   :: (ToS args, ResourceClaim res)
-  => String      -- ^ Name of flow
-  -> res         -- ^ Resources required by workflow
-  -> CallingConv -- ^ Calling convention
+  => String  -- ^ Name of flow
+  -> res     -- ^ Resources required by workflow
+  -> CallExe -- ^ Calling convention
   -> (args -> Flow eff (Result b))
 liftExecutable name res call =
   basicLiftWorkflow res $ Dataflow
@@ -396,8 +396,8 @@ liftExecutable name res call =
 
 liftPhonyExecutable
   :: (ToS args, ResourceClaim res)
-  => res         -- ^ Resources required by workflow
-  -> CallingConv -- ^ Calling convention
+  => res     -- ^ Resources required by workflow
+  -> CallExe -- ^ Calling convention
   -> (args -> Flow eff ())
 liftPhonyExecutable res call =
   basicLiftPhony res $ ActionExe $ Executable call
@@ -555,36 +555,36 @@ callViaArgList exe fun p action = action $ ProcessData
 
 -- | Prepend path relative to flow working directory. It will be
 --   converted to absolute path.
-ccPrependRelPaths :: [FilePath] -> CallingConv -> CallingConv
+ccPrependRelPaths :: [FilePath] -> CallExe -> CallExe
 ccPrependRelPaths paths call p action = call p $ \ProcessData{..} -> do
   action ProcessData{args = (PathA <$> paths) ++ args, ..}
 
 -- | Prepend arguments to list being passed to flow. They are not
 --   modified.
-ccPrependArgs :: [FilePath] -> CallingConv -> CallingConv
+ccPrependArgs :: [FilePath] -> CallExe -> CallExe
 ccPrependArgs xs call p action = call p $ \ProcessData{..} -> do
   action ProcessData{args = (CmdArg <$> xs) ++ args, ..}
 
 -- | Add values to environment variables
-ccAddEnv :: [(String,String)] -> CallingConv -> CallingConv
+ccAddEnv :: [(String,String)] -> CallExe -> CallExe
 ccAddEnv xs cc p action =
   cc p (\ProcessData{..} -> action ProcessData{env = xs ++ env, ..})
 
 -- | Pass strict bytestring to process's stdin.
-ccStdinBL :: BL.ByteString -> CallingConv -> CallingConv
+ccStdinBL :: BL.ByteString -> CallExe -> CallExe
 ccStdinBL dat call p action = call p $ \ProcessData{..} ->
   action ProcessData{stdin = StdinBS dat, ..}
 
 -- | Pass lazy bytestring to process's stdin.
-ccStdinBS :: BS.ByteString -> CallingConv -> CallingConv
+ccStdinBS :: BS.ByteString -> CallExe -> CallExe
 ccStdinBS dat = ccStdinBL (BL.fromStrict dat)
 
 -- | Pass strict text to process's stdin. It will be UTF8 encoded.
-ccStdinText :: Text -> CallingConv -> CallingConv
+ccStdinText :: Text -> CallExe -> CallExe
 ccStdinText dat = ccStdinBS (T.encodeUtf8 dat)
 
 -- | Pass string to process's stdin. It will be UTF8 encoded.
-ccStdinString :: String -> CallingConv -> CallingConv
+ccStdinString :: String -> CallExe -> CallExe
 ccStdinString dat = ccStdinText (T.pack dat)
 
 
@@ -669,5 +669,5 @@ sexpFromArgs xs = runListParser parserS xs where
 --              ]
 
 
--- foo :: Setter' CallingConv ProcessData
+-- foo :: Setter' CallExe ProcessData
 -- foo = undefined
