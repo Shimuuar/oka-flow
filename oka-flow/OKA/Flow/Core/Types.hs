@@ -79,9 +79,12 @@ data ParamFlow a = ParamFlow
 
 -- | What to do with stdin of subprocess
 data Stdin
-  = DevNull                  -- ^ Close @stdin@ of  subprocess
-  | StdinBS   !BL.ByteString -- ^ Write lazy bytestring to stdin
-  | StdinFile !FilePath      -- ^ Read stdin from file
+  = DevNull                   -- ^ Close @stdin@ of  subprocess
+  | StdinBS    !BL.ByteString -- ^ Write lazy bytestring to stdin
+  | StdinFileA !FilePath      -- ^ Read stdin from file. File path is
+                              --   relative to workdir of dataflow manager
+  | StdinFileO !FilePath      -- ^ Read stdin from file. File path is relative to
+                              --   output directory.
   deriving stock (Show,Eq)
 
 -- | Command line argument. We need to distinguish between relative
@@ -141,10 +144,13 @@ toTypedProcess exe process = do
       Nothing -> error "Workdir for subprocess is not set. Path relative to output is not defined"
       Just _  -> pure p
   let set_stdin p = case process.stdin of
-        DevNull        -> pure $ setStdin nullStream           p
-        StdinBS   bs   -> pure $ setStdin (byteStringInput bs) p
-        StdinFile path -> do h <- openFile path ReadMode
-                             pure $ setStdin (useHandleClose h) p
+        DevNull         -> pure $ setStdin nullStream           p
+        StdinBS    bs   -> pure $ setStdin (byteStringInput bs) p
+        StdinFileA path -> do path' <- makeAbsolute path
+                              h     <- openFile path' ReadMode
+                              pure $ setStdin (useHandleClose h) p
+        StdinFileO path -> do h <- openFile path ReadMode
+                              pure $ setStdin (useHandleClose h) p
   id $ set_stdin
      $ case process.workdir of
          Nothing -> id
