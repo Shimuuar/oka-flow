@@ -166,7 +166,7 @@ toTypedProcess process = do
         DevNullOut      -> pure $ setStdout nullStream p
         StdoutFile path -> case process.workdir of
           Nothing -> error "Workdir for subprocess is not set. Path relative to output is not defined"
-          Just _  -> do h <- openFile path ReadMode
+          Just _  -> do h <- openFile path WriteMode
                         pure $ setStdout (useHandleClose h) p
   id $ set_stdout <=< set_stdin
      $ case process.workdir of
