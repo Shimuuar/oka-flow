@@ -38,6 +38,8 @@ module OKA.Flow.Tools
   , ccModifyArgs
   , ccSetArgs
   , ccAddEnv
+  , ccStdin
+  , ccStdout
   , ccStdinBS
   , ccStdinBL
   , ccStdinText
@@ -570,10 +572,17 @@ ccAddEnv :: [(String,String)] -> CallExe -> CallExe
 ccAddEnv xs cc p action =
   cc p (\ProcessData{..} -> action ProcessData{env = xs ++ env, ..})
 
+ccStdin :: Stdin -> CallExe -> CallExe
+ccStdin dat call p action
+  = call p $ \ProcessData{..} -> action ProcessData{stdin = dat, ..}
+
+ccStdout :: Stdout -> CallExe -> CallExe
+ccStdout dat call p action
+  = call p $ \ProcessData{..} -> action ProcessData{stdout = dat, ..}
+
 -- | Pass strict bytestring to process's stdin.
 ccStdinBL :: BL.ByteString -> CallExe -> CallExe
-ccStdinBL dat call p action = call p $ \ProcessData{..} ->
-  action ProcessData{stdin = StdinBS dat, ..}
+ccStdinBL dat = ccStdin (StdinBS dat)
 
 -- | Pass lazy bytestring to process's stdin.
 ccStdinBS :: BS.ByteString -> CallExe -> CallExe
