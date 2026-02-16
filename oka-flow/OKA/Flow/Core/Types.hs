@@ -31,7 +31,7 @@ import Data.ByteString.Lazy   qualified as BL
 import Data.ByteString.Base16 qualified as Base16
 import Data.String
 import Data.Traversable
-import System.FilePath        ((</>),pathSeparator)
+import System.FilePath        ((</>),pathSeparator,isAbsolute)
 import System.Directory       (makeAbsolute)
 import System.Environment     (getEnvironment)
 import System.Process.Typed   (ProcessConfig,Process,ExitCode(..),proc,setStdin,setStdout,setWorkingDir,
@@ -153,21 +153,28 @@ toTypedProcess process = do
     PathO  p -> case process.workdir of
       Nothing -> error "Workdir for subprocess is not set. Path relative to output is not defined"
       Just _  -> pure p
+  -- Normalization of path relative to workdir of subprocess. Note!
+  -- Its workdir is different from ours
+  let normalizePathO (isAbsolute -> True)
+        = error "Path relative to workdir couldn't be absolute"
+      normalizePathO p = case process.workdir of
+        Nothing -> error "Workdir for subprocess is not set. Path relative to output is not defined"
+        Just wd -> makeAbsolute $ wd </> p
   let set_stdin p = case process.stdin of
         DevNullIn       -> pure $ setStdin nullStream           p
         StdinBS    bs   -> pure $ setStdin (byteStringInput bs) p
         StdinFileA path -> do path' <- makeAbsolute path
                               h     <- openFile path' ReadMode
                               pure $ setStdin (useHandleClose h) p
-        StdinFileO path -> do h <- openFile path ReadMode
+        StdinFileO path -> do path' <- normalizePathO path
+                              h     <- openFile path' ReadMode
                               pure $ setStdin (useHandleClose h) p
   let set_stdout p = case process.stdout of
         Inherit         -> pure p
         DevNullOut      -> pure $ setStdout nullStream p
-        StdoutFile path -> case process.workdir of
-          Nothing -> error "Workdir for subprocess is not set. Path relative to output is not defined"
-          Just _  -> do h <- openFile path WriteMode
-                        pure $ setStdout (useHandleClose h) p
+        StdoutFile path -> do path' <- normalizePathO path
+                              h     <- openFile path' WriteMode
+                              pure $ setStdout (useHandleClose h) p
   id $ set_stdout <=< set_stdin
      $ case process.workdir of
          Nothing -> id
