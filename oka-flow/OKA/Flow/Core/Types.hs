@@ -34,9 +34,9 @@ import Data.Traversable
 import System.FilePath        ((</>),pathSeparator)
 import System.Directory       (makeAbsolute)
 import System.Environment     (getEnvironment)
-import System.Process.Typed   (ProcessConfig,Process,proc,setStdin,setStdout,setWorkingDir,setEnv,
-                               nullStream,byteStringInput,useHandleClose,withProcessWait_,waitExitCodeSTM,
-                               getPid
+import System.Process.Typed   (ProcessConfig,Process,ExitCode(..),proc,setStdin,setStdout,setWorkingDir,
+                               setEnv,nullStream,byteStringInput,useHandleClose,withProcessWait_,
+                               waitExitCodeSTM,getPid
                               )
 import System.IO              (openFile,IOMode(..))
 import System.Posix.Signals   (signalProcess, sigINT)
@@ -188,8 +188,10 @@ startSubprocessAndWait call param =
   call param $ \process -> do
     run <- toTypedProcess process
     withProcessWait_ run $ \pid -> do
-      _ <- atomically (waitExitCodeSTM pid) `onException` softKill pid
-      pure ()
+      r <- atomically (waitExitCodeSTM pid) `onException` softKill pid
+      case r of
+        ExitSuccess   -> pure ()
+        ExitFailure{} -> throwIO r
 
 -- Kill process but allow it to die gracefully by sending SIGINT
 -- first. GHC install handler for it but not for SIGTERM
