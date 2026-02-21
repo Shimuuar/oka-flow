@@ -513,7 +513,7 @@ callInEnvironmentF exe p action =
   withSystemTempFile "oka-flow-metadata-" $ \file_args h_args -> do
     -- Write metadata to temporary file
     BL.hPutStr h_meta $ JSON.encode $ encodeMetadata p.meta
-    hClose h_args
+    hClose h_meta
     -- Write arguments to temporary file
     hPutStr h_args $ unlines $ sexpToArgs p.args
     hClose h_args
