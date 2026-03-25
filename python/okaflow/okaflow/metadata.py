@@ -67,7 +67,7 @@ class Meta:
 
     def __getattr__(self, k: str) -> Any:
         "Hack for access fields via dot"
-        if k == "_dct":
+        if k.startswith("_"):
             raise AttributeError
         return _asMeta(self._dct[k])
 
