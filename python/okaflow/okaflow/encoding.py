@@ -6,7 +6,7 @@ import pydantic
 
 class SexpSerializer:
     """
-    Mixing for parsing data as S-expressions. Class name is used as a tag
+    Mixin for parsing data as S-expressions. Class name is used as a tag
     """
     @pydantic.model_serializer
     def _serialize_sexp(self) -> list:
