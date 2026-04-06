@@ -120,8 +120,6 @@ data FlowGraph f = FlowGraph
   , targets :: Set AResult
     -- ^ Set of values which we want to evaluate
   }
-  -- deriving stock (Functor, Foldable, Traversable)
-
 
 
 
