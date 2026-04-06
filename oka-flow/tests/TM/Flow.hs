@@ -182,6 +182,15 @@ tests = testGroup "Run flow"
       runFlow ctx mempty flow
       observe "flowA" obsA [100]
       observe "flowB" obsB [200]
+    --
+  , testCase "externalMeta-phony" $ withSimpleFlow $ \ctx -> do
+      ref <- newIORef (0 :: Int)
+      let flow = do addExtMeta =<< stdSaveMeta (CounterMeta 100 :: CounterMeta "nA")
+                    liftHaskellPhonyFun () (\(CounterMeta n :: CounterMeta "nA") () -> do
+                                               writeIORef ref n
+                                           ) ()
+      runFlow ctx mempty flow
+      assertEqual "" 100 =<< readIORef ref
     -- CacheE tests
     --
     -- We cheat here a bit by using IO to observe number of times

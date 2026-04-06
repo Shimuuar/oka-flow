@@ -124,7 +124,6 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
                              ]
      ctx.logger.init (getStorePath targets.exists)
                      (getStorePath targets.wanted)
-
   -- Prepare dictionary of external metadata which is loaded from
   -- store path
   ext_meta <- prepareExtMetaCache ctx gr_exe targets
@@ -277,11 +276,12 @@ prepareExtMetaCache ctx gr targets = do
   cache <- traverse (\(SomeExtMeta io) -> SomeExtMeta <$> once io)
          $ Map.fromList
          $ flip appEndo []
-         $ foldMap
-           (\fun -> getConst $ traverseMetadata toCache fun.metadata)
-           gr.graph
+         $ foldMap extractExt gr.graph
+        <> foldMap extractExt gr.phony
   pure $ ExtMetaCache cache
   where
+    extractExt fun = getConst $ traverseMetadata toCache fun.metadata
+    --
     toCache :: forall a. IsMetaPrim a => AResult -> Const (Endo [((TypeRep, AResult), SomeExtMeta)]) a
     toCache fid
       = Const

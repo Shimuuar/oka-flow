@@ -173,7 +173,8 @@ shakeFlowGraph tgtExists gr
     -- We always want to evaluate phony workflows
     addPhony :: FIDSet -> Fun Phony b -> m FIDSet
     addPhony fids fun
-      = foldM addFID fids fun.param
+      =   foldAddFID fun.metadata
+      =<< foldM addFID fids fun.param
     --
     foldAddFID :: Foldable f => f AResult -> FIDSet -> m FIDSet
     foldAddFID = flip (foldM addFID)
