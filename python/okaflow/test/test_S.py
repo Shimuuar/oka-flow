@@ -4,7 +4,7 @@
 import sys
 import pydantic
 import pytest
-from okaflow.args import parseS,Atom
+from okaflow.args import parseS,Atom,parse,Path,Args,Many,Some,ParseError,parseArgsS
 import okaflow
 
 
@@ -35,10 +35,25 @@ def test_S():
     assert parseS(["(","AA","(","BB",")",")"]) == ["AA",["BB"]]
     assert parseS(["(","(","!AA",")","BB","(",")",")"]) == [[Atom("AA")],"BB",[]]
 
-
 def test_regressions_S():
     assert parseS(['(', '-', ')']) == [None]
     assert parseS(['(', '(','/A','/B','/C',')', '/D', '-', ')']) == [['/A','/B','/C'], '/D', None]
+
+def test_argparse():
+    def mk(args):
+        return Args(args=args, out=None)
+    # Simple combinators
+    assert parse(Path(),       mk('a'))   == 'a'
+    assert parse(Many(Path()), mk([]))    == []
+    assert parse(Many(Path()), mk(['b'])) == ['b']
+    assert parse(Many(Path()), mk(['b','c'])) == ['b','c']
+    try:
+        parse(Some(Path()), mk([]))
+        assert False
+    except ParseError:
+        pass
+    assert parse(Some(Path()), mk(['b'])) == ['b']
+
 
 
 def test_parse_IsMeta():
