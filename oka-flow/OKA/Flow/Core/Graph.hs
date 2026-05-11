@@ -50,7 +50,7 @@ import Data.Monoid                  (Endo(..))
 import Data.List                    (sortOn,intercalate,intersperse)
 import Data.List.NonEmpty           qualified as NE
 import Data.List.NonEmpty           (NonEmpty(..))
-import Data.Map.Strict              (Map, (!))
+import Data.Map.Strict              (Map)
 import Data.Map.Strict              qualified as Map
 import Data.Set                     (Set)
 import Data.Set                     qualified as Set
@@ -137,10 +137,12 @@ deduplicateGraph
 deduplicateGraph gr
   | null dupes = gr
   | otherwise  = gr & flowGraphL %~ clean
+                    & flowPhonyL %~ fmap replaceKey
                     & flowTgtL   %~ (Set.\\ dupes)
   where
     clean = fmap replaceKey
           . flip Map.withoutKeys dupes
+    replaceKey :: Fun r v -> Fun r v
     replaceKey f = f { param    = replace <$> f.param
                      , metadata = replace <$> f.metadata
                      }
@@ -198,7 +200,9 @@ shakeFlowGraph tgtExists gr
                    $ fidWantedL %~ Set.insert fid
                    $ fids 
       where
-        f = gr.graph ! fid
+        f = case Map.lookup fid gr.graph of
+          Just x  -> x
+          Nothing -> error $ "INTERNAL ERROR: missing FID in graph"
 
 
 data FIDSet = FIDSet

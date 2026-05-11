@@ -139,6 +139,20 @@ tests = testGroup "Run flow"
                     want =<< flowA ()
       runFlow ctx meta flow
       observe "flow" obsA [100]
+    --
+  , testCase "Duplicate-with-phony" $ withSimpleFlow $ \ctx -> do
+      (obsA,  flowA)  <- flowProduceInt @"nA"
+      (obsS1, flowS1) <- flowPhony
+      (obsS2, flowS2) <- flowPhony
+      let meta  = toMetadata (CounterMeta 100 :: CounterMeta "nA")
+      runFlow ctx meta $ do
+        do a <- flowA ()
+           flowS1 a
+        do a <- flowA ()
+           flowS2 a
+      observe      "flowA"  obsA  [100]
+      observePhony "flowS1" obsS1 [10000]
+      observePhony "flowS2" obsS2 [10000]
     -- External metadata works
   , testCase "externalMeta" $ withSimpleFlow $ \ctx -> do
       (obsA, flowA) <- flowProduceInt @"nA"
