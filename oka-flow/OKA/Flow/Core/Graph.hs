@@ -173,15 +173,15 @@ shakeFlowGraph tgtExists gr
     $ FIDSet mempty mempty
   where
     -- We always want to evaluate phony workflows
-    addPhony :: FIDSet -> Fun Phony b -> m FIDSet
+    addPhony :: HasCallStack => FIDSet -> Fun Phony b -> m FIDSet
     addPhony fids fun
       =   foldAddFID fun.metadata
       =<< foldM addFID fids fun.param
     --
-    foldAddFID :: Foldable f => f AResult -> FIDSet -> m FIDSet
+    foldAddFID :: (Foldable f, HasCallStack) => f AResult -> FIDSet -> m FIDSet
     foldAddFID = flip (foldM addFID)
     --
-    addFID :: FIDSet -> AResult -> m FIDSet
+    addFID :: HasCallStack => FIDSet -> AResult -> m FIDSet
     addFID fids fid
       -- We already wisited these workflows
       | fid `Set.member` fids.exists = pure fids

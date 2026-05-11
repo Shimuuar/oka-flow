@@ -256,7 +256,7 @@ newtype ExtMetaCache = ExtMetaCache (Map (TypeRep, AResult) SomeExtMeta)
 data SomeExtMeta where
   SomeExtMeta :: IsMetaPrim a => IO a -> SomeExtMeta
 
-lookupExtCache :: forall a. Typeable a => ExtMetaCache -> AResult -> IO a
+lookupExtCache :: forall a. (Typeable a, HasCallStack) => ExtMetaCache -> AResult -> IO a
 lookupExtCache (ExtMetaCache cache) fid = 
   case Map.lookup (ty, fid) cache of
     Nothing -> error "INTERNAL ERROR: missing entry in cache"
@@ -285,7 +285,7 @@ prepareExtMetaCache ctx gr targets = do
   where
     extractExt fun = getConst $ traverseMetadata toCache fun.metadata
     --
-    toCache :: forall a. IsMetaPrim a => AResult -> Const (Endo [((TypeRep, AResult), SomeExtMeta)]) a
+    toCache :: forall a. (IsMetaPrim a, HasCallStack) => AResult -> Const (Endo [((TypeRep, AResult), SomeExtMeta)]) a
     toCache fid
       = Const
       $ Endo
@@ -303,7 +303,7 @@ prepareExtMetaCache ctx gr targets = do
         path = case (gr.graph ! fid).output of
           RunDataflow _ p -> ctx.root </> storePath p </> "saved.json"
     --
-    readMeta :: IsMetaPrim a => FilePath -> IO a
+    readMeta :: (IsMetaPrim a, HasCallStack) => FilePath -> IO a
     readMeta path = do
       (JSON.eitherDecode <$> BL.readFile path) >>= \case
         Left  e  -> error e
