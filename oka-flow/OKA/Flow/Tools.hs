@@ -73,6 +73,7 @@ import System.IO                    (hClose,hPutStr)
 import System.Environment           (getArgs)
 
 import GHC.Generics hiding (S)
+import GHC.Stack
 
 import OKA.Metadata
 import OKA.Flow.Core.Resources
@@ -297,7 +298,7 @@ instance (FlowArgument a, FlowArgument b, FlowArgument c, FlowArgument d
 -- | Convert haskell function into dataflow. Arguments are loaded and
 --   stored using type classes methods.
 liftHaskellFun
-  :: (FlowArgument a, FlowOutput b, IsMeta meta, ResourceClaim res)
+  :: (FlowArgument a, FlowOutput b, IsMeta meta, ResourceClaim res, HasCallStack)
   => String              -- ^ Name of flow
   -> res                 -- ^ Resources required by workflow
   -> (meta -> a -> IO b) -- ^ IO action
@@ -319,7 +320,7 @@ liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
 
 -- | Same as 'liftHaskellFun' but passes noninterpreted metadata.
 liftHaskellFunMeta
-  :: (FlowArgument a, FlowOutput b, ResourceClaim res)
+  :: (FlowArgument a, FlowOutput b, ResourceClaim res, HasCallStack)
   => String                  -- ^ Name of flow
   -> res                     -- ^ Resources required by workflow
   -> (Metadata -> a -> IO b) -- ^ IO action
@@ -342,7 +343,7 @@ liftHaskellFunMeta name res action = basicLiftWorkflow res $ Dataflow
 --   output directory as first argument and is responsible for writing
 --   outputs.
 liftHaskellFun_
-  :: (FlowArgument a, IsMeta meta, ResourceClaim res)
+  :: (FlowArgument a, IsMeta meta, ResourceClaim res, HasCallStack)
   => String                           -- ^ Name of flow
   -> res                              -- ^ Resources required by workflow
   -> (FilePath -> meta -> a -> IO ()) -- ^ IO action
@@ -363,7 +364,7 @@ liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
 
 -- | Same as 'liftHaskellFun_' but passes noninterpreted metadata.
 liftHaskellFunMeta_
-  :: (FlowArgument a, ResourceClaim res)
+  :: (FlowArgument a, ResourceClaim res, HasCallStack)
   => String                               -- ^ Name of flow
   -> res                                  -- ^ Resources required by workflow
   -> (FilePath -> Metadata -> a -> IO ()) -- ^ IO action
@@ -385,7 +386,7 @@ liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Dataflow
 ----------------------------------------------------------------
 
 liftExecutable
-  :: (ToS args, ResourceClaim res)
+  :: (ToS args, ResourceClaim res, HasCallStack)
   => String  -- ^ Name of flow
   -> res     -- ^ Resources required by workflow
   -> CallExe -- ^ Calling convention
@@ -397,7 +398,7 @@ liftExecutable name res call =
     }
 
 liftPhonyExecutable
-  :: (ToS args, ResourceClaim res)
+  :: (ToS args, ResourceClaim res, HasCallStack)
   => res     -- ^ Resources required by workflow
   -> CallExe -- ^ Calling convention
   -> (args -> Flow eff ())
@@ -408,7 +409,7 @@ liftPhonyExecutable res call =
 -- | Convert haskell function into dataflow. Arguments are loaded and
 --   stored using type classes methods.
 liftHaskellPhonyFun
-  :: (FlowArgument a, IsMeta meta, ResourceClaim res)
+  :: (FlowArgument a, IsMeta meta, ResourceClaim res, HasCallStack)
   => res                  -- ^ Resources required by workflow
   -> (meta -> a -> IO ()) -- ^ IO action
   -> (AsRes a -> Flow eff ())
@@ -424,7 +425,7 @@ liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \_ p -> do
 
 -- | Same as 'liftHaskellFun' but passes noninterpreted metadata.
 liftHaskellPhonyFunMeta
-  :: (FlowArgument a, ResourceClaim res)
+  :: (FlowArgument a, ResourceClaim res, HasCallStack)
   => res                      -- ^ Resources required by workflow
   -> (Metadata -> a -> IO ()) -- ^ IO action
   -> (AsRes a -> Flow eff ())
@@ -443,7 +444,8 @@ liftHaskellPhonyFunMeta res action = basicLiftPhony res $ ActionIO $ \_ p -> do
 --
 --  * Working directory is set to output directory
 callStandardExe
-  :: FilePath
+  :: (HasCallStack)
+  => FilePath
   -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
@@ -467,7 +469,8 @@ callStandardExe exe p action = action ProcessData
 -- * Working directory is set to output directory. Additionally it's
 --   stored in @OKA_OUT@ environment variable.
 callInEnvironment
-  :: FilePath
+  :: (HasCallStack)
+  => FilePath
   -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
@@ -504,7 +507,8 @@ callInEnvironment exe p action =
 -- * Working directory is set to output directory. Additionally it's
 --   stored in @OKA_OUT@ environment variable.
 callInEnvironmentF
-  :: FilePath
+  :: (HasCallStack)
+  => FilePath
   -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
@@ -541,7 +545,8 @@ callInEnvironmentF exe p action =
 --
 --  * Working dir is set to output directory
 callViaArgList
-  :: FilePath                 -- ^ Executable
+  :: (HasCallStack)
+  => FilePath                 -- ^ Executable
   -> (S FilePath -> [CmdArg]) -- ^ How to transform list of store pathes
   -> ParamFlow FilePath
   -> (ProcessData -> IO a)
@@ -602,14 +607,14 @@ ccStdinString dat = ccStdinText (T.pack dat)
 ----------------------------------------------------------------
 
 -- | Read metadata from stdin
-metaFromStdin :: IsMeta a => IO a
+metaFromStdin :: (IsMeta a, HasCallStack) => IO a
 metaFromStdin = do
   (BL.getContents <&> JSON.eitherDecode) >>= \case
     Left  e  -> error $ "Cannot read metadata: " ++ e
     Right js -> evaluate $ decodeMetadata js
 
 -- | Load arguments from CLI parameters
-loadParametersFromCLI :: FlowArgument a => IO a
+loadParametersFromCLI :: (HasCallStack) => FlowArgument a => IO a
 loadParametersFromCLI = do
   args <- getArgs
   s    <- case sexpFromArgs args of

@@ -58,6 +58,7 @@ import Data.Text                    qualified as T
 import Data.Text.Encoding           qualified as T
 import Data.Typeable
 import Data.Vector                  qualified as V
+import GHC.Stack
 
 import OKA.Metadata
 import OKA.Metadata.Meta
@@ -130,7 +131,8 @@ data FlowGraph f = FlowGraph
 -- | Remove duplicate nodes where different FunID correspond to same
 --   workflow
 deduplicateGraph
-  :: FlowGraph OutputPath
+  :: (HasCallStack)
+  => FlowGraph OutputPath
   -> FlowGraph OutputPath
 deduplicateGraph gr
   | null dupes = gr
@@ -161,7 +163,7 @@ deduplicateGraph gr
 
 -- | Remove all workflows that already completed execution.
 shakeFlowGraph
-  :: forall m. (Monad m)
+  :: forall m. (Monad m, HasCallStack)
   => (StorePath -> m Bool)  -- ^ Predicate to check whether path exists
   -> FlowGraph OutputPath   -- ^ Dataflow graph
   -> m FIDSet
@@ -216,7 +218,7 @@ data OutputPath f where
   PathPhony    ::              OutputPath Phony
 
 -- | Compute all hashes and resolve all nodes to corresponding paths
-hashFlowGraph :: FlowGraph Proxy -> FlowGraph OutputPath
+hashFlowGraph :: HasCallStack => FlowGraph Proxy -> FlowGraph OutputPath
 hashFlowGraph gr = res where
   res = gr { graph = hashFun oracle <$> gr.graph
            , phony = (fmap . fmap) (\Proxy -> PathPhony) gr.phony
@@ -227,7 +229,8 @@ hashFlowGraph gr = res where
       PathDataflow p -> p
 
 hashFun
-  :: (AResult -> StorePath)
+  :: (HasCallStack)
+  => (AResult -> StorePath)
   -> Fun Result a
   -> Fun Result (OutputPath Result)
 hashFun oracle fun = fun
@@ -244,13 +247,13 @@ hashFun oracle fun = fun
       : hashS oracle fun.param
       : hashExtMeta oracle fun.metadata
 
-hashHashes :: [Hash] -> Hash
+hashHashes :: (HasCallStack) => [Hash] -> Hash
 hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks
 
-hashFlowName :: String -> Hash
+hashFlowName :: (HasCallStack) => String -> Hash
 hashFlowName = Hash . T.encodeUtf8 . T.pack
 
-hashS :: (k -> StorePath) -> S k -> Hash
+hashS :: (HasCallStack) => (k -> StorePath) -> S k -> Hash
 hashS oracle s0
   = Hash $ SHA1.hashlazy $ BB.toLazyByteString $ BB.string7 "?ARGS?" <> go s0
   where
@@ -262,7 +265,7 @@ hashS oracle s0
               <> mconcat (intersperse (BB.char7 ',') (go <$> ss))
               <> BB.char7 ')'
 
-hashExtMeta :: forall k. (k -> StorePath) -> MetadataF k -> [Hash]
+hashExtMeta :: forall k. (HasCallStack) => (k -> StorePath) -> MetadataF k -> [Hash]
 hashExtMeta oracle meta = case extra [] of
   [] -> []
   hs -> Hash "?EXT_META?" : hs
@@ -284,7 +287,7 @@ hashExtMeta oracle meta = case extra [] of
 
 
 -- Compute hash of metadata
-hashMeta :: Metadata -> Hash
+hashMeta :: (HasCallStack) => Metadata -> Hash
 hashMeta
   = Hash
   . SHA1.hashlazy
@@ -293,7 +296,7 @@ hashMeta
   . encodeMetadata
 
 -- Hash TypeRep. Hopefully this scheme will be stable enough
-hashTypeRep :: TypeRep -> Hash
+hashTypeRep :: (HasCallStack) => TypeRep -> Hash
 hashTypeRep = Hash . SHA1.hash . T.encodeUtf8 . T.pack . showTy
   where
     showTy ty = case splitTyConApp ty of
@@ -301,7 +304,7 @@ hashTypeRep = Hash . SHA1.hash . T.encodeUtf8 . T.pack . showTy
     showCon con = tyConModule con <> "." <> tyConName con
 
 
-encodeToBuilder :: JSON.Value -> JSONB.Encoding
+encodeToBuilder :: (HasCallStack) => JSON.Value -> JSONB.Encoding
 encodeToBuilder JSON.Null       = JSONB.null_
 encodeToBuilder (JSON.Bool b)   = JSONB.bool b
 encodeToBuilder (JSON.Number n) = JSONB.scientific n
@@ -311,7 +314,7 @@ encodeToBuilder (JSON.Object m) = JSONB.dict JSONB.text encodeToBuilder
   (\step z m0 -> foldr (\(k,v) a -> step (toText k) v a) z $ sortOn fst $ KM.toList m0)
   m
 
-jsArray :: V.Vector JSON.Value -> JSONB.Encoding
+jsArray :: (HasCallStack) => V.Vector JSON.Value -> JSONB.Encoding
 jsArray v
   | V.null v  = JSONB.emptyArray_
   | otherwise = JSONB.wrapArray

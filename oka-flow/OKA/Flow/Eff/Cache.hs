@@ -51,7 +51,7 @@ data DynCache where
 
 -- | Execute caching effect
 runCacheE
-  :: (IOE :> es)
+  :: (IOE :> es, HasCallStack)
   => Eff (CacheE : es) a
   -> Eff es a
 runCacheE action = do
@@ -91,7 +91,7 @@ runCacheE action = do
             
     ) action
   where
-    keyType :: forall key a b m. (Typeable key, Typeable a, Typeable b)
+    keyType :: forall key a b m. (Typeable key, Typeable a, Typeable b, HasCallStack)
             => Proxy key -> (a -> m b) -> TypeRep
     keyType _ _ = typeOf (undefined :: (key,a,b))
 
@@ -101,7 +101,7 @@ runCacheE action = do
 --   context of metadata at from call site of 'cache' and all changes
 --   made to metadata by called function are discarded.
 cache
-  :: (Ord a, CacheE :> eff)
+  :: (Ord a, CacheE :> eff, HasCallStack)
   => (a -> Flow eff b) -- ^ Function to memoize.
   -> Flow eff (a -> Flow eff b)
 cache fun = Flow $ do
@@ -117,7 +117,7 @@ cache fun = Flow $ do
 --   Function will be called with empty metadata and all changes to
 --   metadata will be discarded.
 memoize
-  :: (Ord a, Typeable key, Typeable a, Typeable b, CacheE :> eff)
+  :: (Ord a, Typeable key, Typeable a, Typeable b, CacheE :> eff, HasCallStack)
   => Proxy key         -- ^ Memoization key
   -> (a -> Flow eff b) -- ^ Function to memoize
   -> (a -> Flow eff b)

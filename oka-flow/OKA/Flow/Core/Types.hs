@@ -40,6 +40,7 @@ import System.Process.Typed   (ProcessConfig,Process,ExitCode(..),proc,setStdin,
                               )
 import System.IO              (openFile,IOMode(..))
 import System.Posix.Signals   (signalProcess, sigINT)
+import GHC.Stack
 
 import OKA.Metadata
 import OKA.Flow.Core.S
@@ -132,7 +133,8 @@ type CallExe = forall a. (ParamFlow FilePath -> (ProcessData -> IO a) -> IO a)
 -- | Convert dictionary into data structure for calling external
 --   process using @typed-process@
 toTypedProcess
-  :: ProcessData -- ^ Parameters
+  :: (HasCallStack)
+  => ProcessData -- ^ Parameters
   -> IO (ProcessConfig () () ())
 toTypedProcess process = do
   -- Executable is searched relative to the working directory of
@@ -188,7 +190,8 @@ toTypedProcess process = do
 --   interrupted subprocess is killed. If process exits with nonzero
 --   exit code exception is raised.
 startSubprocessAndWait
-  :: CallExe            -- ^ Calling conventions
+  :: (HasCallStack)
+  => CallExe            -- ^ Calling conventions
   -> ParamFlow FilePath -- ^ Parameters
   -> IO ()
 startSubprocessAndWait call param =
@@ -202,7 +205,7 @@ startSubprocessAndWait call param =
 
 -- Kill process but allow it to die gracefully by sending SIGINT
 -- first. GHC install handler for it but not for SIGTERM
-softKill :: Process stdin stdout stderr -> IO ()
+softKill :: (HasCallStack) => Process stdin stdout stderr -> IO ()
 softKill p = getPid p >>= \case
   Nothing  -> pure ()
   Just pid -> do

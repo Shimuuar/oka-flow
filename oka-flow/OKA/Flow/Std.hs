@@ -36,6 +36,7 @@ import System.Process.Typed
 import System.IO.Temp
 import GHC.Generics
 import GHC.Exts                   (proxy#)
+import GHC.Stack
 
 import OKA.Flow.Tools
 import OKA.Flow.Core.Graph
@@ -69,7 +70,7 @@ instance (IsMeta a) => FlowOutput (SavedMeta a) where
     $ JSON.encode $ encodeToMetadata a
 
 -- | Save metadata value so it could be passed as parameter.
-stdSaveMeta :: (IsMeta a) => a -> Flow eff (Result (SavedMeta a))
+stdSaveMeta :: (IsMeta a, HasCallStack) => a -> Flow eff (Result (SavedMeta a))
 stdSaveMeta meta = scopeMeta $ do
   put $ toMetadata meta
   liftHaskellFun "std.SavedMeta" ()
@@ -77,7 +78,7 @@ stdSaveMeta meta = scopeMeta $ do
     ()
 
 -- | Save metadata value so it could be passed as parameter.
-stdSaveSomeMeta :: Metadata -> Flow eff (Result (SavedMeta Metadata))
+stdSaveSomeMeta :: (HasCallStack) => Metadata -> Flow eff (Result (SavedMeta Metadata))
 stdSaveSomeMeta meta = scopeMeta $ do
   put $ absurd <$> meta
   liftHaskellFunMeta_ "std.SavedMeta" ()
@@ -87,7 +88,7 @@ stdSaveSomeMeta meta = scopeMeta $ do
 -- | Convert one saved metadata to another which possibly uses less
 --   data.
 narrowSavedMeta
-  :: forall a b. (IsMeta a, IsMeta b)
+  :: forall a b. (IsMeta a, IsMeta b, HasCallStack)
   => Result (SavedMeta a)
   -> Result (SavedMeta b)
 narrowSavedMeta r
@@ -107,7 +108,7 @@ data ReportPDF
 
 -- | Run PDF viewer as phony workflow. Reader is picked from runtime
 --   configuration.
-runPdfReader :: (SequenceOf ReportPDF a, ProgConfigE :> eff) => a -> Flow eff ()
+runPdfReader :: (SequenceOf ReportPDF a, ProgConfigE :> eff, HasCallStack) => a -> Flow eff ()
 runPdfReader a = do 
   pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
   liftPhonyExecutable ()
@@ -118,7 +119,7 @@ runPdfReader a = do
     (sequenceOf @ReportPDF a)
 
 -- | Concatenate PDFs using @pdftk@ program
-stdConcatPDF :: SequenceOf ReportPDF a => a -> Flow eff (Result ReportPDF)
+stdConcatPDF :: (SequenceOf ReportPDF a, HasCallStack) => a -> Flow eff (Result ReportPDF)
 stdConcatPDF reports = restrictMeta @() $ do
   liftExecutable "std.pdftk.concat" ()
     (callViaArgList "pdftk" $ \s ->
@@ -139,7 +140,7 @@ stdConcatPDF reports = restrictMeta @() $ do
 -- | Run jupyter notebook. Metadata and parameters are passed in
 --   environment variables.
 stdJupyter
-  :: (ToS p, ProgConfigE :> eff)
+  :: (ToS p, ProgConfigE :> eff, HasCallStack)
   => [FilePath] -- ^ Notebooks' names
   -> p          -- ^ Parameters to pass to notebook.
   -> Flow eff ()
@@ -221,21 +222,21 @@ commonPrefix (x:xs) = go x xs where
 
 -- We use curl to check availability of URL. If there's no curl we simply won't wait.
 -- I don't want to add network
-waitForJupyter :: FilePath -> IO (Maybe JupyterConfig)
+waitForJupyter :: (HasCallStack) => FilePath -> IO (Maybe JupyterConfig)
 waitForJupyter datadir = backoff delays wait where
   delays = takeWhile (<5_000_000) $ iterate (*2) 100_000
   wait   = runMaybeT $ do
     cfg <- MaybeT $ findJupyterConfig datadir
     MaybeT $ readJupyterConfig cfg
 
-backoff :: [Int] -> IO (Maybe a) -> IO (Maybe a)
+backoff :: HasCallStack => [Int] -> IO (Maybe a) -> IO (Maybe a)
 backoff delays action = go delays where
   go [] = pure Nothing
   go (t:ts) = threadDelay t >> action >>= \case
     Nothing  -> go ts
     a@Just{} -> pure a
 
-findJupyterConfig :: FilePath -> IO (Maybe FilePath)
+findJupyterConfig :: (HasCallStack) => FilePath -> IO (Maybe FilePath)
 findJupyterConfig datadir = ignoreIOException $ do
   let runtime_dir = datadir </> "runtime"
   paths <- listDirectory runtime_dir
@@ -249,7 +250,7 @@ findJupyterConfig datadir = ignoreIOException $ do
     [nm] -> pure $ Just (runtime_dir </> nm)
     _    -> error "stdJupyter: something wrong with jupyter. Multiple configs"
 
-readJupyterConfig :: FilePath -> IO (Maybe JupyterConfig)
+readJupyterConfig :: (HasCallStack) => FilePath -> IO (Maybe JupyterConfig)
 readJupyterConfig path = ignoreIOException $ do
   -- We may read file only partially due to races. So if we fail to
   -- decode JSON it should be OK. But failure to parse valid JSON is
@@ -262,7 +263,7 @@ readJupyterConfig path = ignoreIOException $ do
       JSON.Success c -> pure (Just c)
 
 
-ignoreIOException :: IO (Maybe a) -> IO (Maybe a)
+ignoreIOException :: HasCallStack => IO (Maybe a) -> IO (Maybe a)
 ignoreIOException = handle (\(_::IOException) -> pure Nothing)
 
 -- | Parts of Jupyter server config generated on server start.

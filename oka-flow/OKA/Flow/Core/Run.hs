@@ -28,8 +28,8 @@ import Effectful.State.Static.Local qualified as Eff
 
 import System.FilePath              ((</>))
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
-                                     doesDirectoryExist
-                                    )
+                                     doesDirectoryExist)
+import GHC.Stack
 
 import OKA.Metadata
 import OKA.Metadata.Meta
@@ -98,7 +98,7 @@ data OutputRun f where
 
 -- | Execute dataflow program
 runFlow
-  :: (ToS r)
+  :: (ToS r, HasCallStack)
   => FlowCtx eff -- ^ Evaluation context
   -> Metadata    -- ^ Metadata for program
   -> Flow eff r  -- ^ Dataflow program
@@ -142,7 +142,8 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
 -- Add MVars to each node of graph. They are used to block evaluator
 -- until all dependencies are ready
 addMVars
-  :: FIDSet
+  :: (HasCallStack)
+  => FIDSet
   -> FlowGraph OutputPath
   -> IO (FlowGraph OutputRun)
 addMVars FIDSet{exists,wanted} gr = do
@@ -159,7 +160,8 @@ addMVars FIDSet{exists,wanted} gr = do
     
 -- Prepare functixon for evaluation
 prepareFun
-  :: FlowCtx eff                        -- Evaluation context
+  :: (HasCallStack)
+  => FlowCtx eff                        -- Evaluation context
   -> FlowGraph OutputRun                -- Full dataflow graph
   -> ExtMetaCache                       -- External metadata
   -> Fun r (OutputRun r)                -- Function to evaluate
@@ -217,7 +219,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
 
 
 -- Report crash in case of exception
-crashReport :: FlowLogger -> Fun r (OutputRun r) -> IO x -> IO x
+crashReport :: (HasCallStack) => FlowLogger -> Fun r (OutputRun r) -> IO x -> IO x
 crashReport logger fun = handle $ \e0@(SomeException e) -> do
   let path = case fun.output of
                RunDataflow _ p -> Just p
@@ -268,7 +270,8 @@ lookupExtCache (ExtMetaCache cache) fid =
 
 
 prepareExtMetaCache
-  :: FlowCtx eff
+  :: (HasCallStack)
+  => FlowCtx eff
   -> FlowGraph OutputRun
   -> FIDSet
   -> IO ExtMetaCache
