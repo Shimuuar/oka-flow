@@ -65,6 +65,7 @@ import OKA.Metadata.Meta
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Types
 import OKA.Flow.Core.S
+import OKA.Flow.Core.Merkle
 
 ----------------------------------------------------------------
 -- Dataflow graph definition
@@ -289,16 +290,6 @@ hashExtMeta oracle meta = case extra [] of
       where
         ty = typeRep (Proxy @x)
 
-
--- Compute hash of metadata
-hashMeta :: (HasCallStack) => Metadata -> Hash
-hashMeta
-  = Hash
-  . SHA1.hashlazy
-  . JSONB.encodingToLazyByteString
-  . encodeToBuilder
-  . encodeMetadata
-
 -- Hash TypeRep. Hopefully this scheme will be stable enough
 hashTypeRep :: (HasCallStack) => TypeRep -> Hash
 hashTypeRep = Hash . SHA1.hash . T.encodeUtf8 . T.pack . showTy
@@ -306,28 +297,6 @@ hashTypeRep = Hash . SHA1.hash . T.encodeUtf8 . T.pack . showTy
     showTy ty = case splitTyConApp ty of
       (con,param) -> "("++intercalate " " (showCon con : map showTy param)++ ")"
     showCon con = tyConModule con <> "." <> tyConName con
-
-
-encodeToBuilder :: (HasCallStack) => JSON.Value -> JSONB.Encoding
-encodeToBuilder JSON.Null       = JSONB.null_
-encodeToBuilder (JSON.Bool b)   = JSONB.bool b
-encodeToBuilder (JSON.Number n) = JSONB.scientific n
-encodeToBuilder (JSON.String s) = JSONB.text s
-encodeToBuilder (JSON.Array v)  = jsArray v
-encodeToBuilder (JSON.Object m) = JSONB.dict JSONB.text encodeToBuilder
-  (\step z m0 -> foldr (\(k,v) a -> step (toText k) v a) z $ sortOn fst $ KM.toList m0)
-  m
-
-jsArray :: (HasCallStack) => V.Vector JSON.Value -> JSONB.Encoding
-jsArray v
-  | V.null v  = JSONB.emptyArray_
-  | otherwise = JSONB.wrapArray
-              $  encodeToBuilder (V.unsafeHead v)
-             <@> V.foldr withComma (JSONB.Encoding mempty) (V.unsafeTail v)
-  where
-    withComma a z = JSONB.comma <@> encodeToBuilder a <@> z
-    JSONB.Encoding e1 <@> JSONB.Encoding e2 = JSONB.Encoding (e1 <> e2)
-
 
 
 ----------------------------------------------------------------
