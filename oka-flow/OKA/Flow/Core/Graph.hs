@@ -249,7 +249,7 @@ hashFun oracle fun = fun
       $ hashMeta ( runIdentity
                  $ traverseMetadataMay (\_ -> pure Nothing) fun.metadata)
       : hashFlowName name
-      : hashS oracle fun.param
+      : hashS (oracle <$> fun.param)
       : hashExtMeta oracle fun.metadata
 
 hashHashes :: (HasCallStack) => [Hash] -> Hash
@@ -257,18 +257,6 @@ hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks
 
 hashFlowName :: (HasCallStack) => String -> Hash
 hashFlowName = Hash . T.encodeUtf8 . T.pack
-
-hashS :: (HasCallStack) => (k -> StorePath) -> S k -> Hash
-hashS oracle s0
-  = Hash $ SHA1.hashlazy $ BB.toLazyByteString $ BB.string7 "?ARGS?" <> go s0
-  where
-    go = \case
-      Param k -> BB.char7 '/' <> BB.byteString (case oracle k of StorePath _ (Hash h) -> h)
-      Atom  a -> BB.char7 ':' <> BB.string8 a
-      Nil     -> BB.char7 '-'
-      S ss    -> BB.char7 '('
-              <> mconcat (intersperse (BB.char7 ',') (go <$> ss))
-              <> BB.char7 ')'
 
 hashExtMeta :: forall k. (HasCallStack) => (k -> StorePath) -> MetadataF k -> [Hash]
 hashExtMeta oracle meta = case extra [] of

@@ -2,6 +2,7 @@
 -- Simple Merkle tree for computing hash of flow.
 module OKA.Flow.Core.Merkle
   ( hashMeta
+  , hashS
   ) where
 
 import Crypto.Hash.SHA1             qualified as SHA1
@@ -10,6 +11,7 @@ import Data.Aeson.Encoding          qualified as JSONB
 import Data.Aeson.Encoding.Internal qualified as JSONB
 import Data.Aeson.KeyMap            qualified as KM
 import Data.Aeson.Key               (toText)
+import Data.ByteString.Builder      qualified as BB
 import Data.List                    (sortOn,intercalate,intersperse)
 import Data.Vector                  qualified as V
 import Data.Text                    qualified as T
@@ -19,6 +21,19 @@ import GHC.Stack
 
 import OKA.Metadata.Meta
 import OKA.Flow.Core.Types
+import OKA.Flow.Core.S
+hashS :: S StorePath -> Hash
+hashS s0
+  = Hash $ SHA1.hashlazy $ BB.toLazyByteString $ BB.string7 "?ARGS?" <> go s0
+  where
+    go = \case
+      Param (StorePath _ (Hash h))
+        -> BB.char7 '/' <> BB.byteString h
+      Atom  a -> BB.char7 ':' <> BB.string8 a
+      Nil     -> BB.char7 '-'
+      S ss    -> BB.char7 '('
+              <> mconcat (intersperse (BB.char7 ',') (go <$> ss))
+              <> BB.char7 ')'
 
 
 
