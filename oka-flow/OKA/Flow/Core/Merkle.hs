@@ -1,7 +1,9 @@
 -- |
 -- Simple Merkle tree for computing hash of flow.
 module OKA.Flow.Core.Merkle
-  ( hashMeta
+  ( Merkle(..)
+  , hashMerkle
+  , hashMeta
   , hashS
   ) where
 
@@ -12,6 +14,7 @@ import Data.Aeson.Encoding.Internal qualified as JSONB
 import Data.Aeson.KeyMap            qualified as KM
 import Data.Aeson.Key               (toText)
 import Data.ByteString.Builder      qualified as BB
+import Data.Coerce
 import Data.List                    (sortOn,intercalate,intersperse)
 import Data.Vector                  qualified as V
 import Data.Text                    qualified as T
@@ -22,9 +25,41 @@ import GHC.Stack
 import OKA.Metadata.Meta
 import OKA.Flow.Core.Types
 import OKA.Flow.Core.S
+
+
+-- | Data type with
+data Merkle
+  = MerkleBranch [Merkle]
+    -- ^ Branch of Merkle tree
+  | MerkleS      (S StorePath)
+    -- ^ Leaf node with parameters passed to dataflow
+  | MerkleMeta   Metadata
+    -- ^ Leaf node with metadata
+  | MerkleExt    [([JSON.Key], StorePath)]
+    -- ^ List of external metadata load from output of another dataflow
+
+hashMerkle :: Merkle -> Hash
+hashMerkle = \case
+  MerkleBranch xs -> hashBranch xs
+  MerkleS      s  -> hashS      s
+  MerkleMeta   m  -> hashMeta   m
+  MerkleExt    xs -> hashExt    xs
+
+
+hashBuilder :: String -> BB.Builder -> Hash
+{-# INLINE hashBuilder #-}
+hashBuilder prefix builder
+  = Hash $ SHA1.hashlazy $ BB.toLazyByteString $ BB.string7 prefix <> builder
+
+
+hashBranch :: [Merkle] -> Hash
+hashBranch = hashBuilder "?BRANCH?" . foldMap (builderHash . hashMerkle)
+
+
+-- | Compute hash of S expression 
 hashS :: S StorePath -> Hash
 hashS s0
-  = Hash $ SHA1.hashlazy $ BB.toLazyByteString $ BB.string7 "?ARGS?" <> go s0
+  = hashBuilder "?ARGS?" $ go s0
   where
     go = \case
       Param (StorePath _ (Hash h))
@@ -36,13 +71,11 @@ hashS s0
               <> BB.char7 ')'
 
 
-
 -- | Compute hash of metadata
 hashMeta :: (HasCallStack) => Metadata -> Hash
 hashMeta
-  = Hash
-  . SHA1.hashlazy
-  . JSONB.encodingToLazyByteString
+  = hashBuilder "?META?"
+  . JSONB.fromEncoding
   . encodeToBuilder
   . encodeMetadata
 
@@ -67,6 +100,14 @@ jsArray v
     JSONB.Encoding e1 <@> JSONB.Encoding e2 = JSONB.Encoding (e1 <> e2)
 
 
+-- | Hash of external metadata. We sort it using @metaLocation@ in
+--   order to provide canonicalization.
+hashExt :: [([JSON.Key], StorePath)] -> Hash
+hashExt = hashBuilder "?EXT?" . foldMap hash . sortOn fst
+  where
+    hash (loc, StorePath _ h)
+      = foldMap (T.encodeUtf8Builder . toText) loc
+     <> builderHash h
 
-
-
+builderHash :: Hash -> BB.Builder
+builderHash = coerce BB.byteString
