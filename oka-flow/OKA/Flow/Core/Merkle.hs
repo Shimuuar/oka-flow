@@ -15,11 +15,9 @@ import Data.Aeson.KeyMap            qualified as KM
 import Data.Aeson.Key               (toText)
 import Data.ByteString.Builder      qualified as BB
 import Data.Coerce
-import Data.List                    (sortOn,intercalate,intersperse)
+import Data.List                    (sortOn,intersperse)
 import Data.Vector                  qualified as V
-import Data.Text                    qualified as T
 import Data.Text.Encoding           qualified as T
-import Data.Typeable
 import GHC.Stack
 
 import OKA.Metadata.Meta
@@ -31,6 +29,7 @@ import OKA.Flow.Core.S
 data Merkle
   = MerkleBranch [Merkle]
     -- ^ Branch of Merkle tree
+  | MerkleName   String
   | MerkleS      (S StorePath)
     -- ^ Leaf node with parameters passed to dataflow
   | MerkleMeta   Metadata
@@ -41,6 +40,7 @@ data Merkle
 hashMerkle :: Merkle -> Hash
 hashMerkle = \case
   MerkleBranch xs -> hashBranch xs
+  MerkleName   nm -> hashBuilder "?NAME?" $ BB.stringUtf8 nm
   MerkleS      s  -> hashS      s
   MerkleMeta   m  -> hashMeta   m
   MerkleExt    xs -> hashExt    xs

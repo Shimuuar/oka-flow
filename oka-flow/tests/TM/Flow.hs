@@ -76,10 +76,10 @@ tests = testGroup "Run flow"
                     b  <- flowB ()
                     rA <- flowS a
                     rB <- flowS b
-                    observeOutput obs "a2cd17720b4b99db295d163503f2f964c56fa212" a
-                    observeOutput obs "81f0aaa39ae1659e8f28a8e4e30fb4fde1769b4b" b
-                    observeOutput obs "5593eb1a59553d6de638c48fbd06cd36324064c9" rA
-                    observeOutput obs "6d44756d6dc99dc79ded6a84052f6002f3cc75a7" rB
+                    observeOutput obs "4a389e1dc0f5b62aa57479809d3eb0eea6cdfe8b" a
+                    observeOutput obs "4a0a3d6fa0d089de9c295932f10facbe5750f374" b
+                    observeOutput obs "db842811b7ae0ab5347dd5c71367c8cb9e19afcc" rA
+                    observeOutput obs "794dc077cfe604ea2f4b977393ca8808f5e3d405" rB
       runFlow ctx meta flow
       readIORef obs >>= \case
         [] -> pure ()
