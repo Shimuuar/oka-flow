@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveAnyClass #-}
 -- |
 -- Very simple resource management system. We need way to observe
 -- resource limitation when scheduling workflows. We use very simple
@@ -242,9 +243,17 @@ withResources
   -> IO a
 withResources res r = bracket ini fini . const where
   claim = claimResource r
-  ini   = atomically $ claim.claim res
-  fini  = atomically
+  ini   = annotate "Claim resource"   $ atomically $ claim.claim res
+  fini  = annotate "Release resource" . atomically
 
+
+data AnnBlockedIndefinitelyOnSTM = AnnBlockedIndefinitelyOnSTM String
+  deriving stock (Show,Eq)
+  deriving anyclass Exception
+
+annotate :: String -> IO a -> IO a
+annotate msg io = io `catch` (\BlockedIndefinitelyOnSTM ->
+                                 throwIO (AnnBlockedIndefinitelyOnSTM msg))
 
 ----------------------------------------------------------------
 -- Deriving via
