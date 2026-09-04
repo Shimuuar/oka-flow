@@ -36,28 +36,17 @@ module OKA.Flow.Core.Graph
 import Control.Applicative
 import Control.Lens
 import Control.Monad
-import Crypto.Hash.SHA1             qualified as SHA1
-import Data.ByteString.Builder      qualified as BB
 import Data.Aeson                   qualified as JSON
-import Data.Aeson.Encoding          qualified as JSONB
-import Data.Aeson.Encoding.Internal qualified as JSONB
 import Data.Aeson.KeyMap            qualified as KM
-import Data.Aeson.Key               (toText)
-import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
-import Data.Coerce
 import Data.Monoid                  (Endo(..))
-import Data.List                    (sortOn,intercalate,intersperse)
 import Data.List.NonEmpty           qualified as NE
 import Data.List.NonEmpty           (NonEmpty(..))
 import Data.Map.Strict              (Map)
 import Data.Map.Strict              qualified as Map
 import Data.Set                     (Set)
 import Data.Set                     qualified as Set
-import Data.Text                    qualified as T
-import Data.Text.Encoding           qualified as T
 import Data.Typeable
-import Data.Vector                  qualified as V
 import GHC.Stack
 
 import OKA.Metadata
@@ -65,6 +54,7 @@ import OKA.Metadata.Meta
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Types
 import OKA.Flow.Core.S
+import OKA.Flow.Core.Merkle
 
 ----------------------------------------------------------------
 -- Dataflow graph definition
@@ -244,90 +234,23 @@ hashFun oracle fun = fun
   where
     mkStorePath name
       = StorePath name
-      $ hashHashes
-      $ hashMeta ( runIdentity
-                 $ traverseMetadataMay (\_ -> pure Nothing) fun.metadata)
-      : hashFlowName name
-      : hashS oracle fun.param
-      : hashExtMeta oracle fun.metadata
+      $ hashMerkle
+      $ MerkleBranch [ MerkleName name
+                     , MerkleS    $ oracle <$> fun.param
+                       -- Here we drop all external metadata
+                     , MerkleMeta $ runIdentity
+                                  $ traverseMetadataMay (\_ -> pure Nothing) fun.metadata
+                       -- Generate list of external metadata
+                     , MerkleExt  $ getExtMeta oracle fun.metadata
+                     ]
 
-hashHashes :: (HasCallStack) => [Hash] -> Hash
-hashHashes = Hash . SHA1.hashlazy . coerce BL.fromChunks
-
-hashFlowName :: (HasCallStack) => String -> Hash
-hashFlowName = Hash . T.encodeUtf8 . T.pack
-
-hashS :: (HasCallStack) => (k -> StorePath) -> S k -> Hash
-hashS oracle s0
-  = Hash $ SHA1.hashlazy $ BB.toLazyByteString $ BB.string7 "?ARGS?" <> go s0
-  where
-    go = \case
-      Param k -> BB.char7 '/' <> BB.byteString (case oracle k of StorePath _ (Hash h) -> h)
-      Atom  a -> BB.char7 ':' <> BB.string8 a
-      Nil     -> BB.char7 '-'
-      S ss    -> BB.char7 '('
-              <> mconcat (intersperse (BB.char7 ',') (go <$> ss))
-              <> BB.char7 ')'
-
-hashExtMeta :: forall k. (HasCallStack) => (k -> StorePath) -> MetadataF k -> [Hash]
-hashExtMeta oracle meta = case extra [] of
-  [] -> []
-  hs -> Hash "?EXT_META?" : hs
-  where
-    -- Here we trying to be clever and collect keys using traversal and Const
-    --
-    -- NOTE: TypeReps inside metadata are sorted so traversal order is
-    --       well defined and we don't need to sort anything
-    extra
-      = appEndo $ getConst
-      $ traverseMetadata collectK meta
-    collectK :: forall x. IsMetaPrim x => k -> Const (Endo [Hash]) x
-    collectK k
-      = Const $ Endo
-      $ (hashTypeRep ty                        :)
-      . ((case oracle k of StorePath _ h -> h) :)
-      where
-        ty = typeRep (Proxy @x)
-
-
--- Compute hash of metadata
-hashMeta :: (HasCallStack) => Metadata -> Hash
-hashMeta
-  = Hash
-  . SHA1.hashlazy
-  . JSONB.encodingToLazyByteString
-  . encodeToBuilder
-  . encodeMetadata
-
--- Hash TypeRep. Hopefully this scheme will be stable enough
-hashTypeRep :: (HasCallStack) => TypeRep -> Hash
-hashTypeRep = Hash . SHA1.hash . T.encodeUtf8 . T.pack . showTy
-  where
-    showTy ty = case splitTyConApp ty of
-      (con,param) -> "("++intercalate " " (showCon con : map showTy param)++ ")"
-    showCon con = tyConModule con <> "." <> tyConName con
-
-
-encodeToBuilder :: (HasCallStack) => JSON.Value -> JSONB.Encoding
-encodeToBuilder JSON.Null       = JSONB.null_
-encodeToBuilder (JSON.Bool b)   = JSONB.bool b
-encodeToBuilder (JSON.Number n) = JSONB.scientific n
-encodeToBuilder (JSON.String s) = JSONB.text s
-encodeToBuilder (JSON.Array v)  = jsArray v
-encodeToBuilder (JSON.Object m) = JSONB.dict JSONB.text encodeToBuilder
-  (\step z m0 -> foldr (\(k,v) a -> step (toText k) v a) z $ sortOn fst $ KM.toList m0)
-  m
-
-jsArray :: (HasCallStack) => V.Vector JSON.Value -> JSONB.Encoding
-jsArray v
-  | V.null v  = JSONB.emptyArray_
-  | otherwise = JSONB.wrapArray
-              $  encodeToBuilder (V.unsafeHead v)
-             <@> V.foldr withComma (JSONB.Encoding mempty) (V.unsafeTail v)
-  where
-    withComma a z = JSONB.comma <@> encodeToBuilder a <@> z
-    JSONB.Encoding e1 <@> JSONB.Encoding e2 = JSONB.Encoding (e1 <> e2)
-
+getExtMeta :: forall k. (HasCallStack) => (k -> StorePath) -> MetadataF k -> [([JSON.Key], StorePath)]
+getExtMeta oracle meta = extra where
+  extra = flip appEndo []
+        $ getConst
+        $ traverseMetadata extract meta
+  extract :: forall x. IsMetaPrim x => k -> Const (Endo [([KM.Key], StorePath)]) x
+  extract k = Const $ Endo ((metaLocation @x, oracle k):)
 
 
 ----------------------------------------------------------------

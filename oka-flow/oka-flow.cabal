@@ -65,6 +65,7 @@ Library
         OKA.Flow.Core.Flow
         OKA.Flow.Core.Run
         OKA.Flow.Core.S
+        OKA.Flow.Core.Merkle
         --
         OKA.Flow
         OKA.Flow.Eff
