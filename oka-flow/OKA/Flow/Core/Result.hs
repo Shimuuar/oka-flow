@@ -23,7 +23,9 @@ newtype APhony  = APhony  FunID
 -- | Opaque handle to a dataflow in dataflow graph. It's type tagged
 --   in order to provide type safety.
 newtype Result a = Result AResult
+  deriving stock (Show,Eq,Ord)
 
 -- | Opaque handle to result of evaluation of single phony dataflow.
 --   This is dataflow which doesn't produce any output.
 newtype Phony a = Phony APhony 
+  deriving stock (Show,Eq,Ord)
