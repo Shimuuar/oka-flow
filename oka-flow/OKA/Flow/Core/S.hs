@@ -10,14 +10,12 @@ module OKA.Flow.Core.S
   , ToS(..)
   , sequenceS
     -- * JSON serialization
-  , sToJSON
   , sFromJSON
-  , parseJSONtoS
   ) where
 
 import Data.Aeson        qualified as JSON
 import Data.Aeson.Types  qualified as JSON
-import Data.Aeson        (FromJSON,ToJSON,Value(..),(.=))
+import Data.Aeson        (FromJSON,Value(..),(.=))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Monoid       (Endo(..))
 import Data.Vector       qualified as V
@@ -43,6 +41,7 @@ data S a
 class ToS a where
   -- | Convert value to a S-expression for passing to S.
   toS :: a -> S AResult
+
 
 -- | Convert S-expression that doesn't contain 'Atom's into list.
 sequenceS :: S a -> Maybe [a]
@@ -97,25 +96,25 @@ instance (ToS a, ToS b) => ToS (Either a b) where
 -- JSON serialization
 ----------------------------------------------------------------
 
-sToJSON :: ToJSON a => S a -> Value
-sToJSON = \case
-  Nil     -> Null
-  S xs    -> JSON.toJSON (sToJSON <$> xs)
-  Atom  a -> JSON.toJSON a
-  Param p -> JSON.object [ "v"  .= p ]
+instance JSON.ToJSON a => JSON.ToJSON (S a) where
+  toJSON = \case
+    Nil     -> Null
+    S xs    -> JSON.toJSON (JSON.toJSON <$> xs)
+    Atom  a -> JSON.toJSON a
+    Param p -> JSON.object [ "v"  .= p ]
+
+instance JSON.FromJSON a => JSON.FromJSON (S a) where
+  parseJSON = \case
+    Null     -> pure Nil
+    Array xs -> S <$> traverse JSON.parseJSON (V.toList xs)
+    String s -> pure $ Atom $ T.unpack s
+    Object o -> case KM.toList o of
+      [("v",v)] -> Param <$> JSON.parseJSON v
+      _         -> fail "Cannot interpret object as S-expression leaf"
+    Number{} -> fail "Bare number encountered in S-expression"
+    Bool{}   -> fail "Bare Bool encountered in S-expression"
 
 sFromJSON :: FromJSON a => Value -> Either String (S a)
-sFromJSON js = case JSON.parse parseJSONtoS js of
+sFromJSON js = case JSON.parse JSON.parseJSON js of
   JSON.Success a -> Right a
   JSON.Error   e -> Left  e
-
-parseJSONtoS :: FromJSON a => Value -> JSON.Parser (S a)
-parseJSONtoS = \case
-  Null     -> pure Nil
-  Array xs -> S <$> traverse parseJSONtoS (V.toList xs)
-  String s -> pure $ Atom $ T.unpack s
-  Object o -> case KM.toList o of
-    [("v",v)] -> Param <$> JSON.parseJSON v
-    _         -> fail "Cannot interpret object as S-expression leaf"
-  Number{} -> fail "Bare number encountered in S-expression"
-  Bool{}   -> fail "Bare Bool encountered in S-expression"

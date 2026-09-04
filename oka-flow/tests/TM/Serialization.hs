@@ -19,7 +19,7 @@ import OKA.Flow.Tools
 tests :: TestTree
 tests = testGroup "Serialization"
   [ testProperty "roundtrip S args" args_roundtrip
-  , testProperty "roundtrip S JSON" json_roundtrip
+  , testJsonRoundtrip @(S Int)
   , testJsonRoundtrip @StorePath
   , testJsonRoundtrip @Hash
   ]
@@ -28,10 +28,6 @@ tests = testGroup "Serialization"
 args_roundtrip :: S FilePath -> Bool
 args_roundtrip s
   = Right s == (sexpFromArgs . sexpToArgs) s
-
-json_roundtrip :: S Int -> Bool
-json_roundtrip s
-  = Right s == (sFromJSON . sToJSON) s
 
 testJsonRoundtrip :: forall a. (JSON.ToJSON a, JSON.FromJSON a, Arbitrary a, Eq a, Show a, Typeable a) => TestTree
 testJsonRoundtrip
