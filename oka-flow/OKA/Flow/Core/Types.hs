@@ -25,11 +25,14 @@ import Control.Applicative
 import Control.Monad
 import Control.Exception
 import Control.Concurrent.STM
+import Data.Aeson             qualified as JSON
 import Data.ByteString        (ByteString)
 import Data.ByteString.Char8  qualified as BC8
 import Data.ByteString.Lazy   qualified as BL
 import Data.ByteString.Base16 qualified as Base16
 import Data.String
+import Data.Text             qualified as T
+import Data.Text.Encoding    qualified as T
 import Data.Traversable
 import System.FilePath        ((</>),pathSeparator,isAbsolute)
 import System.Directory       (makeAbsolute)
@@ -64,7 +67,28 @@ data StorePath = StorePath
   { name :: String
   , hash :: Hash
   }
-  deriving (Show)
+  deriving stock (Show,Eq)
+
+instance JSON.ToJSON StorePath where
+  toJSON = JSON.toJSON . storePath
+
+instance JSON.FromJSON StorePath where
+  parseJSON = JSON.withText "StorePath" $ \str ->
+    case T.split (=='/') str of
+      [path,hash_b16] -> do
+        hash <- JSON.parseJSON $ JSON.String hash_b16
+        pure $ StorePath (T.unpack path) hash
+      _     -> fail "Invalid StorePath"
+
+instance JSON.ToJSON Hash where
+  toJSON (Hash hash) = JSON.toJSON $ BC8.unpack $ Base16.encode hash
+instance JSON.FromJSON Hash where
+  parseJSON = JSON.withText "Hash" $ \hash_b16 ->
+    case Base16.decode (T.encodeUtf8 hash_b16) of
+      Right hash | BC8.length hash == 20
+        -> pure $ Hash hash
+      _ -> fail "Hash: invalid hash"
+
 
 -- | Compute file name of directory in nix-like store.
 storePath :: StorePath -> FilePath

@@ -184,7 +184,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
         () <- withBuildDirectory ctx.root path $ \build -> do
           BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
           -- FIXME: I need to properly write deps.txt
-          BL.writeFile (build </> "deps.json") $ JSON.encode $ sToJSON paramP
+          BL.writeFile (build </> "deps.json") $ JSON.encode paramP
           let param = ParamFlow { meta = meta
                                 , args = params
                                 , out  = Just build
