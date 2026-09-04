@@ -11,6 +11,7 @@ import Data.ByteString.Lazy         qualified as BL
 import Data.Typeable
 import Test.Tasty
 import Test.Tasty.QuickCheck
+import Unsafe.Coerce
 
 import OKA.Flow.Core.S
 import OKA.Flow.Core.Types
@@ -63,3 +64,10 @@ instance Arbitrary Hash where
 
 atom :: Gen FilePath
 atom = vectorOf 8 (choose ('a', 'z'))
+
+-- Dangerous but will work
+instance Arbitrary AResult where
+  arbitrary = unsafeCoerce (arbitrary @Int)
+instance Arbitrary APhony where
+  arbitrary = unsafeCoerce (arbitrary @Int)
+
