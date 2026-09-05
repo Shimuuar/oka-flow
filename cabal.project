@@ -1,4 +1,5 @@
 packages:
   oka-metadata
+  oka-metadata-std
   oka-flow
 tests: True

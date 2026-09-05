@@ -1,0 +1,60 @@
+Cabal-Version:  3.0
+Name:           oka-metadata-std
+Version:        0.1
+Synopsis:       Standard data types for data analysis
+
+License:        BSD-3-Clause
+License-File:   LICENSE
+Author:         Aleksey Khudyakov <alexey.skladnoy@gmail.com>
+Maintainer:     Aleksey Khudyakov <alexey.skladnoy@gmail.com>
+Category:       Data
+Build-Type:     Simple
+
+common extensions
+  Default-Language:   GHC2021
+  Default-extensions: NoPolyKinds
+                      --
+                      NoFieldSelectors
+                      OverloadedRecordDot
+                      DuplicateRecordFields
+                      --
+                      DataKinds
+                      DerivingStrategies
+                      DerivingVia
+                      LambdaCase
+                      ViewPatterns
+                      RoleAnnotations
+
+
+
+Library
+  import:             extensions
+  Ghc-options:        -Wall -O2
+  --
+  Build-Depends:    base                >=4.12 && <5
+                  , oka-metadata
+                  , lens                >=5
+                  , text                >=2
+  Exposed-modules:
+        OKA.Metadata.Std.Cuts
+
+
+Test-suite oka-metadata-std-tests
+  import:           extensions
+  type:             exitcode-stdio-1.0
+  ghc-options:      -Wall
+  Build-Depends:    base
+                  , aeson
+                  , oka-metadata
+                  , oka-metadata-std
+                    --
+                  , lens
+                    --
+                  , tasty
+                  , tasty-quickcheck
+                  , generic-arbitrary >= 1
+  hs-source-dirs: tests
+  main-is:        main.hs
+  other-modules:  TST.Serialization
+                  TST.Orphanage
+
