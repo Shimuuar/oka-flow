@@ -231,6 +231,14 @@ instance FlowArgument () where
     _   -> Left "Expecting nil"
   parameterShape _   ()  = ()
 
+instance FlowArgument Bool where
+  type AsRes Bool = Bool
+  parseFlowArguments = \case
+    Atom "True"  -> pure $ pure True
+    Atom "False" -> pure $ pure False
+    _            -> Left "Cannot parse boolean"
+  parameterShape _ = id
+
 instance FlowArgument a => FlowArgument [a] where
   type AsRes [a] = [AsRes a]
   parseFlowArguments = \case

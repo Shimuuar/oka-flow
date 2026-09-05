@@ -92,6 +92,12 @@ instance (ToS a, ToS b) => ToS (Either a b) where
   toS (Right b) = S [Atom "Right", toS b]
 
 
+instance ToS Bool where
+  toS = \case
+    True  -> Atom "True"
+    False -> Atom "False"
+
+
 ----------------------------------------------------------------
 -- JSON serialization
 ----------------------------------------------------------------
