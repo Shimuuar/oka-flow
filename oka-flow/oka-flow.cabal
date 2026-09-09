@@ -31,7 +31,7 @@ Library
   Ghc-options:      -Wall -O2
   Default-Language: GHC2021
   --
-  Build-Depends:    base                 >=4.12 && <5
+  Build-Depends:    base                 >=4.13 && <5
                   , oka-metadata
                     --
                   , aeson                >=2
