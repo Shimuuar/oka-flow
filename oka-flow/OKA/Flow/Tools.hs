@@ -661,35 +661,3 @@ sexpFromArgs xs = runListParser parserS xs where
   eol     = consume >>= \case
     ")" -> pure []
     _   -> fail "Expecting )"
-
-
-
-
--- ----------------------------------------------------------------
--- -- GHC compilation
--- ----------------------------------------------------------------
-
--- -- | Compile program with GHC. Uses 'LockGHC' to ensure that only one
--- --   compilation runs at a time.
--- compileProgramGHC
---   :: FilePath    -- ^ Path to Main module
---   -> [String]    -- ^ Options to pass to GHC
---   -> ResourceSet -- ^ Set of resources
---   -> IO ()
--- compileProgramGHC exe opts res
---   = withResources res LockGHC
---   $ withProcessWait_ ghc
---   $ \_ -> pure ()
---   where
---     ghc = proc "ghc" (exe:opts)
-
--- -- | Default GHC options
--- defGhcOpts :: [String]
--- defGhcOpts = [ "-O2"
---              , "-threaded"
---              , "-with-rtsopts=-T -A8m"
---              ]
-
-
--- foo :: Setter' CallExe ProcessData
--- foo = undefined
