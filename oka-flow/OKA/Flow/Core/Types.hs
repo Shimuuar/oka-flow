@@ -67,7 +67,7 @@ data StorePath = StorePath
   { name :: String
   , hash :: Hash
   }
-  deriving stock (Show,Eq)
+  deriving stock (Show,Eq,Ord)
 
 instance JSON.ToJSON StorePath where
   toJSON = JSON.toJSON . storePath
