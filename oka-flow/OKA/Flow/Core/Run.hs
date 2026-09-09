@@ -173,6 +173,16 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
   -- Compute metadata which should be passed to the workflow by
   -- applying data loaded from
   meta <- traverseMetadata (lookupExtCache ext_meta) fun.metadata
+  -- Collect list of external metadata
+  let ext_meta_json :: [(StorePath,[JSON.Key])]
+      ext_meta_json = flip appEndo []
+               $ getConst
+               $ traverseMetadata getExt fun.metadata where
+        getExt :: forall x. IsMetaPrim x => AResult -> Const (Endo [(StorePath,[JSON.Key])]) x
+        getExt r = Const $ Endo ((case Map.lookup r gr of
+                                    Nothing -> error "INTERNAL ERROR: missing external meta"
+                                    Just Fun{output=RunDataflow _ p} -> p
+                                 , metaLocation @x):)
   -- Request resources & run action
   withResources ctx.res fun.resources $ do
     () <- case fun.workflow of
@@ -183,8 +193,10 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
         t1 <- getCurrentTime
         () <- withBuildDirectory ctx.root path $ \build -> do
           BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
-          -- FIXME: I need to properly write deps.txt
           BL.writeFile (build </> "deps.json") $ JSON.encode paramP
+          case ext_meta_json of
+            [] -> pure ()
+            _  -> BL.writeFile (build </> "ext_meta.json") $ JSON.encode ext_meta_json
           let param = ParamFlow { meta = meta
                                 , args = params
                                 , out  = Just build
