@@ -87,10 +87,12 @@ executable oka-flow
   build-depends:    base
                   , oka-flow
                   , aeson
+                  , bytestring
                   , filepath
                   , directory
                   , containers
                   , transformers
+                  , lens
                   , optparse-applicative >= 0.18
 
 Test-suite oka-flow-tests
