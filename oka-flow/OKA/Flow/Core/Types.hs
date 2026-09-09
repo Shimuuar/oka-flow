@@ -8,6 +8,8 @@ module OKA.Flow.Core.Types
   , APhony
     -- * Store path
   , Hash(..)
+  , hashFromString
+  , hashFromText
   , StorePath(..)
   , storePath
     -- * Flow parameters
@@ -62,6 +64,17 @@ newtype Hash = Hash ByteString
 instance Show Hash where
   show (Hash hash) = show $ BC8.unpack $ Base16.encode hash
 
+hashFromString :: FilePath -> Maybe Hash
+hashFromString = hashFromText . T.pack
+
+hashFromText :: T.Text -> Maybe Hash
+hashFromText b16
+  | Right hash <- Base16.decode (T.encodeUtf8 b16)
+  , BC8.length hash == 20
+  = Just (Hash hash)
+  | otherwise
+  = Nothing
+
 -- | Path in nix-like storage.
 data StorePath = StorePath
   { name :: String
@@ -84,10 +97,9 @@ instance JSON.ToJSON Hash where
   toJSON (Hash hash) = JSON.toJSON $ BC8.unpack $ Base16.encode hash
 instance JSON.FromJSON Hash where
   parseJSON = JSON.withText "Hash" $ \hash_b16 ->
-    case Base16.decode (T.encodeUtf8 hash_b16) of
-      Right hash | BC8.length hash == 20
-        -> pure $ Hash hash
-      _ -> fail "Hash: invalid hash"
+    case hashFromText hash_b16 of
+      Just hash -> pure hash
+      Nothing   -> fail "Hash: invalid hash"
 
 
 -- | Compute file name of directory in nix-like store.
