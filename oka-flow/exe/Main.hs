@@ -4,17 +4,15 @@
 module Main (main) where
 
 import Control.Monad
-import Control.Lens
+import Control.Lens         hiding (argument,set)
 import Control.Exception
 import Control.Monad.IO.Class
--- import Control.Monad.Trans.Writer.CPS
 import Effectful
 import Effectful.Writer.Static.Local
 import Data.Aeson           qualified as JSON
 import Data.ByteString.Lazy qualified as BL
-import Data.Traversable
-import Data.Maybe       (mapMaybe)
 import Data.Monoid      (Ap(..))
+import Data.List        (isSuffixOf)
 import Data.Foldable
 import Data.Map.Strict  qualified as Map
 import Data.Map.Strict  (Map)
@@ -22,10 +20,12 @@ import Data.Set         qualified as Set
 import Options.Applicative
 import System.Directory
 import System.FilePath
-import System.IO
+import System.Exit
 
 import OKA.Flow.Core.Types
 import OKA.Flow.Core.S
+
+
 
 main :: IO ()
 main
@@ -49,13 +49,31 @@ parser = do
                     <> value   ".")
   act <- subparser $ mconcat
     [ cmd "fsck"    (pure cmdFsck) "Perform consistency check for a store"
-    -- , cmd "closure" cmdClosure     "Compute closure of store path"
-    -- , cmd "revdep"  cmdRevdeps     "Compute all dependencies of a path"
+    , cmd "closure" parserClosure  "Compute closure of store path (all dependencies)"
+    , cmd "revdeps" parserRevdeps  "Compute outputs that depend on given one"
     -- , cmd "prune"   cmdPrune       "Remove all paths with given prefix and all paths that depend on them"
     ]
   pure $ act store
   where
     cmd name fun hlp = command name ((helper <*> fun) `info` header hlp)
+
+
+parserClosure :: Parser (FilePath -> IO ())
+parserClosure = do
+  path <- argument (maybeReader parseStorePath) (help "Store path" <> metavar "DIR")
+  pure $ \store -> cmdClosure store path
+
+parserRevdeps :: Parser (FilePath -> IO ())
+parserRevdeps = do
+  path <- argument (maybeReader parseStorePath) (help "Store path" <> metavar "DIR")
+  pure $ \store -> cmdRevdeps store path
+
+
+parseStorePath :: String -> Maybe StorePath
+parseStorePath path = do
+  (nm,'/':hash_b16) <- Just $ span (/='/') path
+  hash <- hashFromString $ filter (/='/') hash_b16
+  Just $ StorePath nm hash
 
 
 ----------------------------------------------------------------
@@ -89,28 +107,36 @@ cmdFsck store = do
   traverse_ checkDependency paths_info
 
 
--- -- | Compute closure (all dependencies)
--- cmdClosure :: Parser (FilePath -> IO ())
--- cmdClosure = do
---   path <- argument (maybeReader pathToPath) (help "Store path" <> metavar "DIR")
---   pure $ \store -> do
---     (paths0, err) <- runWriterT $ readStoreEntries store
---     paths1 <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
---     for_ err (hPutStrLn stderr . pprError)
---     case paths1 of
---       Left  e     -> error $ show e
---       Right paths -> forM_ (computeClosure paths path) (putStrLn . pprPath)
+-- | Compute closure (all dependencies)
+cmdClosure :: FilePath -> StorePath -> IO ()
+cmdClosure store path = do
+  (paths_info, err) <- runEff $ runWriter @[Error] $ do
+    paths <- readStoreEntries store
+    Map.traverseWithKey (\p () -> readDependency store p) paths
+  case err of
+    [] -> pure ()
+    _  -> putStrLn "Corrupted store" >> exitFailure
+  --
+  let dep_graph = fmap (\p -> (p.deps ^.. _Just . traverse)
+                           ++ (p.ext  ^.. _Just . traverse . _1)
+                ) paths_info
+      closure = computeClosure dep_graph path
+  forM_ closure (putStrLn . storePath)
 
--- cmdRevdeps :: Parser (FilePath -> IO ())
--- cmdRevdeps = do
---   path <- argument (maybeReader pathToPath) (help "Store path" <> metavar "DIR")
---   pure $ \store -> do
---     (paths0, err) <- runWriterT $ readStoreEntries store
---     paths1 <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
---     for_ err (hPutStrLn stderr . pprError)
---     case paths1 of
---       Left  e     -> error $ show e
---       Right paths -> forM_ (computeClosure (invertMap paths) path) (putStrLn . pprPath)
+cmdRevdeps :: FilePath -> StorePath -> IO ()
+cmdRevdeps store path = do
+  (paths_info, err) <- runEff $ runWriter @[Error] $ do
+    paths <- readStoreEntries store
+    Map.traverseWithKey (\p () -> readDependency store p) paths
+  case err of
+    [] -> pure ()
+    _  -> putStrLn "Corrupted store" >> exitFailure
+  --
+  let dep_graph = fmap (\p -> (p.deps ^.. _Just . traverse)
+                           ++ (p.ext  ^.. _Just . traverse . _1)
+                ) paths_info
+      closure = computeClosure (invertMap dep_graph) path
+  forM_ closure (putStrLn . storePath)
 
 -- cmdPrune :: Parser (FilePath -> IO ())
 -- cmdPrune = do
@@ -125,7 +151,7 @@ cmdFsck store = do
 --       Left  e -> error $ show e
 --       Right p -> pure p
 --     -- Compute reverse closure
---     hashes <- listDirectory (store </> name) 
+--     hashes <- listDirectory (store </> name)
 --     let paths   = Path name <$> hashes
 --         revdeps = foldl' (addToClosure (invertMap pathset)) mempty paths
 --     --
@@ -136,26 +162,7 @@ cmdFsck store = do
 --       putStrLn $ prefix ++ pprPath p
 --       when yes $ do
 --         removeDirectoryRecursive (store </> nm </> h)
-        
 
-
--- computeClosure :: (Ord a) => Map a [a] -> a -> Set.Set a
--- computeClosure set = addToClosure set mempty 
-
--- addToClosure :: (Ord a) => Map a [a] -> Set.Set a -> a -> Set.Set a
--- addToClosure set = go where
---   go acc a
---     | a `Set.member` acc = acc
---     | otherwise          = case a `Map.lookup` set of
---         Nothing -> acc'
---         Just as -> foldl' go acc' as
---     where acc' = Set.insert a acc
-
--- invertMap :: Ord a => Map a [a] -> Map a [a]
--- invertMap m = Map.fromListWith (<>) [ (b,[a]) | (a,bs) <- Map.toList m
---                                               , b      <- bs
---                                               ]
-  
 
 
 
@@ -163,11 +170,11 @@ cmdFsck store = do
 -- Implementation
 ----------------------------------------------------------------
 
--- | Errors in store 
+-- | Errors in store
 data Error
   = FileInStore FilePath  -- ^ Store contains file where directory is expected
   | MissingDeps StorePath -- ^ No list of dependencies
-  | BadExtMeta  StorePath -- ^ Unreadable external metadata
+  | BadExtMeta  StorePath (Maybe String) -- ^ Unreadable external metadata
   | MissingMeta StorePath -- ^ No Metadata
   | BadDeps     StorePath -- ^ Cannot parse dependencies
   | BadMeta     StorePath -- ^ Cannot parse metadata
@@ -178,7 +185,7 @@ pprError :: Error -> String
 pprError = \case
   FileInStore path -> "File where directory expected: " ++ path
   MissingDeps path -> "Missing deps.json in:     " <> storePath path
-  BadExtMeta  path -> "Bad external metadata in: " <> storePath path
+  BadExtMeta  p e  -> "Bad external metadata in: " <> storePath p <> maybe "" (": "++) e
   MissingMeta path -> "Missing meta.json in:     " <> storePath path
   BadDeps     path -> "Cannot parse deps.txt in: " <> storePath path
   BadMeta     path -> "Cannot parse meta.json in:" <> storePath path
@@ -199,7 +206,8 @@ readStoreEntries
 readStoreEntries store = do
   flows <- listOnlyDirs ""
   flip foldMapM flows $ \flow -> do
-    hashes <- listOnlyDirs flow
+    hashes0 <- listOnlyDirs flow
+    let hashes = filter (not . isSuffixOf "-build") hashes0
     flip foldMapM hashes $ \hash_b16 -> do
       case hashFromString hash_b16 of
         Just hash -> pure $ Map.singleton (StorePath flow hash) ()
@@ -214,7 +222,7 @@ readStoreEntries store = do
           True  -> pure True
 
 
--- | Read information about flow output. 
+-- | Read information about flow output.
 readDependency
   :: (Writer [Error] :> eff, IOE :> eff)
   => FilePath -> StorePath -> Eff eff PathInfo
@@ -226,21 +234,43 @@ readDependency store path = do
       Right x -> pure $ Just x
   ext <- liftIO (doesFileExist path_ext) >>= \case
     False -> pure $ Just []
-    True  -> liftIO (try (BL.readFile path_dep)) >>= \case
-      Left  (_::IOException) -> Nothing <$ tell [BadExtMeta path]
+    True  -> liftIO (try (BL.readFile path_ext)) >>= \case
+      Left  (_::IOException) -> Nothing <$ tell [BadExtMeta path Nothing]
       Right json -> case JSON.eitherDecode json of
-        Left  _ -> Nothing <$ tell [BadExtMeta path]
+        Left  e -> Nothing <$ tell [BadExtMeta path (Just e)]
         Right x -> pure $ Just x
+  liftIO (doesFileExist path_meta) >>= \case
+    True  -> pure ()
+    False -> tell [MissingMeta path]
   pure PathInfo{..}
   where
     path_flow = store </> storePath path
     path_dep  = path_flow </> "deps.json"
+    path_meta = path_flow </> "meta.json"
     path_ext  = path_flow </> "ext_meta.json"
 
 
 ----------------------------------------------------------------
 -- Utils
 ----------------------------------------------------------------
+
+computeClosure :: (Ord a) => Map a [a] -> a -> Set.Set a
+computeClosure set = addToClosure set mempty
+
+addToClosure :: (Ord a) => Map a [a] -> Set.Set a -> a -> Set.Set a
+addToClosure set = go where
+  go acc a
+    | a `Set.member` acc = acc
+    | otherwise          = case a `Map.lookup` set of
+        Nothing -> acc'
+        Just as -> foldl' go acc' as
+    where acc' = Set.insert a acc
+
+invertMap :: Ord a => Map a [a] -> Map a [a]
+invertMap m = Map.fromListWith (<>) [ (b,[a]) | (a,bs) <- Map.toList m
+                                              , b      <- bs
+                                              ]
+
 
 memptyErr
   :: (Writer [Error] :> eff, Monoid m)
