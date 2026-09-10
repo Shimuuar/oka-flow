@@ -175,6 +175,11 @@ pprError = \case
   BadHash     p h  -> "Cannot parse hash in:     " <> (p </> h)
 
 
+data PathInfo = PathInfo
+  { deps :: S StorePath
+  , ext  :: [(StorePath,[JSON.Key])]
+  }
+
 
 -- | Get list of all entries in a store
 readStoreEntries :: FilePath -> WriterT [Error] IO (Map StorePath ())
