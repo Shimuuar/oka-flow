@@ -88,12 +88,13 @@ executable oka-flow
                   , oka-flow
                   , aeson
                   , bytestring
-                  , filepath
-                  , directory
                   , containers
-                  , transformers
+                  , directory
+                  , effectful-core
+                  , filepath
                   , lens
                   , optparse-applicative >= 0.18
+                  , transformers
 
 Test-suite oka-flow-tests
   import:           extensions

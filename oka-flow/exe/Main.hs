@@ -1,4 +1,5 @@
-{-# LANGUAGE ApplicativeDo #-}
+{-# LANGUAGE ApplicativeDo   #-}
+{-# LANGUAGE RecordWildCards #-}
 -- |
 module Main (main) where
 
@@ -6,7 +7,9 @@ import Control.Monad
 import Control.Lens
 import Control.Exception
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Writer.CPS
+-- import Control.Monad.Trans.Writer.CPS
+import Effectful
+import Effectful.Writer.Static.Local
 import Data.Aeson           qualified as JSON
 import Data.ByteString.Lazy qualified as BL
 import Data.Traversable
@@ -63,23 +66,28 @@ parser = do
 cmdFsck :: FilePath -> IO ()
 cmdFsck store = do
   -- Read all store paths
-  (paths,err) <- runWriterT $ readStoreEntries store
-  paths_dep   <- Map.traverseWithKey (\p _ -> readDependency store p) paths
+  (paths_info,err) <- runEff $ runWriter @[Error] $ do
+    paths <- readStoreEntries store
+    Map.traverseWithKey (\p () -> readDependency store p) paths
   -- Print found errors
-  traverseOf_  each          (putStrLn . pprError) err
-  traverseOf_ (each . _Left) (putStrLn . pprError) paths_dep
-  -- Check that dependency exists
-  let depExists p = case p `Map.lookup` paths_dep of
-        Nothing -> Just $ "Missing dependency: " ++ storePath p
+  traverse_ (putStrLn . pprError) err
+  -- Check that dependencies exists
+  let missingDependency p = case p `Map.lookup` paths_info of
+        Nothing -> Just $ storePath p
         Just _  -> Nothing
-  forM_ (Map.toList paths_dep) $ \case
-    (_, Left _)     -> pure ()
-    (p, Right deps) -> case mapMaybe depExists $ toList deps of
-      []  -> pure ()
-      bad -> do
-        putStrLn $ "Bad dependencies for " ++ storePath p
-        for_ bad $ \e -> putStrLn ("  - " ++ e)
-  return ()
+      checkDependency PathInfo{..} = do
+        case deps ^.. _Just . traverse @S . to missingDependency . _Just of
+          [] -> pure ()
+          bad -> do
+            putStrLn $ "Missing dependencies for " ++ storePath path
+            for_ bad $ \e -> putStrLn ("  - " ++ e)
+        case ext ^.. _Just . traverse @[] . _1 . to missingDependency . _Just of
+          [] -> pure ()
+          bad -> do
+            putStrLn $ "Missing external metadata for " ++ storePath path
+            for_ bad $ \e -> putStrLn ("  - " ++ e)
+  traverse_ checkDependency paths_info
+
 
 -- -- | Compute closure (all dependencies)
 -- cmdClosure :: Parser (FilePath -> IO ())
@@ -159,6 +167,7 @@ cmdFsck store = do
 data Error
   = FileInStore FilePath  -- ^ Store contains file where directory is expected
   | MissingDeps StorePath -- ^ No list of dependencies
+  | BadExtMeta  StorePath -- ^ Unreadable external metadata
   | MissingMeta StorePath -- ^ No Metadata
   | BadDeps     StorePath -- ^ Cannot parse dependencies
   | BadMeta     StorePath -- ^ Cannot parse metadata
@@ -169,6 +178,7 @@ pprError :: Error -> String
 pprError = \case
   FileInStore path -> "File where directory expected: " ++ path
   MissingDeps path -> "Missing deps.json in:     " <> storePath path
+  BadExtMeta  path -> "Bad external metadata in: " <> storePath path
   MissingMeta path -> "Missing meta.json in:     " <> storePath path
   BadDeps     path -> "Cannot parse deps.txt in: " <> storePath path
   BadMeta     path -> "Cannot parse meta.json in:" <> storePath path
@@ -176,13 +186,16 @@ pprError = \case
 
 
 data PathInfo = PathInfo
-  { deps :: S StorePath
-  , ext  :: [(StorePath,[JSON.Key])]
+  { path :: !StorePath
+  , deps :: !(Maybe (S StorePath))
+  , ext  :: !(Maybe ([(StorePath,[JSON.Key])]))
   }
 
 
 -- | Get list of all entries in a store
-readStoreEntries :: FilePath -> WriterT [Error] IO (Map StorePath ())
+readStoreEntries
+  :: (Writer [Error] :> eff, IOE :> eff)
+  => FilePath -> Eff eff (Map StorePath ())
 readStoreEntries store = do
   flows <- listOnlyDirs ""
   flip foldMapM flows $ \flow -> do
@@ -190,7 +203,7 @@ readStoreEntries store = do
     flip foldMapM hashes $ \hash_b16 -> do
       case hashFromString hash_b16 of
         Just hash -> pure $ Map.singleton (StorePath flow hash) ()
-        Nothing   -> mempty <$ tell [BadHash flow hash_b16]
+        Nothing   -> memptyErr $ BadHash flow hash_b16
   where
     listOnlyDirs path
       = filterM check =<< liftIO (listDirectory root )
@@ -200,17 +213,39 @@ readStoreEntries store = do
           False -> False <$ tell [FileInStore dir]
           True  -> pure True
 
--- | Read list of dependencies 
-readDependency :: FilePath -> StorePath -> IO (Either Error (S StorePath))
+
+-- | Read information about flow output. 
+readDependency
+  :: (Writer [Error] :> eff, IOE :> eff)
+  => FilePath -> StorePath -> Eff eff PathInfo
 readDependency store path = do
-  try (BL.readFile (store </> storePath path </> "deps.json")) >>= \case
-    Left  (_ :: IOException) -> pure $ Left $ MissingDeps path
-    Right deps -> case JSON.eitherDecode deps of
-      Left  _ -> pure $ Left $ BadDeps path
-      Right x -> pure $ Right x
+  deps <- liftIO (try (BL.readFile path_dep)) >>= \case
+    Left  (_ :: IOException) -> Nothing <$ tell [MissingDeps path]
+    Right json -> case JSON.eitherDecode json of
+      Left  _ -> Nothing <$ tell [BadDeps path]
+      Right x -> pure $ Just x
+  ext <- liftIO (doesFileExist path_ext) >>= \case
+    False -> pure $ Just []
+    True  -> liftIO (try (BL.readFile path_dep)) >>= \case
+      Left  (_::IOException) -> Nothing <$ tell [BadExtMeta path]
+      Right json -> case JSON.eitherDecode json of
+        Left  _ -> Nothing <$ tell [BadExtMeta path]
+        Right x -> pure $ Just x
+  pure PathInfo{..}
+  where
+    path_flow = store </> storePath path
+    path_dep  = path_flow </> "deps.json"
+    path_ext  = path_flow </> "ext_meta.json"
 
 
+----------------------------------------------------------------
+-- Utils
+----------------------------------------------------------------
 
+memptyErr
+  :: (Writer [Error] :> eff, Monoid m)
+  => Error -> Eff eff m
+memptyErr err = mempty <$ tell [err]
 
 foldMapM :: (Foldable t, Monoid m, Applicative f) => (a -> f m) -> t a -> f m
 foldMapM f = getAp . foldMap (Ap . f)
