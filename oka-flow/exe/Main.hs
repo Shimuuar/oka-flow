@@ -180,9 +180,9 @@ pprError = \case
 readStoreEntries :: FilePath -> WriterT [Error] IO (Map StorePath ())
 readStoreEntries store = do
   flows <- listOnlyDirs ""
-  getAp $ flip foldMap flows $ \flow -> Ap $ do
+  flip foldMapM flows $ \flow -> do
     hashes <- listOnlyDirs flow
-    getAp $ flip foldMap hashes $ \hash_b16 -> Ap $ do
+    flip foldMapM hashes $ \hash_b16 -> do
       case hashFromString hash_b16 of
         Just hash -> pure $ Map.singleton (StorePath flow hash) ()
         Nothing   -> mempty <$ tell [BadHash flow hash_b16]
@@ -197,9 +197,15 @@ readStoreEntries store = do
 
 -- | Read list of dependencies 
 readDependency :: FilePath -> StorePath -> IO (Either Error (S StorePath))
-readDependency store path@(StorePath nm hash) = do
+readDependency store path = do
   try (BL.readFile (store </> storePath path </> "deps.json")) >>= \case
     Left  (_ :: IOException) -> pure $ Left $ MissingDeps path
     Right deps -> case JSON.eitherDecode deps of
       Left  _ -> pure $ Left $ BadDeps path
       Right x -> pure $ Right x
+
+
+
+
+foldMapM :: (Foldable t, Monoid m, Applicative f) => (a -> f m) -> t a -> f m
+foldMapM f = getAp . foldMap (Ap . f)
