@@ -1,5 +1,6 @@
-{-# LANGUAGE ApplicativeDo   #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ApplicativeDo    #-}
+{-# LANGUAGE NoFieldSelectors #-}
+{-# LANGUAGE RecordWildCards  #-}
 -- |
 module Main (main) where
 
@@ -84,27 +85,37 @@ parseStorePath path = do
 cmdFsck :: FilePath -> IO ()
 cmdFsck store = do
   -- Read all store paths
-  (paths_info,err) <- runEff $ runWriter @[Error] $ do
+  (paths_info, err) <- runEff $ runWriter @[Error] $ do
     paths <- readStoreEntries store
     Map.traverseWithKey (\p () -> readDependency store p) paths
   -- Print found errors
   traverse_ (putStrLn . pprError) err
-  -- Check that dependencies exists
+  -- Cbeck for error
   let missingDependency p = case p `Map.lookup` paths_info of
-        Nothing -> Just $ storePath p
+        Nothing -> Just p
         Just _  -> Nothing
-      checkDependency PathInfo{..} = do
-        case deps ^.. _Just . traverse @S . to missingDependency . _Just of
-          [] -> pure ()
-          bad -> do
-            putStrLn $ "Missing dependencies for " ++ storePath path
-            for_ bad $ \e -> putStrLn ("  - " ++ e)
-        case ext ^.. _Just . traverse @[] . _1 . to missingDependency . _Just of
-          [] -> pure ()
-          bad -> do
-            putStrLn $ "Missing external metadata for " ++ storePath path
-            for_ bad $ \e -> putStrLn ("  - " ++ e)
-  traverse_ checkDependency paths_info
+      check :: PathInfo -> [CheckFailure]
+      check p = (p.deps ^.. _Just . traverse @S . to missingDependency . _Just . to MissingDependency)
+             ++ (p.ext  ^.. _Just . traverse @[] . _1 . to missingDependency . _Just . to MissingExtMeta)
+  let paths_info_checked = fmap check paths_info
+  -- Find bad transitive dependencies
+  let dep_graph    = fmap (\p -> (p.deps ^.. _Just . traverse)
+                              ++ (p.ext  ^.. _Just . traverse . _1)
+                   ) paths_info
+  let failed_check = Map.keysSet
+                   $ Map.filter (not . null) paths_info_checked
+      closure      = computeClosureSet (invertMap dep_graph) failed_check
+                     `Set.difference`
+                     failed_check
+  let bad = Map.unionWith (<>)
+            (Map.fromSet (\_ -> [BadDependency]) closure)
+            (paths_info_checked)
+  -- Report
+  forM_ (Map.toList bad) $ \case
+    (_, []  ) -> pure ()
+    (p, errs) -> do
+      putStrLn $ "Check failure: " ++ storePath p
+      forM_ errs $ \e -> putStrLn $ "  - " ++ pprCheckFailure e
 
 
 -- | Compute closure (all dependencies)
@@ -138,30 +149,7 @@ cmdRevdeps store path = do
       closure = computeClosure (invertMap dep_graph) path
   forM_ closure (putStrLn . storePath)
 
--- cmdPrune :: Parser (FilePath -> IO ())
--- cmdPrune = do
---   name <- strArgument (metavar "DIR" <> help "Path prefix to remove")
---   yes  <- switch (short 'y' <> help "Really delete store paths")
---   pure $ \store -> do
---     when ('/' `elem` name) $ error "Only single path is OK"
---     -- Load paths
---     (paths0,_) <- runWriterT $ readStoreEntries store
---     paths1     <- fmap sequence $ Map.traverseWithKey (\p _ -> readDependency store p) paths0
---     pathset <- case paths1 of
---       Left  e -> error $ show e
---       Right p -> pure p
---     -- Compute reverse closure
---     hashes <- listDirectory (store </> name)
---     let paths   = Path name <$> hashes
---         revdeps = foldl' (addToClosure (invertMap pathset)) mempty paths
---     --
---     let prefix = case yes of
---           True  -> "Deleting: "
---           False -> "Dry-run: "
---     forM_ revdeps $ \p@(Path nm h) -> do
---       putStrLn $ prefix ++ pprPath p
---       when yes $ do
---         removeDirectoryRecursive (store </> nm </> h)
+
 
 
 
@@ -172,14 +160,20 @@ cmdRevdeps store path = do
 
 -- | Errors in store
 data Error
-  = FileInStore FilePath  -- ^ Store contains file where directory is expected
-  | MissingDeps StorePath -- ^ No list of dependencies
-  | BadExtMeta  StorePath (Maybe String) -- ^ Unreadable external metadata
-  | MissingMeta StorePath -- ^ No Metadata
-  | BadDeps     StorePath -- ^ Cannot parse dependencies
-  | BadMeta     StorePath -- ^ Cannot parse metadata
-  | BadHash     FilePath FilePath
+  = FileInStore !FilePath                  -- ^ Store contains file where directory is expected
+  | MissingDeps !StorePath                 -- ^ No list of dependencies
+  | BadExtMeta  !StorePath !(Maybe String) -- ^ Unreadable external metadata
+  | MissingMeta !StorePath                 -- ^ No Metadata
+  | BadDeps     !StorePath                 -- ^ Cannot parse dependencies
+  | BadMeta     !StorePath                 -- ^ Cannot parse metadata
+  | BadHash     !FilePath !FilePath
   deriving Show
+
+-- | Failures for otherwise well formed store outputs
+data CheckFailure
+  = MissingDependency !StorePath -- ^ Dependency is not in a store
+  | MissingExtMeta    !StorePath -- ^ Linked external metadata is not present
+  | BadDependency                -- ^ Transitively depends on broken output
 
 pprError :: Error -> String
 pprError = \case
@@ -190,6 +184,12 @@ pprError = \case
   BadDeps     path -> "Cannot parse deps.txt in: " <> storePath path
   BadMeta     path -> "Cannot parse meta.json in:" <> storePath path
   BadHash     p h  -> "Cannot parse hash in:     " <> (p </> h)
+
+pprCheckFailure :: CheckFailure -> String
+pprCheckFailure = \case
+  MissingDependency p -> "Missing dependency: " ++ storePath p
+  MissingExtMeta    p -> "Missing external metadata: " ++ storePath p
+  BadDependency       -> "Depends on broken output"
 
 
 data PathInfo = PathInfo
@@ -256,6 +256,9 @@ readDependency store path = do
 
 computeClosure :: (Ord a) => Map a [a] -> a -> Set.Set a
 computeClosure set = addToClosure set mempty
+
+computeClosureSet :: (Foldable t, Ord a) => Map a [a] -> t a -> Set.Set a
+computeClosureSet set = foldl' (addToClosure set) mempty
 
 addToClosure :: (Ord a) => Map a [a] -> Set.Set a -> a -> Set.Set a
 addToClosure set = go where
