@@ -49,7 +49,7 @@ parser = do
                     <> help    "path to store (default .)"
                     <> value   ".")
   act <- subparser $ mconcat
-    [ cmd "fsck"    (pure cmdFsck) "Perform consistency check for a store"
+    [ cmd "fsck"    parserFsck     "Perform consistency check for a store"
     , cmd "closure" parserClosure  "Compute closure of store path (all dependencies)"
     , cmd "revdeps" parserRevdeps  "Compute outputs that depend on given one"
     -- , cmd "prune"   cmdPrune       "Remove all paths with given prefix and all paths that depend on them"
@@ -69,6 +69,11 @@ parserRevdeps = do
   path <- argument (maybeReader parseStorePath) (help "Store path" <> metavar "DIR")
   pure $ \store -> cmdRevdeps store path
 
+parserFsck :: Parser (FilePath -> IO ())
+parserFsck = do
+  shrt  <- switch (long "short" <> help "Write only store path that failed checks")
+  prune <- switch (long "prune" <> help "Remove offending paths from storage")
+  pure $ \store -> cmdFsck shrt prune store
 
 parseStorePath :: String -> Maybe StorePath
 parseStorePath path = do
@@ -82,8 +87,8 @@ parseStorePath path = do
 ----------------------------------------------------------------
 
 -- | Check store
-cmdFsck :: FilePath -> IO ()
-cmdFsck store = do
+cmdFsck :: Bool -> Bool -> FilePath -> IO ()
+cmdFsck shrt prune store = do
   -- Read all store paths
   (paths_info, err) <- runEff $ runWriter @[Error] $ do
     paths <- readStoreEntries store
@@ -97,13 +102,14 @@ cmdFsck store = do
       check :: PathInfo -> [CheckFailure]
       check p = (p.deps ^.. _Just . traverse @S . to missingDependency . _Just . to MissingDependency)
              ++ (p.ext  ^.. _Just . traverse @[] . _1 . to missingDependency . _Just . to MissingExtMeta)
-  let paths_info_checked = fmap check paths_info
+  let paths_info_checked
+        = Map.filter (not . null)
+        $ fmap check paths_info
   -- Find bad transitive dependencies
   let dep_graph    = fmap (\p -> (p.deps ^.. _Just . traverse)
                               ++ (p.ext  ^.. _Just . traverse . _1)
                    ) paths_info
-  let failed_check = Map.keysSet
-                   $ Map.filter (not . null) paths_info_checked
+  let failed_check = Map.keysSet paths_info_checked
       closure      = computeClosureSet (invertMap dep_graph) failed_check
                      `Set.difference`
                      failed_check
@@ -113,9 +119,18 @@ cmdFsck store = do
   -- Report
   forM_ (Map.toList bad) $ \case
     (_, []  ) -> pure ()
-    (p, errs) -> do
-      putStrLn $ "Check failure: " ++ storePath p
-      forM_ errs $ \e -> putStrLn $ "  - " ++ pprCheckFailure e
+    (p, errs) -> case shrt of
+      True  -> putStrLn $ storePath p
+      False -> do
+        putStrLn $ "Check failure: " ++ storePath p
+        forM_ errs $ \e -> putStrLn $ "  - " ++ pprCheckFailure e
+  when (prune && not (null bad)) $ do
+    putStrLn $ "=== WILL DELETE PATHS ABOVE (y/n) ==="
+    responce <- getLine
+    when (responce == "y" || responce == "yes") $ do
+      forM_ (Map.keys bad) $ \p -> do
+        removeDirectoryRecursive $ store </> storePath p
+        putStrLn $ "Removed " ++ storePath p
 
 
 -- | Compute closure (all dependencies)
