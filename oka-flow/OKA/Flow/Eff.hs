@@ -29,6 +29,7 @@ module OKA.Flow.Eff
     -- * PRNG
   , PrngE
   , PRNG(..)
+  , setPrngState
   , runPrngE
   ) where
 
@@ -215,6 +216,9 @@ runPrngE
   -> Eff (PrngE : es) a
   -> Eff es a
 runPrngE g = evalStaticRep (PrngE g)
+
+setPrngState :: (PrngE :> eff) => StdGen -> Flow eff ()
+setPrngState g = Flow $ stateStaticRep $ \_ -> ((), PrngE g)
 
 instance (PrngE :> eff) => StatefulGen PRNG (Flow eff) where
   uniformWord32    _ = Flow $ stateStaticRep @PrngE $ coerce (genWord32  @StdGen)
