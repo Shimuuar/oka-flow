@@ -70,7 +70,7 @@ newtype Executable = Executable
 
 -- | Action to be execute by dataflow either normal or phony.
 data Action
-  = ActionIO  (ResourceSet -> ParamFlow FilePath -> IO ())
+  = ActionIO  (ParamFlow FilePath -> IO ())
     -- ^ Some haskell function 
   | ActionExe Executable
     -- ^ Run executable

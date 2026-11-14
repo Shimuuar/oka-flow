@@ -249,7 +249,7 @@ liftHaskellFun
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , flow = ActionIO $ \_ p -> do
+  , flow = ActionIO $ \p -> do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
@@ -275,7 +275,7 @@ liftHaskellFun_
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , flow = ActionIO $ \_ p -> do
+  , flow = ActionIO $ \p -> do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
@@ -321,7 +321,7 @@ liftHaskellPhonyFun
   => res                  -- ^ Resources required by workflow
   -> (meta -> a -> IO ()) -- ^ IO action
   -> (AsRes a -> Flow eff ())
-liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \_ p -> do
+liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \p -> do
   meta <- case p.meta ^? metadata of
     Just m  -> pure m
     Nothing -> error $ "loadFlowArguments: Cannot get metadata"
