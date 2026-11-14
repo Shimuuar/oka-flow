@@ -108,18 +108,17 @@ data ReportPDF
 
 -- | Run PDF viewer as phony workflow. Reader is picked from runtime
 --   configuration.
-runPdfReader :: (SequenceOf ReportPDF a, ProgConfigE :> eff, HasCallStack) => a -> Flow eff ()
-runPdfReader a = do 
+runPdfReader :: (ProgConfigE :> eff, HasCallStack) => [Result ReportPDF] -> Flow eff ()
+runPdfReader pdfs = do 
   pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
   liftPhonyExecutable ()
-    -- FIXME: We need way to generalize SequenceOf!
     (callViaArgList pdf $ \s -> [CmdArg $ p </> "report.pdf" | Just args <- [sequenceS s]
                                                              , p         <- args
                                                              ])
-    (sequenceOf @ReportPDF a)
+    pdfs
 
 -- | Concatenate PDFs using @pdftk@ program
-stdConcatPDF :: (SequenceOf ReportPDF a, HasCallStack) => a -> Flow eff (Result ReportPDF)
+stdConcatPDF :: (HasCallStack) => [Result ReportPDF] -> Flow eff (Result ReportPDF)
 stdConcatPDF reports = restrictMeta @() $ do
   liftExecutable "std.pdftk.concat" ()
     (callViaArgList "pdftk" $ \s ->
@@ -128,7 +127,7 @@ stdConcatPDF reports = restrictMeta @() $ do
                                    ] ++
         ["cat", "output", "report.pdf"]
     )
-    (sequenceOf @ReportPDF reports)
+    (reports)
 
 
 

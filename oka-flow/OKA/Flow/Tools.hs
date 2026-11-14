@@ -18,8 +18,6 @@ module OKA.Flow.Tools
     -- ** Deriving via
   , AsMetaEncoded(..)
   , AsFlowInput(..)
-    -- * Class for polymorphic parameters
-  , SequenceOf(..)
     -- * Lifting of haskell function
   , liftHaskellFun
   , liftHaskellFunMeta
@@ -126,63 +124,6 @@ class (ToS (AsRes a)) => FlowArgument a where
   -- |
   parameterShape :: (forall x. Result x) -> a -> AsRes a
 
-
-
-----------------------------------------------------------------
--- SequenceOf
-----------------------------------------------------------------
-
--- | Convenience type class for collecting list of results for passing
---   for flow which simply accept uniform lists of parameters
-class SequenceOf x a where
-  sequenceOf :: a -> [Result x]
-
-instance SequenceOf x (Result x) where
-  sequenceOf p = [p]
-deriving via Generically (a,b)
-    instance (SequenceOf x a, SequenceOf x b) => SequenceOf x (a,b)
-deriving via Generically (a,b,c)
-    instance (SequenceOf x a, SequenceOf x b, SequenceOf x c) => SequenceOf x (a,b,c)
-deriving via Generically (a,b,c,d)
-    instance (SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
-             ) => SequenceOf x (a,b,c,d)
-deriving via Generically (a,b,c,d,e)
-    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
-             , SequenceOf x e
-             ) => SequenceOf x (a,b,c,d,e)
-deriving via Generically (a,b,c,d,e,f)
-    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
-             , SequenceOf x e, SequenceOf x f
-             ) => SequenceOf x (a,b,c,d,e,f)
-deriving via Generically (a,b,c,d,e,f,g)
-    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
-             , SequenceOf x e, SequenceOf x f, SequenceOf x g
-             ) => SequenceOf x (a,b,c,d,e,f,g)
-deriving via Generically (a,b,c,d,e,f,g,h)
-    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
-             , SequenceOf x e, SequenceOf x f, SequenceOf x g, SequenceOf x h
-             ) => SequenceOf x (a,b,c,d,e,f,g,h)
-
-
-instance (SequenceOf x a) => SequenceOf x [a] where
-  sequenceOf = concatMap sequenceOf
-
--- | This instance could be used to derive SequenceOf instance
---   with @DerivingVia@
-instance (Generic a, GSequenceOf x (Rep a)) => SequenceOf x (Generically a) where
-  sequenceOf (Generically a) = gsequenceOf (from a)
-
-
-class GSequenceOf x f where
-  gsequenceOf :: f p -> [Result x]
-
-deriving newtype instance GSequenceOf x f => GSequenceOf x (M1 c i f)
-
-instance (GSequenceOf x f, GSequenceOf x g) => GSequenceOf x (f :*: g) where
-  gsequenceOf (f :*: g) = gsequenceOf f <> gsequenceOf g
-
-instance (SequenceOf x a) => GSequenceOf x (K1 i a) where
-  gsequenceOf = coerce (sequenceOf @x @a)
 
 
 ----------------------------------------------------------------
