@@ -20,11 +20,8 @@ module OKA.Flow.Tools
   , AsFlowInput(..)
     -- * Lifting of haskell function
   , liftHaskellFun
-  , liftHaskellFunMeta
   , liftHaskellFun_
-  , liftHaskellFunMeta_
   , liftHaskellPhonyFun
-  , liftHaskellPhonyFunMeta
     -- * Calling of external executables
   , liftExecutable
   , liftPhonyExecutable
@@ -56,7 +53,6 @@ module OKA.Flow.Tools
 import Control.Applicative
 import Control.Exception
 import Control.Lens                 ((<&>),(^?))
-import Data.Coerce
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
 import Data.ByteString              qualified as BS
@@ -70,7 +66,6 @@ import System.IO.Temp
 import System.IO                    (hClose,hPutStr)
 import System.Environment           (getArgs)
 
-import GHC.Generics hiding (S)
 import GHC.Stack
 
 import OKA.Metadata
@@ -267,25 +262,6 @@ liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
         Nothing  -> error "liftHaskellFun: output is required"
   }
 
--- | Same as 'liftHaskellFun' but passes noninterpreted metadata.
-liftHaskellFunMeta
-  :: (FlowArgument a, FlowOutput b, ResourceClaim res, HasCallStack)
-  => String                  -- ^ Name of flow
-  -> res                     -- ^ Resources required by workflow
-  -> (Metadata -> a -> IO b) -- ^ IO action
-  -> (AsRes a -> Flow eff (Result b))
-liftHaskellFunMeta name res action = basicLiftWorkflow res $ Dataflow
-  { name = name
-  , flow = ActionIO $ \_ p -> do
-      a <- case parseFlowArguments p.args of
-        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-        Right ioa -> ioa
-      b <- action p.meta a
-      case p.out of
-        Just out -> writeOutput out b
-        Nothing  -> error "liftHaskellFun: output is required"
-  }
-
 
 -- | Convert haskell function into dataflow. Arguments are loaded
 --   using type 'FlowArgument' type class and provided action takes
@@ -311,23 +287,6 @@ liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
         Nothing  -> error "liftHaskellFun: output is required"
   }
 
--- | Same as 'liftHaskellFun_' but passes noninterpreted metadata.
-liftHaskellFunMeta_
-  :: (FlowArgument a, ResourceClaim res, HasCallStack)
-  => String                               -- ^ Name of flow
-  -> res                                  -- ^ Resources required by workflow
-  -> (FilePath -> Metadata -> a -> IO ()) -- ^ IO action
-  -> (AsRes a -> Flow eff (Result b))
-liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Dataflow
-  { name = name
-  , flow = ActionIO $ \_ p -> do
-      a <- case parseFlowArguments p.args of
-        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-        Right ioa -> ioa
-      case p.out of
-        Just out -> action out p.meta a
-        Nothing  -> error "liftHaskellFun: output is required"
-  }
 
 
 ----------------------------------------------------------------
@@ -370,19 +329,6 @@ liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \_ p -> do
     Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
     Right ioa -> ioa
   action meta a
-
-
--- | Same as 'liftHaskellFun' but passes noninterpreted metadata.
-liftHaskellPhonyFunMeta
-  :: (FlowArgument a, ResourceClaim res, HasCallStack)
-  => res                      -- ^ Resources required by workflow
-  -> (Metadata -> a -> IO ()) -- ^ IO action
-  -> (AsRes a -> Flow eff ())
-liftHaskellPhonyFunMeta res action = basicLiftPhony res $ ActionIO $ \_ p -> do
-  a <- case parseFlowArguments p.args of
-    Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-    Right ioa -> ioa
-  action p.meta a
 
 
 -- | Standard calling conventions for external process.

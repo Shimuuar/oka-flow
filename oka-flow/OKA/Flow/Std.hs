@@ -8,7 +8,6 @@ module OKA.Flow.Std
   ( -- * Saved metadata
     SavedMeta(..)
   , stdSaveMeta
-  , stdSaveSomeMeta
   , narrowSavedMeta
     -- * Reports
   , ReportPDF
@@ -28,10 +27,9 @@ import Data.Maybe
 import Data.List                  (stripPrefix,isPrefixOf,isSuffixOf)
 import Data.Set                   qualified as Set
 import Data.ByteString.Lazy       qualified as BL
-import Data.Void
 import Effectful                  ((:>))
 import System.FilePath            ((</>), splitFileName,splitPath,joinPath)
-import System.Directory           (createFileLink,createDirectory,canonicalizePath,listDirectory)
+import System.Directory           (createDirectory,canonicalizePath,listDirectory)
 import System.Process.Typed
 import System.IO.Temp
 import GHC.Generics
@@ -75,14 +73,6 @@ stdSaveMeta meta = scopeMeta $ do
   put $ toMetadata meta
   liftHaskellFun "std.SavedMeta" ()
     (\(a::a) () -> pure $ SavedMeta a)
-    ()
-
--- | Save metadata value so it could be passed as parameter.
-stdSaveSomeMeta :: (HasCallStack) => Metadata -> Flow eff (Result (SavedMeta Metadata))
-stdSaveSomeMeta meta = scopeMeta $ do
-  put $ absurd <$> meta
-  liftHaskellFunMeta_ "std.SavedMeta" ()
-    (\out _ () -> createFileLink "meta.json" (out </> "saved.json"))
     ()
 
 -- | Convert one saved metadata to another which possibly uses less
