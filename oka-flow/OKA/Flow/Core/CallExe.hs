@@ -21,9 +21,6 @@ module OKA.Flow.Core.CallExe
   , callInEnvironment
   , callInEnvironmentF
   , callViaArgList
-    -- ** Conversion
-  , sexpToArgs
-  , sexpFromArgs
     -- * Spawning process
   , toTypedProcess
   , startSubprocessAndWait
@@ -37,7 +34,6 @@ import Control.Concurrent.STM
 import Data.Aeson             qualified as JSON
 import Data.ByteString        qualified as BS
 import Data.ByteString.Lazy   qualified as BL
-import Data.Monoid            (Endo(..))
 import Data.String
 import Data.Text              (Text)
 import Data.Text              qualified as T
@@ -57,7 +53,6 @@ import GHC.Stack
 
 import OKA.Flow.Core.Types    (ParamFlow(..))
 import OKA.Flow.Core.S
-import OKA.Flow.Internal.Parser
 import OKA.Metadata
 
 
@@ -288,34 +283,6 @@ callViaArgList exe fun p action = action $ ProcessData
   }
 
 
-----------------------------------------------------------------
--- Conversion
-----------------------------------------------------------------
-
-sexpToArgs :: S FilePath -> [FilePath]
-sexpToArgs Nil = []
-sexpToArgs s0  = ($ []) $ appEndo $ go s0 where
-  go = \case
-    Nil     -> cons "-"
-    Atom  a -> cons ('!':a)
-    Param p -> cons p
-    S xs    -> cons "(" <> foldMap go xs <> cons ")"
-  cons s = Endo (s:)
-
-sexpFromArgs :: [FilePath] -> Either String (S FilePath)
-sexpFromArgs [] = pure Nil
-sexpFromArgs xs = runListParser parserS xs where
-  parserS = consume >>= \case
-    ""    -> fail "Empty parameter encountered"
-    "("   -> S <$> parserL
-    "-"   -> pure Nil
-    '!':a -> pure $ Atom  a
-    p     -> pure $ Param p
-  parserL =  eol
-         <|> liftA2 (:) parserS parserL
-  eol     = consume >>= \case
-    ")" -> pure []
-    _   -> fail "Expecting )"
 
 ----------------------------------------------------------------
 -- Running executables

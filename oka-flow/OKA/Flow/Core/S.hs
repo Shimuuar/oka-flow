@@ -11,8 +11,12 @@ module OKA.Flow.Core.S
   , sequenceS
     -- * JSON serialization
   , sFromJSON
+    -- * CLI argument
+  , sexpToArgs
+  , sexpFromArgs
   ) where
 
+import Control.Applicative
 import Data.Aeson        qualified as JSON
 import Data.Aeson.Types  qualified as JSON
 import Data.Aeson        (FromJSON,Value(..),(.=))
@@ -22,6 +26,8 @@ import Data.Vector       qualified as V
 import Data.Text         qualified as T
 
 import OKA.Flow.Core.Result
+import OKA.Flow.Internal.Parser
+
 
 
 ----------------------------------------------------------------
@@ -124,3 +130,33 @@ sFromJSON :: FromJSON a => Value -> Either String (S a)
 sFromJSON js = case JSON.parse JSON.parseJSON js of
   JSON.Success a -> Right a
   JSON.Error   e -> Left  e
+
+
+----------------------------------------------------------------
+-- CLI arguments
+----------------------------------------------------------------
+
+sexpToArgs :: S FilePath -> [FilePath]
+sexpToArgs Nil = []
+sexpToArgs s0  = ($ []) $ appEndo $ go s0 where
+  go = \case
+    Nil     -> cons "-"
+    Atom  a -> cons ('!':a)
+    Param p -> cons p
+    S xs    -> cons "(" <> foldMap go xs <> cons ")"
+  cons s = Endo (s:)
+
+sexpFromArgs :: [FilePath] -> Either String (S FilePath)
+sexpFromArgs [] = pure Nil
+sexpFromArgs xs = runListParser parserS xs where
+  parserS = consume >>= \case
+    ""    -> fail "Empty parameter encountered"
+    "("   -> S <$> parserL
+    "-"   -> pure Nil
+    '!':a -> pure $ Atom  a
+    p     -> pure $ Param p
+  parserL =  eol
+         <|> liftA2 (:) parserS parserL
+  eol     = consume >>= \case
+    ")" -> pure []
+    _   -> fail "Expecting )"

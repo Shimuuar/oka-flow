@@ -14,7 +14,6 @@ import Test.Tasty.QuickCheck
 
 import OKA.Flow.Core.S
 import OKA.Flow.Core.Types
-import OKA.Flow.Core.CallExe
 
 
 tests :: TestTree
