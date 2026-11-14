@@ -19,7 +19,6 @@ module OKA.Flow.Core.CallExe
     -- * Standard calling conventions
   , callStandardExe
   , callInEnvironment
-  , callInEnvironmentF
   , callViaArgList
     -- * Spawning process
   , toTypedProcess
@@ -179,45 +178,6 @@ callStandardExe exe p action = action ProcessData
   }
 
 
-
--- | Pass arguments in the environment.
---
--- * Metadata is written in temporary file. It's stored in
---   @OKA_META@ environment variable.
---
--- * Arguments are passed in the same way as in 'callStandardExe' but
---   in environment variables @OKA_ARG_1@, @OKA_ARG_2@, etc.
---
--- * Working directory is set to output directory. Additionally it's
---   stored in @OKA_OUT@ environment variable.
-callInEnvironment
-  :: (HasCallStack)
-  => FilePath
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callInEnvironment exe p action =
-  withSystemTempFile "oka-flow-metadata-" $ \file_meta h -> do
-    -- Write metadata to temporary file
-    BL.hPutStr h $ JSON.encode $ encodeMetadata p.meta
-    hClose h
-    -- Populate environment
-    let env = case p.out of
-                Nothing -> id
-                Just d  -> (("OKA_OUT", d):)
-            $ ("OKA_META", file_meta)
-            : [ ("OKA_ARG_" ++ show i, arg)
-              | (i,arg) <- [1::Int ..] `zip` sexpToArgs p.args
-              ]
-    action ProcessData
-      { executable = exe
-      , stdin      = DevNullIn
-      , stdout     = Inherit
-      , env        = env
-      , args       = []
-      , workdir    = p.out
-      }
-
 -- | Pass arguments in the environment.
 --
 -- * Metadata is written in temporary file. It's stored in
@@ -228,13 +188,13 @@ callInEnvironment exe p action =
 --
 -- * Working directory is set to output directory. Additionally it's
 --   stored in @OKA_OUT@ environment variable.
-callInEnvironmentF
+callInEnvironment
   :: (HasCallStack)
   => FilePath
   -> ParamFlow FilePath
   -> (ProcessData -> IO a)
   -> IO a
-callInEnvironmentF exe p action =
+callInEnvironment exe p action =
   withSystemTempFile "oka-flow-metadata-" $ \file_meta h_meta ->
   withSystemTempFile "oka-flow-metadata-" $ \file_args h_args -> do
     -- Write metadata to temporary file
