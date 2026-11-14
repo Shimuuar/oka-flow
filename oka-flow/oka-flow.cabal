@@ -68,8 +68,10 @@ Library
         OKA.Flow.Core.Merkle
         --
         OKA.Flow
-        OKA.Flow.Eff
         OKA.Flow.Eff.Cache
+        OKA.Flow.Eff.PRNG
+        OKA.Flow.Eff.ProgConfig
+        OKA.Flow.Eff.ReadMeta
         OKA.Flow.Tools
         OKA.Flow.Std
   Other-modules:
