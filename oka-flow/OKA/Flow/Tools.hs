@@ -26,10 +26,6 @@ module OKA.Flow.Tools
   , liftExecutable
   , liftPhonyExecutable
     -- ** Calling conventions
-  , callStandardExe
-  , callInEnvironment
-  , callInEnvironmentF
-  , callViaArgList
   , ccModifyArgs
   , ccSetArgs
   , ccAddEnv
@@ -42,28 +38,21 @@ module OKA.Flow.Tools
     -- * Primitives for creating flows
   , basicLiftWorkflow
   , basicLiftPhony
-    -- * Encoding\/decoding of S-expressions
-  , sexpToArgs
-  , sexpFromArgs
     -- * Creating executables
   , metaFromStdin
   , loadParametersFromCLI
   ) where
 
-import Control.Applicative
 import Control.Exception
 import Control.Lens                 ((<&>),(^?))
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
 import Data.ByteString              qualified as BS
 import Data.ByteString.Lazy         qualified as BL
-import Data.Monoid                  (Endo(..))
 import Data.Text                    (Text)
 import Data.Text                    qualified as T
 import Data.Text.Encoding           qualified as T
 import System.FilePath              ((</>))
-import System.IO.Temp
-import System.IO                    (hClose,hPutStr)
 import System.Environment           (getArgs)
 
 import GHC.Stack
@@ -75,7 +64,6 @@ import OKA.Flow.Core.Graph
 import OKA.Flow.Core.S
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.CallExe
-import OKA.Flow.Internal.Parser
 
 
 ----------------------------------------------------------------
@@ -332,129 +320,6 @@ liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \p -> do
   action meta a
 
 
--- | Standard calling conventions for external process.
---
---  * JSON-encoded metadata is passed to process via stdin.
---
---  * Arguments are passed via command line serialized as S-expression
---
---  * Working directory is set to output directory
-callStandardExe
-  :: (HasCallStack)
-  => FilePath
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callStandardExe exe p action = action ProcessData
-  { executable = exe
-  , stdin      = StdinBS $ JSON.encode $ encodeMetadata p.meta
-  , stdout     = Inherit
-  , env        = []
-  , args       = CmdArg <$> sexpToArgs p.args
-  , workdir    = p.out
-  }
-
--- | Pass arguments in the environment.
---
--- * Metadata is written in temporary file. It's stored in
---   @OKA_META@ environment variable.
---
--- * Arguments are passed in the same way as in 'callStandardExe' but
---   in environment variables @OKA_ARG_1@, @OKA_ARG_2@, etc.
---
--- * Working directory is set to output directory. Additionally it's
---   stored in @OKA_OUT@ environment variable.
-callInEnvironment
-  :: (HasCallStack)
-  => FilePath
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callInEnvironment exe p action =
-  withSystemTempFile "oka-flow-metadata-" $ \file_meta h -> do
-    -- Write metadata to temporary file
-    BL.hPutStr h $ JSON.encode $ encodeMetadata p.meta
-    hClose h
-    -- Populate environment
-    let env = case p.out of
-                Nothing -> id
-                Just d  -> (("OKA_OUT", d):)
-            $ ("OKA_META", file_meta)
-            : [ ("OKA_ARG_" ++ show i, arg)
-              | (i,arg) <- [1::Int ..] `zip` sexpToArgs p.args
-              ]
-    action ProcessData
-      { executable = exe
-      , stdin      = DevNullIn
-      , stdout     = Inherit
-      , env        = env
-      , args       = []
-      , workdir    = p.out
-      }
-
--- | Pass arguments in the environment.
---
--- * Metadata is written in temporary file. It's stored in
---   @OKA_META@ environment variable.
---
--- * Arguments are written into temporary file one value on each line.
---   File name is stored in @OKA_ARGS@ environment variable.
---
--- * Working directory is set to output directory. Additionally it's
---   stored in @OKA_OUT@ environment variable.
-callInEnvironmentF
-  :: (HasCallStack)
-  => FilePath
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callInEnvironmentF exe p action =
-  withSystemTempFile "oka-flow-metadata-" $ \file_meta h_meta ->
-  withSystemTempFile "oka-flow-metadata-" $ \file_args h_args -> do
-    -- Write metadata to temporary file
-    BL.hPutStr h_meta $ JSON.encode $ encodeMetadata p.meta
-    hClose h_meta
-    -- Write arguments to temporary file
-    hPutStr h_args $ unlines $ sexpToArgs p.args
-    hClose h_args
-    -- Populate environment
-    let env = case p.out of
-                Nothing -> id
-                Just d  -> (("OKA_OUT", d):)
-            $ ("OKA_META", file_meta)
-            : ("OKA_ARGS", file_args)
-            : []
-    action ProcessData
-      { executable = exe
-      , stdin      = DevNullIn
-      , stdout     = Inherit
-      , env        = env
-      , args       = []
-      , workdir    = p.out
-      }
-
-
--- | Call executable where all parameters are passing via command line
---   parameters.
---
---  * Metadata is discarded
---
---  * Working dir is set to output directory
-callViaArgList
-  :: (HasCallStack)
-  => FilePath                 -- ^ Executable
-  -> (S FilePath -> [CmdArg]) -- ^ How to transform list of store pathes
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callViaArgList exe fun p action = action $ ProcessData
-  { executable = exe
-  , stdin      = DevNullIn
-  , stdout     = Inherit
-  , env        = []
-  , args       = fun p.args
-  , workdir    = p.out
-  }
 
 
 -- | Modify argument list of a program
@@ -519,33 +384,3 @@ loadParametersFromCLI = do
   case parseFlowArguments s of
     Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
     Right ioa -> ioa
-
-
-----------------------------------------------------------------
--- Conversion
-----------------------------------------------------------------
-
-sexpToArgs :: S FilePath -> [FilePath]
-sexpToArgs Nil = []
-sexpToArgs s0  = ($ []) $ appEndo $ go s0 where
-  go = \case
-    Nil     -> cons "-"
-    Atom  a -> cons ('!':a)
-    Param p -> cons p
-    S xs    -> cons "(" <> foldMap go xs <> cons ")"
-  cons s = Endo (s:)
-
-sexpFromArgs :: [FilePath] -> Either String (S FilePath)
-sexpFromArgs [] = pure Nil
-sexpFromArgs xs = runListParser parserS xs where
-  parserS = consume >>= \case
-    ""    -> fail "Empty parameter encountered"
-    "("   -> S <$> parserL
-    "-"   -> pure Nil
-    '!':a -> pure $ Atom  a
-    p     -> pure $ Param p
-  parserL =  eol
-         <|> liftA2 (:) parserS parserL
-  eol     = consume >>= \case
-    ")" -> pure []
-    _   -> fail "Expecting )"
