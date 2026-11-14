@@ -1,7 +1,17 @@
+{-# LANGUAGE RecordWildCards #-}
 -- |
 module OKA.Flow.Core.CallExe
   ( -- * Calling conventions
     CallExe
+  , ccModifyArgs
+  , ccSetArgs
+  , ccAddEnv
+  , ccStdin
+  , ccStdout
+  , ccStdinBS
+  , ccStdinBL
+  , ccStdinText
+  , ccStdinString
   , Stdin(..)
   , Stdout(..)
   , CmdArg(..)
@@ -25,9 +35,13 @@ import Control.Monad
 import Control.Exception
 import Control.Concurrent.STM
 import Data.Aeson             qualified as JSON
+import Data.ByteString        qualified as BS
 import Data.ByteString.Lazy   qualified as BL
 import Data.Monoid            (Endo(..))
 import Data.String
+import Data.Text              (Text)
+import Data.Text              qualified as T
+import Data.Text.Encoding     qualified as T
 import Data.Traversable
 import System.FilePath        ((</>),pathSeparator,isAbsolute)
 import System.Directory       (makeAbsolute)
@@ -54,6 +68,47 @@ import OKA.Metadata
 
 -- | Bracket for passing parameters to a subprocess
 type CallExe = forall a. (ParamFlow FilePath -> (ProcessData -> IO a) -> IO a)
+
+-- | Modify argument list of a program
+ccModifyArgs :: ([CmdArg] -> [CmdArg]) -> CallExe -> CallExe
+ccModifyArgs fun call p action = call p $ \ProcessData{..} -> do
+  action ProcessData{args = fun args, ..}
+
+-- | Prepend arguments to list being passed to flow. They are not
+--   modified.
+ccSetArgs :: [CmdArg] -> CallExe -> CallExe
+ccSetArgs xs call p action = call p $ \ProcessData{..} -> do
+  action ProcessData{args = xs, ..}
+
+-- | Add values to environment variables
+ccAddEnv :: [(String,String)] -> CallExe -> CallExe
+ccAddEnv xs cc p action =
+  cc p (\ProcessData{..} -> action ProcessData{env = xs ++ env, ..})
+
+ccStdin :: Stdin -> CallExe -> CallExe
+ccStdin dat call p action
+  = call p $ \ProcessData{..} -> action ProcessData{stdin = dat, ..}
+
+ccStdout :: Stdout -> CallExe -> CallExe
+ccStdout dat call p action
+  = call p $ \ProcessData{..} -> action ProcessData{stdout = dat, ..}
+
+-- | Pass strict bytestring to process's stdin.
+ccStdinBL :: BL.ByteString -> CallExe -> CallExe
+ccStdinBL dat = ccStdin (StdinBS dat)
+
+-- | Pass lazy bytestring to process's stdin.
+ccStdinBS :: BS.ByteString -> CallExe -> CallExe
+ccStdinBS dat = ccStdinBL (BL.fromStrict dat)
+
+-- | Pass strict text to process's stdin. It will be UTF8 encoded.
+ccStdinText :: Text -> CallExe -> CallExe
+ccStdinText dat = ccStdinBS (T.encodeUtf8 dat)
+
+-- | Pass string to process's stdin. It will be UTF8 encoded.
+ccStdinString :: String -> CallExe -> CallExe
+ccStdinString dat = ccStdinText (T.pack dat)
+
 
 
 -- | What to do with stdin of subprocess

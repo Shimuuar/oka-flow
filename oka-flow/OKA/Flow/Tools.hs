@@ -25,16 +25,6 @@ module OKA.Flow.Tools
     -- * Calling of external executables
   , liftExecutable
   , liftPhonyExecutable
-    -- ** Calling conventions
-  , ccModifyArgs
-  , ccSetArgs
-  , ccAddEnv
-  , ccStdin
-  , ccStdout
-  , ccStdinBS
-  , ccStdinBL
-  , ccStdinText
-  , ccStdinString
     -- * Primitives for creating flows
   , basicLiftWorkflow
   , basicLiftPhony
@@ -47,11 +37,7 @@ import Control.Exception
 import Control.Lens                 ((<&>),(^?))
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
-import Data.ByteString              qualified as BS
 import Data.ByteString.Lazy         qualified as BL
-import Data.Text                    (Text)
-import Data.Text                    qualified as T
-import Data.Text.Encoding           qualified as T
 import System.FilePath              ((</>))
 import System.Environment           (getArgs)
 
@@ -319,48 +305,6 @@ liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \p -> do
     Right ioa -> ioa
   action meta a
 
-
-
-
--- | Modify argument list of a program
-ccModifyArgs :: ([CmdArg] -> [CmdArg]) -> CallExe -> CallExe
-ccModifyArgs fun call p action = call p $ \ProcessData{..} -> do
-  action ProcessData{args = fun args, ..}
-
--- | Prepend arguments to list being passed to flow. They are not
---   modified.
-ccSetArgs :: [CmdArg] -> CallExe -> CallExe
-ccSetArgs xs call p action = call p $ \ProcessData{..} -> do
-  action ProcessData{args = xs, ..}
-
--- | Add values to environment variables
-ccAddEnv :: [(String,String)] -> CallExe -> CallExe
-ccAddEnv xs cc p action =
-  cc p (\ProcessData{..} -> action ProcessData{env = xs ++ env, ..})
-
-ccStdin :: Stdin -> CallExe -> CallExe
-ccStdin dat call p action
-  = call p $ \ProcessData{..} -> action ProcessData{stdin = dat, ..}
-
-ccStdout :: Stdout -> CallExe -> CallExe
-ccStdout dat call p action
-  = call p $ \ProcessData{..} -> action ProcessData{stdout = dat, ..}
-
--- | Pass strict bytestring to process's stdin.
-ccStdinBL :: BL.ByteString -> CallExe -> CallExe
-ccStdinBL dat = ccStdin (StdinBS dat)
-
--- | Pass lazy bytestring to process's stdin.
-ccStdinBS :: BS.ByteString -> CallExe -> CallExe
-ccStdinBS dat = ccStdinBL (BL.fromStrict dat)
-
--- | Pass strict text to process's stdin. It will be UTF8 encoded.
-ccStdinText :: Text -> CallExe -> CallExe
-ccStdinText dat = ccStdinBS (T.encodeUtf8 dat)
-
--- | Pass string to process's stdin. It will be UTF8 encoded.
-ccStdinString :: String -> CallExe -> CallExe
-ccStdinString dat = ccStdinText (T.pack dat)
 
 
 ----------------------------------------------------------------
