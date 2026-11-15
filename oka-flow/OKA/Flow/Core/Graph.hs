@@ -13,6 +13,7 @@ module OKA.Flow.Core.Graph
   , Phony
   , CallExe
     -- ** Single dataflow description 
+  , IsDataflow(..)
   , Executable(..)
   , Action(..)
   , Dataflow(..)

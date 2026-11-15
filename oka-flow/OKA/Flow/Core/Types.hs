@@ -14,6 +14,7 @@ module OKA.Flow.Core.Types
   , storePath
     -- * Flow parameters
   , ParamFlow(..)
+  , IsDataflow(..)
   ) where
 
 import Data.Aeson             qualified as JSON
@@ -94,3 +95,6 @@ data ParamFlow a = ParamFlow
   , out  :: Maybe a
   }
   deriving stock (Functor,Foldable,Traversable)
+
+class IsDataflow a where
+  runDataflow :: a -> ParamFlow FilePath -> IO ()
