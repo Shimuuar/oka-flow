@@ -30,6 +30,7 @@ import System.FilePath              ((</>))
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
                                      doesDirectoryExist)
 import GHC.Stack
+import GHC.Generics                (Generic,Generically(..))
 
 import OKA.Metadata
 import OKA.Metadata.Meta
@@ -60,20 +61,9 @@ data FlowLogger = FlowLogger
   , crash :: Maybe StorePath -> SomeException -> IO ()
     -- | Called when job crashes
   }
+  deriving stock Generic
+  deriving (Semigroup,Monoid) via Generically FlowLogger
 
-instance Semigroup FlowLogger where
-  a <> b = FlowLogger { init  = a.init  <> b.init
-                      , start = a.start <> b.start
-                      , done  = a.done  <> b.done
-                      , crash = a.crash <> b.crash
-                      }
-
-instance Monoid FlowLogger where
-  mempty = FlowLogger { init  = mempty
-                      , start = mempty
-                      , done  = mempty
-                      , crash = mempty
-                      }
 
 -- | Evaluation context for dataflow program
 data FlowCtx eff = FlowCtx
