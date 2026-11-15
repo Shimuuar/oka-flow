@@ -193,8 +193,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
                                 , out  = Just build
                                 }
           case dataflow.flow of
-            ActionIO  io               -> io param
-            ActionExe Executable{call} -> startSubprocessAndWait call param
+            Action io -> runDataflow io param
         t2 <- getCurrentTime
         ctx.logger.done path (diffUTCTime t2 t1)
       ----------------
@@ -204,8 +203,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
                              , out  = Nothing
                              }
         case phony of
-          ActionIO  io               -> io param
-          ActionExe Executable{call} -> startSubprocessAndWait call param
+          Action io -> runDataflow io param
     -- Signal that we successfully completed execution
     case fun.output of
       RunDataflow b _ -> clearBarrier b

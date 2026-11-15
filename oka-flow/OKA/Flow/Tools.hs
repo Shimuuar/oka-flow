@@ -213,6 +213,38 @@ instance (FlowArgument a, FlowArgument b, FlowArgument c, FlowArgument d
 -- FIXME: How to properly encode result of b? Is Result OK?
 ----------------------------------------------------------------
 
+newtype HaskFlow meta a b = HaskFlow (meta -> a -> IO b)
+
+instance (IsMeta meta, FlowArgument a, FlowOutput b
+         ) => IsDataflow (HaskFlow meta a b) where
+  runDataflow (HaskFlow action) p = do
+      meta <- case p.meta ^? metadata of
+        Just m  -> pure m
+        Nothing -> error $ "loadFlowArguments: Cannot get metadata"
+      a    <- case parseFlowArguments p.args of
+        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+        Right ioa -> ioa
+      b <- action meta a
+      case p.out of
+        Just out -> writeOutput out b
+        Nothing  -> error "runDataflow[HaskFlow]: output is required"
+
+
+newtype HaskFlowIO meta a = HaskFlowIO (FilePath -> meta -> a -> IO ())
+
+instance (IsMeta meta, FlowArgument a) => IsDataflow (HaskFlowIO meta a) where
+  runDataflow (HaskFlowIO action) p = do
+    meta <- case p.meta ^? metadata of
+      Just m  -> pure m
+      Nothing -> error $ "loadFlowArguments: Cannot get metadata"
+    a    <- case parseFlowArguments p.args of
+      Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+      Right ioa -> ioa
+    case p.out of
+      Just out -> action out meta a
+      Nothing  -> error "runDataflow[HaskFlowIO]: output is required"
+    
+
 -- | Convert haskell function into dataflow. Arguments are loaded and
 --   stored using type classes methods.
 liftHaskellFun
@@ -223,17 +255,7 @@ liftHaskellFun
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , flow = ActionIO $ \p -> do
-      meta <- case p.meta ^? metadata of
-        Just m  -> pure m
-        Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-      a    <- case parseFlowArguments p.args of
-        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-        Right ioa -> ioa
-      b <- action meta a
-      case p.out of
-        Just out -> writeOutput out b
-        Nothing  -> error "liftHaskellFun: output is required"
+  , flow = Action $ HaskFlow action
   }
 
 
@@ -249,16 +271,7 @@ liftHaskellFun_
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , flow = ActionIO $ \p -> do
-      meta <- case p.meta ^? metadata of
-        Just m  -> pure m
-        Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-      a    <- case parseFlowArguments p.args of
-        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-        Right ioa -> ioa
-      case p.out of
-        Just out -> action out meta a
-        Nothing  -> error "liftHaskellFun: output is required"
+  , flow = Action $ HaskFlowIO action
   }
 
 
@@ -276,7 +289,7 @@ liftExecutable
 liftExecutable name res call =
   basicLiftWorkflow res $ Dataflow
     { name = name
-    , flow = ActionExe $ Executable call
+    , flow = Action call
     }
 
 liftPhonyExecutable
@@ -285,7 +298,7 @@ liftPhonyExecutable
   -> CallExe -- ^ Calling convention
   -> (args -> Flow eff ())
 liftPhonyExecutable res call =
-  basicLiftPhony res $ ActionExe $ Executable call
+  basicLiftPhony res $ Action call
 
 
 -- | Convert haskell function into dataflow. Arguments are loaded and
@@ -295,14 +308,17 @@ liftHaskellPhonyFun
   => res                  -- ^ Resources required by workflow
   -> (meta -> a -> IO ()) -- ^ IO action
   -> (AsRes a -> Flow eff ())
-liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \p -> do
-  meta <- case p.meta ^? metadata of
-    Just m  -> pure m
-    Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-  a    <- case parseFlowArguments p.args of
-    Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-    Right ioa -> ioa
-  action meta a
+liftHaskellPhonyFun res action = undefined
+-- FIXME: What to do with PHONY?
+--
+-- basicLiftPhony res $ ActionIO $ \p -> do
+--   meta <- case p.meta ^? metadata of
+--     Just m  -> pure m
+--     Nothing -> error $ "loadFlowArguments: Cannot get metadata"
+--   a    <- case parseFlowArguments p.args of
+--     Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+--     Right ioa -> ioa
+--   action meta a
 
 
 

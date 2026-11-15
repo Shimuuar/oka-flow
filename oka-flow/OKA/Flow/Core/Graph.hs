@@ -72,11 +72,8 @@ newtype Executable = Executable
   }
 
 -- | Action to be execute by dataflow either normal or phony.
-data Action
-  = ActionIO  (ParamFlow FilePath -> IO ())
-    -- ^ Some haskell function 
-  | ActionExe Executable
-    -- ^ Run executable
+data Action where
+  Action :: IsDataflow a => a -> Action
 
 -- | Dataflow which produces output in the store.
 data Dataflow = Dataflow

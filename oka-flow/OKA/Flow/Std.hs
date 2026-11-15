@@ -144,7 +144,9 @@ stdJupyter
 --
 -- FIXME: We need mutex although not badly. No reason to run two
 --        notebooks concurrently
-stdJupyter notebooks params = do
+stdJupyter notebooks params = do -- FIXME: What to do here???
+  undefined
+{-
   cfg <- askProgConfig
   let browser = case cfg.browser of
         Nothing -> "chromium"
@@ -198,7 +200,7 @@ stdJupyter notebooks params = do
               _ <- startProcess (proc browser (tree_url nb_url))
               pure ()
     ) params
-
+-}
 
 commonPrefix :: forall a. Eq a => [[a]] -> [a]
 commonPrefix []     = []
