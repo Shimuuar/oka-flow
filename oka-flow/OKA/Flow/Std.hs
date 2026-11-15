@@ -168,33 +168,35 @@ stdJupyter notebooks params = do
       let notebooks_rel = case traverse (stripPrefix notebook_dir) notebooks_abs of
             Just s  -> s
             Nothing -> error "Error during processing notebooks"
-      callInEnvironment "jupyter" param $ \proc_jupyter -> do
-        withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
-          let dir_config  = tmp </> "config"
-              dir_data    = tmp </> "data"
-          createDirectory dir_config
-          createDirectory dir_data
-          run_jupyter <- toTypedProcess proc_jupyter
-            { env  = [ ("JUPYTER_DATA_DIR",   dir_data)
-                     , ("JUPYTER_CONFIG_DIR", dir_config)
-                     ] ++ proc_jupyter.env
-            , args = [ "notebook"
-                     , "--no-browser"
-                     , CmdArg $ "--notebook-dir=" ++ notebook_dir
-                     ]
-            }
-          withProcessWait_ run_jupyter $ \_ -> do
-            -- Wait until server starts and launch browser.
-            jp <- waitForJupyter dir_data >>= \case
-              Nothing -> error "stdJupyter: can't find server config"
-              Just a  -> pure a
-            let nb_url = [ jp.url ++ "notebooks/"++path++"?token="++jp.token
-                         | path <- notebooks_rel
-                         ]
-                tree_url | cfg.jupyterBrowser = ((jp.url++"tree/"++"?token="++jp.token):)
-                         | otherwise          = id
-            _ <- startProcess (proc browser (tree_url nb_url))
-            pure ()
+      -- FIXME: Could this logic be simplified?
+      case callInEnvironment "jupyter" of
+        CallExe call -> flip call param $ \proc_jupyter -> do
+          withSystemTempDirectory "oka-flow-jupyter-" $ \tmp -> do
+            let dir_config  = tmp </> "config"
+                dir_data    = tmp </> "data"
+            createDirectory dir_config
+            createDirectory dir_data
+            run_jupyter <- toTypedProcess proc_jupyter
+              { env  = [ ("JUPYTER_DATA_DIR",   dir_data)
+                       , ("JUPYTER_CONFIG_DIR", dir_config)
+                       ] ++ proc_jupyter.env
+              , args = [ "notebook"
+                       , "--no-browser"
+                       , CmdArg $ "--notebook-dir=" ++ notebook_dir
+                       ]
+              }
+            withProcessWait_ run_jupyter $ \_ -> do
+              -- Wait until server starts and launch browser.
+              jp <- waitForJupyter dir_data >>= \case
+                Nothing -> error "stdJupyter: can't find server config"
+                Just a  -> pure a
+              let nb_url = [ jp.url ++ "notebooks/"++path++"?token="++jp.token
+                           | path <- notebooks_rel
+                           ]
+                  tree_url | cfg.jupyterBrowser = ((jp.url++"tree/"++"?token="++jp.token):)
+                           | otherwise          = id
+              _ <- startProcess (proc browser (tree_url nb_url))
+              pure ()
     ) params
 
 

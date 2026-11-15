@@ -2,7 +2,7 @@
 -- |
 module OKA.Flow.Core.CallExe
   ( -- * Calling conventions
-    CallExe
+    CallExe(..)
   , ccModifyArgs
   , ccSetArgs
   , ccAddEnv
@@ -61,31 +61,30 @@ import OKA.Metadata
 ----------------------------------------------------------------
 
 -- | Bracket for passing parameters to a subprocess
-type CallExe = forall a. (ParamFlow FilePath -> (ProcessData -> IO a) -> IO a)
+newtype CallExe = CallExe (forall a. (ProcessData -> IO a) -> (ParamFlow FilePath -> IO a))
+
+mapCallExe :: (ProcessData -> ProcessData) -> CallExe -> CallExe
+mapCallExe f (CallExe call) = CallExe $ \action p ->
+  call (action . f) p
 
 -- | Modify argument list of a program
 ccModifyArgs :: ([CmdArg] -> [CmdArg]) -> CallExe -> CallExe
-ccModifyArgs fun call p action = call p $ \ProcessData{..} -> do
-  action ProcessData{args = fun args, ..}
+ccModifyArgs fun = mapCallExe $ \ProcessData{..} -> ProcessData{args = fun args, ..}
 
 -- | Prepend arguments to list being passed to flow. They are not
 --   modified.
 ccSetArgs :: [CmdArg] -> CallExe -> CallExe
-ccSetArgs xs call p action = call p $ \ProcessData{..} -> do
-  action ProcessData{args = xs, ..}
+ccSetArgs xs = mapCallExe $ \ProcessData{..} -> ProcessData{args = xs, ..}
 
 -- | Add values to environment variables
 ccAddEnv :: [(String,String)] -> CallExe -> CallExe
-ccAddEnv xs cc p action =
-  cc p (\ProcessData{..} -> action ProcessData{env = xs ++ env, ..})
+ccAddEnv xs = mapCallExe $ \ProcessData{..} -> ProcessData{env = xs ++ env, ..}
 
 ccStdin :: Stdin -> CallExe -> CallExe
-ccStdin dat call p action
-  = call p $ \ProcessData{..} -> action ProcessData{stdin = dat, ..}
+ccStdin dat = mapCallExe $ \ProcessData{..} -> ProcessData{stdin = dat, ..}
 
 ccStdout :: Stdout -> CallExe -> CallExe
-ccStdout dat call p action
-  = call p $ \ProcessData{..} -> action ProcessData{stdout = dat, ..}
+ccStdout dat = mapCallExe $ \ProcessData{..} -> ProcessData{stdout = dat, ..}
 
 -- | Pass strict bytestring to process's stdin.
 ccStdinBL :: BL.ByteString -> CallExe -> CallExe
@@ -191,10 +190,8 @@ callStandardExe exe p action = action ProcessData
 callInEnvironment
   :: (HasCallStack)
   => FilePath
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callInEnvironment exe p action =
+  -> CallExe 
+callInEnvironment exe = CallExe $ \action p ->
   withSystemTempFile "oka-flow-metadata-" $ \file_meta h_meta ->
   withSystemTempFile "oka-flow-metadata-" $ \file_args h_args -> do
     -- Write metadata to temporary file
@@ -230,10 +227,8 @@ callViaArgList
   :: (HasCallStack)
   => FilePath                 -- ^ Executable
   -> (S FilePath -> [CmdArg]) -- ^ How to transform list of store pathes
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callViaArgList exe fun p action = action $ ProcessData
+  -> CallExe
+callViaArgList exe fun = CallExe $ \action p -> action $ ProcessData
   { executable = exe
   , stdin      = DevNullIn
   , stdout     = Inherit
@@ -312,8 +307,8 @@ startSubprocessAndWait
   => CallExe            -- ^ Calling conventions
   -> ParamFlow FilePath -- ^ Parameters
   -> IO ()
-startSubprocessAndWait call param =
-  call param $ \process -> do
+startSubprocessAndWait (CallExe call) param =
+  flip call param $ \process -> do
     run <- toTypedProcess process
     withProcessWait_ run $ \pid -> do
       r <- atomically (waitExitCodeSTM pid) `onException` softKill pid
