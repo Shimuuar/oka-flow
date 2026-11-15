@@ -50,7 +50,7 @@ import System.Posix.Signals   (signalProcess, sigINT)
 import System.IO.Temp
 import GHC.Stack
 
-import OKA.Flow.Core.Types    (ParamFlow(..))
+import OKA.Flow.Core.Types    (ParamFlow(..), IsDataflow(..))
 import OKA.Flow.Core.S
 import OKA.Metadata
 
@@ -62,6 +62,10 @@ import OKA.Metadata
 
 -- | Bracket for passing parameters to a subprocess
 newtype CallExe = CallExe (forall a. (ProcessData -> IO a) -> (ParamFlow FilePath -> IO a))
+
+instance IsDataflow CallExe where
+  runDataflow = startSubprocessAndWait
+
 
 mapCallExe :: (ProcessData -> ProcessData) -> CallExe -> CallExe
 mapCallExe f (CallExe call) = CallExe $ \action p ->
