@@ -66,10 +66,10 @@ import OKA.Metadata
 newtype CallExe r = CallExe
   (forall a. (ProcessData r -> IO a) -> (ParamFlow r FilePath -> IO a))
 
-instance IsDataflow (CallExe Result) where
+instance r ~ Result => IsDataflow (CallExe r) where
   runDataflow = startSubprocessAndWait
 
-instance IsPhony (CallExe Phony) where
+instance r ~ Phony => IsPhony (CallExe r) where
   runPhony = startSubprocessAndWait
 
 

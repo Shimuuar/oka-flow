@@ -69,11 +69,11 @@ instance (IsMeta a) => FlowOutput (SavedMeta a) where
     $ JSON.encode $ encodeToMetadata a
 
 -- | Save metadata value so it could be passed as parameter.
-stdSaveMeta :: (IsMeta a, HasCallStack) => a -> Flow eff (Result (SavedMeta a))
+stdSaveMeta :: forall a eff. (IsMeta a, HasCallStack) => a -> Flow eff (Result (SavedMeta a))
 stdSaveMeta meta = scopeMeta $ do
   put $ toMetadata meta
-  liftHaskellFun "std.SavedMeta" ()
-    (\(a::a) () -> pure $ SavedMeta a)
+  liftWorkflow () "std.SavedMeta"
+    (HaskFlow $ \(a::a) () -> pure $ SavedMeta a)
     ()
 
 -- | Convert one saved metadata to another which possibly uses less
@@ -102,7 +102,7 @@ data ReportPDF
 runPdfReader :: (ProgConfigE :> eff, HasCallStack) => [Result ReportPDF] -> Flow eff ()
 runPdfReader pdfs = do 
   pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
-  liftPhonyExecutable ()
+  liftPhony ()
     (callViaArgList pdf $ \s -> [CmdArg $ p </> "report.pdf" | Just args <- [sequenceS s]
                                                              , p         <- args
                                                              ])
@@ -111,7 +111,7 @@ runPdfReader pdfs = do
 -- | Concatenate PDFs using @pdftk@ program
 stdConcatPDF :: (HasCallStack) => [Result ReportPDF] -> Flow eff (Result ReportPDF)
 stdConcatPDF reports = restrictMeta @() $ do
-  liftExecutable "std.pdftk.concat" ()
+  liftWorkflow () "std.pdftk.concat"
     (callViaArgList "pdftk" $ \s ->
         [CmdArg $ a</>"report.pdf" | Just args <- [sequenceS s]
                                    , a <- args

@@ -18,19 +18,12 @@ module OKA.Flow.Tools
     -- ** Deriving via
   , AsMetaEncoded(..)
   , AsFlowInput(..)
-    -- * Lifting of haskell function
+    -- * Primitives for creating flows
+  , liftWorkflow
+  , liftPhony
   , HaskFlow(..)
   , HaskFlowIO(..)
   , HaskFlowPhony(..)
-  , liftHaskellFun
-  , liftHaskellFun_
-  , liftHaskellPhonyFun
-    -- * Calling of external executables
-  , liftExecutable
-  , liftPhonyExecutable
-    -- * Primitives for creating flows
-  , basicLiftWorkflow
-  , basicLiftPhony
     -- * Creating executables
   , metaFromStdin
   , loadParametersFromCLI
@@ -256,72 +249,6 @@ instance (IsMeta meta, FlowArgument a) => IsPhony (HaskFlowPhony meta a) where
       Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
       Right ioa -> ioa
     action meta a
-
--- | Convert haskell function into dataflow. Arguments are loaded and
---   stored using type classes methods.
-liftHaskellFun
-  :: (FlowArgument a, FlowOutput b, IsMeta meta, ResourceClaim res, HasCallStack)
-  => String              -- ^ Name of flow
-  -> res                 -- ^ Resources required by workflow
-  -> (meta -> a -> IO b) -- ^ IO action
-  -> (AsRes a -> Flow eff (Result b))
-liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
-  { name = name
-  , flow = Action $ HaskFlow action
-  }
-
-
--- | Convert haskell function into dataflow. Arguments are loaded
---   using type 'FlowArgument' type class and provided action takes
---   output directory as first argument and is responsible for writing
---   outputs.
-liftHaskellFun_
-  :: (FlowArgument a, IsMeta meta, ResourceClaim res, HasCallStack)
-  => String                           -- ^ Name of flow
-  -> res                              -- ^ Resources required by workflow
-  -> (FilePath -> meta -> a -> IO ()) -- ^ IO action
-  -> (AsRes a -> Flow eff (Result b))
-liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
-  { name = name
-  , flow = Action $ HaskFlowIO action
-  }
-
-
-
-----------------------------------------------------------------
--- Calling conventions
-----------------------------------------------------------------
-
-liftExecutable
-  :: (ToS args, ResourceClaim res, HasCallStack)
-  => String  -- ^ Name of flow
-  -> res     -- ^ Resources required by workflow
-  -> CallExe Result -- ^ Calling convention
-  -> (args -> Flow eff (Result b))
-liftExecutable name res call =
-  basicLiftWorkflow res $ Dataflow
-    { name = name
-    , flow = Action call
-    }
-
-liftPhonyExecutable
-  :: (ToS args, ResourceClaim res, HasCallStack)
-  => res     -- ^ Resources required by workflow
-  -> CallExe Phony -- ^ Calling convention
-  -> (args -> Flow eff ())
-liftPhonyExecutable res call =
-  basicLiftPhony res $ ActionPhony call
-
-
--- | Convert haskell function into dataflow. Arguments are loaded and
---   stored using type classes methods.
-liftHaskellPhonyFun
-  :: (FlowArgument a, IsMeta meta, ResourceClaim res, HasCallStack)
-  => res                  -- ^ Resources required by workflow
-  -> (meta -> a -> IO ()) -- ^ IO action
-  -> (AsRes a -> Flow eff ())
-liftHaskellPhonyFun res action =
-  basicLiftPhony res $ ActionPhony $ HaskFlowPhony action
 
 
 
