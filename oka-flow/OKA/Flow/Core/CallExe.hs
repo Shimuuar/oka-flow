@@ -1,3 +1,5 @@
+{-# LANGUAGE GADTs           #-}
+{-# LANGUAGE MonoLocalBinds  #-}
 {-# LANGUAGE RecordWildCards #-}
 -- |
 module OKA.Flow.Core.CallExe
@@ -50,7 +52,7 @@ import System.Posix.Signals   (signalProcess, sigINT)
 import System.IO.Temp
 import GHC.Stack
 
-import OKA.Flow.Core.Types    (ParamFlow(..), IsDataflow(..))
+import OKA.Flow.Core.Types
 import OKA.Flow.Core.S
 import OKA.Metadata
 
@@ -61,49 +63,53 @@ import OKA.Metadata
 ----------------------------------------------------------------
 
 -- | Bracket for passing parameters to a subprocess
-newtype CallExe = CallExe (forall a. (ProcessData -> IO a) -> (ParamFlow FilePath -> IO a))
+newtype CallExe r = CallExe
+  (forall a. (ProcessData r -> IO a) -> (ParamFlow r FilePath -> IO a))
 
-instance IsDataflow CallExe where
+instance IsDataflow (CallExe Result) where
   runDataflow = startSubprocessAndWait
 
+instance IsPhony (CallExe Phony) where
+  runPhony = startSubprocessAndWait
 
-mapCallExe :: (ProcessData -> ProcessData) -> CallExe -> CallExe
+
+mapCallExe :: (ProcessData r -> ProcessData r) -> CallExe r -> CallExe r
 mapCallExe f (CallExe call) = CallExe $ \action p ->
   call (action . f) p
 
 -- | Modify argument list of a program
-ccModifyArgs :: ([CmdArg] -> [CmdArg]) -> CallExe -> CallExe
+ccModifyArgs :: ([CmdArg] -> [CmdArg]) -> CallExe r -> CallExe r
 ccModifyArgs fun = mapCallExe $ \ProcessData{..} -> ProcessData{args = fun args, ..}
 
 -- | Prepend arguments to list being passed to flow. They are not
 --   modified.
-ccSetArgs :: [CmdArg] -> CallExe -> CallExe
+ccSetArgs :: [CmdArg] -> CallExe r -> CallExe r
 ccSetArgs xs = mapCallExe $ \ProcessData{..} -> ProcessData{args = xs, ..}
 
 -- | Add values to environment variables
-ccAddEnv :: [(String,String)] -> CallExe -> CallExe
+ccAddEnv :: [(String,String)] -> CallExe r -> CallExe r
 ccAddEnv xs = mapCallExe $ \ProcessData{..} -> ProcessData{env = xs ++ env, ..}
 
-ccStdin :: Stdin -> CallExe -> CallExe
+ccStdin :: Stdin -> CallExe r -> CallExe r
 ccStdin dat = mapCallExe $ \ProcessData{..} -> ProcessData{stdin = dat, ..}
 
-ccStdout :: Stdout -> CallExe -> CallExe
+ccStdout :: Stdout -> CallExe r -> CallExe r
 ccStdout dat = mapCallExe $ \ProcessData{..} -> ProcessData{stdout = dat, ..}
 
 -- | Pass strict bytestring to process's stdin.
-ccStdinBL :: BL.ByteString -> CallExe -> CallExe
+ccStdinBL :: BL.ByteString -> CallExe r -> CallExe r
 ccStdinBL dat = ccStdin (StdinBS dat)
 
 -- | Pass lazy bytestring to process's stdin.
-ccStdinBS :: BS.ByteString -> CallExe -> CallExe
+ccStdinBS :: BS.ByteString -> CallExe r -> CallExe r
 ccStdinBS dat = ccStdinBL (BL.fromStrict dat)
 
 -- | Pass strict text to process's stdin. It will be UTF8 encoded.
-ccStdinText :: Text -> CallExe -> CallExe
+ccStdinText :: Text -> CallExe r -> CallExe r
 ccStdinText dat = ccStdinBS (T.encodeUtf8 dat)
 
 -- | Pass string to process's stdin. It will be UTF8 encoded.
-ccStdinString :: String -> CallExe -> CallExe
+ccStdinString :: String -> CallExe r -> CallExe r
 ccStdinString dat = ccStdinText (T.pack dat)
 
 
@@ -142,14 +148,14 @@ instance IsString CmdArg where
 
 
 -- | Data for calling external process
-data ProcessData = ProcessData
+data ProcessData r = ProcessData
   { executable :: !FilePath         -- ^ Executable name. If it contains path separators
                                     --   it will be converted to absolute path relative
   , stdin      :: !Stdin            -- ^ Data to pass to stdin
   , stdout     :: !Stdout           -- ^ Stdout treatment
   , env        :: [(String,String)] -- ^ Data for adding to process environment
   , args       :: [CmdArg]          -- ^ Arguments for a process
-  , workdir    :: !(Maybe FilePath) -- ^ Working directory for subprocess.
+  , workdir    :: !(Output r FilePath) -- ^ Working directory for subprocess.
   }
 
 
@@ -168,10 +174,8 @@ data ProcessData = ProcessData
 callStandardExe
   :: (HasCallStack)
   => FilePath
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callStandardExe exe p action = action ProcessData
+  -> CallExe r
+callStandardExe exe = CallExe $ \action p -> action ProcessData
   { executable = exe
   , stdin      = StdinBS $ JSON.encode $ encodeMetadata p.meta
   , stdout     = Inherit
@@ -194,7 +198,7 @@ callStandardExe exe p action = action ProcessData
 callInEnvironment
   :: (HasCallStack)
   => FilePath
-  -> CallExe 
+  -> CallExe r 
 callInEnvironment exe = CallExe $ \action p ->
   withSystemTempFile "oka-flow-metadata-" $ \file_meta h_meta ->
   withSystemTempFile "oka-flow-metadata-" $ \file_args h_args -> do
@@ -205,9 +209,11 @@ callInEnvironment exe = CallExe $ \action p ->
     hPutStr h_args $ unlines $ sexpToArgs p.args
     hClose h_args
     -- Populate environment
-    let env = case p.out of
-                Nothing -> id
-                Just d  -> (("OKA_OUT", d):)
+    let appendWD :: [(String,String)] -> [(String,String)]
+        appendWD = case p.out of
+                     OutputPhony -> id
+                     OutputRes d -> (("OKA_OUT", d):)
+        env = appendWD
             $ ("OKA_META", file_meta)
             : ("OKA_ARGS", file_args)
             : []
@@ -231,7 +237,7 @@ callViaArgList
   :: (HasCallStack)
   => FilePath                 -- ^ Executable
   -> (S FilePath -> [CmdArg]) -- ^ How to transform list of store pathes
-  -> CallExe
+  -> CallExe r
 callViaArgList exe fun = CallExe $ \action p -> action $ ProcessData
   { executable = exe
   , stdin      = DevNullIn
@@ -251,7 +257,7 @@ callViaArgList exe fun = CallExe $ \action p -> action $ ProcessData
 --   process using @typed-process@
 toTypedProcess
   :: (HasCallStack)
-  => ProcessData -- ^ Parameters
+  => ProcessData r -- ^ Parameters
   -> IO (ProcessConfig () () ())
 toTypedProcess process = do
   -- Executable is searched relative to the working directory of
@@ -270,15 +276,16 @@ toTypedProcess process = do
     CmdArg p -> pure p
     PathA  p -> makeAbsolute p
     PathO  p -> case process.workdir of
-      Nothing -> error "Workdir for subprocess is not set. Path relative to output is not defined"
-      Just _  -> pure p
+      OutputPhony  -> error "Workdir for subprocess is not set. Path relative to output is not defined"
+      OutputRes _  -> pure p
   -- Normalization of path relative to workdir of subprocess. Note!
   -- Its workdir is different from ours
-  let normalizePathO (isAbsolute -> True)
+  let normalizePathO :: FilePath ->  IO FilePath
+      normalizePathO (isAbsolute -> True)
         = error "Path relative to workdir couldn't be absolute"
       normalizePathO p = case process.workdir of
-        Nothing -> error "Workdir for subprocess is not set. Path relative to output is not defined"
-        Just wd -> makeAbsolute $ wd </> p
+        OutputPhony  -> error "Workdir for subprocess is not set. Path relative to output is not defined"
+        OutputRes wd -> makeAbsolute $ wd </> p
   let set_stdin p = case process.stdin of
         DevNullIn       -> pure $ setStdin nullStream           p
         StdinBS    bs   -> pure $ setStdin (byteStringInput bs) p
@@ -294,10 +301,13 @@ toTypedProcess process = do
         StdoutFile path -> do path' <- normalizePathO path
                               h     <- openFile path' WriteMode
                               pure $ setStdout (useHandleClose h) p
+  let set_wd :: ProcessConfig stdin stdout stderr
+             -> ProcessConfig stdin stdout stderr
+      set_wd p = case process.workdir of
+        OutputPhony -> p
+        OutputRes d -> setWorkingDir d p
   id $ set_stdout <=< set_stdin
-     $ case process.workdir of
-         Nothing -> id
-         Just p  -> setWorkingDir p
+     $ set_wd
      $ case env of
          [] -> id
          _  -> setEnv env
@@ -308,8 +318,8 @@ toTypedProcess process = do
 --   exit code exception is raised.
 startSubprocessAndWait
   :: (HasCallStack)
-  => CallExe            -- ^ Calling conventions
-  -> ParamFlow FilePath -- ^ Parameters
+  => CallExe r            -- ^ Calling conventions
+  -> ParamFlow r FilePath -- ^ Parameters
   -> IO ()
 startSubprocessAndWait (CallExe call) param =
   flip call param $ \process -> do

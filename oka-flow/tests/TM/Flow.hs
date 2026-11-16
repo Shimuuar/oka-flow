@@ -25,6 +25,8 @@ import GHC.TypeLits
 import OKA.Metadata
 import OKA.Flow.Std
 import OKA.Flow.Core.Resources
+import OKA.Flow.Core.Graph
+import OKA.Flow.Core.Types
 import OKA.Flow.Eff.Cache
 import OKA.Flow.Tools
 import OKA.Flow
@@ -354,15 +356,13 @@ flowPhony :: IO (ObsPhony Number, Result Number -> Flow eff ())
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
-       , basicLiftPhony (LockCoreCPU 1) $ ActionIO $ \p -> do
-           let Param arg = p.args
-           n <- readOutput arg
+       , basicLiftPhony (LockCoreCPU 1) $ ActionPhony $ HaskFlowPhony $ \() (n::Number) -> do
            let n' = n * n
            saveObsPhony obs n'
        )
 
 observeOutput :: IORef [String] -> FilePath -> Result a -> Flow eff ()
-observeOutput out expected = basicLiftPhony () $ ActionIO $ \p -> do
+observeOutput out expected = basicLiftPhony () $ ActionPhony $ BasicFlow $ \p -> do
   let Param arg = p.args
   let hash = last (splitPath arg)
   when (hash /= expected) $

@@ -124,7 +124,7 @@ basicLiftPhony
   :: (ToS params, ResourceClaim res)
   => res
      -- ^ Resources required by workflow
-  -> Action
+  -> ActionPhony
      -- ^ Action to execute
   -> params
      -- ^ Parameters to pass to workflow

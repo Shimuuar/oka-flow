@@ -19,6 +19,9 @@ module OKA.Flow.Tools
   , AsMetaEncoded(..)
   , AsFlowInput(..)
     -- * Lifting of haskell function
+  , HaskFlow(..)
+  , HaskFlowIO(..)
+  , HaskFlowPhony(..)
   , liftHaskellFun
   , liftHaskellFun_
   , liftHaskellPhonyFun
@@ -226,8 +229,7 @@ instance (IsMeta meta, FlowArgument a, FlowOutput b
         Right ioa -> ioa
       b <- action meta a
       case p.out of
-        Just out -> writeOutput out b
-        Nothing  -> error "runDataflow[HaskFlow]: output is required"
+        OutputRes out -> writeOutput out b
 
 
 newtype HaskFlowIO meta a = HaskFlowIO (FilePath -> meta -> a -> IO ())
@@ -241,9 +243,19 @@ instance (IsMeta meta, FlowArgument a) => IsDataflow (HaskFlowIO meta a) where
       Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
       Right ioa -> ioa
     case p.out of
-      Just out -> action out meta a
-      Nothing  -> error "runDataflow[HaskFlowIO]: output is required"
-    
+      OutputRes out -> action out meta a
+
+newtype HaskFlowPhony meta a = HaskFlowPhony (meta -> a -> IO ())
+
+instance (IsMeta meta, FlowArgument a) => IsPhony (HaskFlowPhony meta a) where
+  runPhony (HaskFlowPhony action) p = do
+    meta <- case p.meta ^? metadata of
+      Just m  -> pure m
+      Nothing -> error $ "loadFlowArguments: Cannot get metadata"
+    a    <- case parseFlowArguments p.args of
+      Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+      Right ioa -> ioa
+    action meta a
 
 -- | Convert haskell function into dataflow. Arguments are loaded and
 --   stored using type classes methods.
@@ -284,7 +296,7 @@ liftExecutable
   :: (ToS args, ResourceClaim res, HasCallStack)
   => String  -- ^ Name of flow
   -> res     -- ^ Resources required by workflow
-  -> CallExe -- ^ Calling convention
+  -> CallExe Result -- ^ Calling convention
   -> (args -> Flow eff (Result b))
 liftExecutable name res call =
   basicLiftWorkflow res $ Dataflow
@@ -295,10 +307,10 @@ liftExecutable name res call =
 liftPhonyExecutable
   :: (ToS args, ResourceClaim res, HasCallStack)
   => res     -- ^ Resources required by workflow
-  -> CallExe -- ^ Calling convention
+  -> CallExe Phony -- ^ Calling convention
   -> (args -> Flow eff ())
 liftPhonyExecutable res call =
-  basicLiftPhony res $ Action call
+  basicLiftPhony res $ ActionPhony call
 
 
 -- | Convert haskell function into dataflow. Arguments are loaded and
@@ -308,17 +320,8 @@ liftHaskellPhonyFun
   => res                  -- ^ Resources required by workflow
   -> (meta -> a -> IO ()) -- ^ IO action
   -> (AsRes a -> Flow eff ())
-liftHaskellPhonyFun res action = undefined
--- FIXME: What to do with PHONY?
---
--- basicLiftPhony res $ ActionIO $ \p -> do
---   meta <- case p.meta ^? metadata of
---     Just m  -> pure m
---     Nothing -> error $ "loadFlowArguments: Cannot get metadata"
---   a    <- case parseFlowArguments p.args of
---     Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
---     Right ioa -> ioa
---   action meta a
+liftHaskellPhonyFun res action =
+  basicLiftPhony res $ ActionPhony $ HaskFlowPhony action
 
 
 

@@ -190,7 +190,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
             _  -> BL.writeFile (build </> "ext_meta.json") $ JSON.encode ext_meta_json
           let param = ParamFlow { meta = meta
                                 , args = params
-                                , out  = Just build
+                                , out  = OutputRes build
                                 }
           case dataflow.flow of
             Action io -> runDataflow io param
@@ -200,10 +200,10 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
       WorkflowPhony phony -> do
         let param = ParamFlow{ meta = meta
                              , args = params
-                             , out  = Nothing
+                             , out  = OutputPhony
                              }
         case phony of
-          Action io -> runDataflow io param
+          ActionPhony io -> runPhony io param
     -- Signal that we successfully completed execution
     case fun.output of
       RunDataflow b _ -> clearBarrier b
