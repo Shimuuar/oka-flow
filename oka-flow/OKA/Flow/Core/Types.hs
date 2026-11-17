@@ -26,6 +26,7 @@ import Data.ByteString.Char8  qualified as BC8
 import Data.ByteString.Base16 qualified as Base16
 import Data.Text              qualified as T
 import Data.Text.Encoding     qualified as T
+import Data.Foldable
 import System.FilePath        ((</>))
 
 import OKA.Metadata
@@ -119,3 +120,14 @@ instance (r ~ Result) => IsDataflow (BasicFlow r) where
   runDataflow (BasicFlow f) = f
 instance (r ~ Phony) => IsPhony (BasicFlow r) where
   runPhony (BasicFlow f) = f
+
+instance IsDataflow a => IsDataflow [a] where
+  runDataflow xs p = traverse_ (flip runDataflow p) xs
+
+instance IsDataflow a => IsDataflow (Maybe a) where
+  runDataflow xs p = traverse_ (flip runDataflow p) xs
+
+instance (IsDataflow a, IsDataflow b) => IsDataflow (a,b) where
+  runDataflow (a,b) p = do
+    runDataflow a p
+    runDataflow b p
