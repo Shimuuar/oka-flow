@@ -156,7 +156,7 @@ prepareFun
   -> ExtMetaCache                       -- External metadata
   -> Fun r (OutputRun r)                -- Function to evaluate
   -> IO ()
-prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ do
+prepareFun ctx fgr@FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> case outputOf fid of
     RunDataflow b _ -> checkBarrier b
@@ -165,14 +165,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
   meta <- traverseMetadata (lookupExtCache ext_meta) fun.metadata
   -- Collect list of external metadata
   let ext_meta_json :: [(StorePath,[JSON.Key])]
-      ext_meta_json = flip appEndo []
-               $ getConst
-               $ traverseMetadata getExt fun.metadata where
-        getExt :: forall x. IsMetaPrim x => AResult -> Const (Endo [(StorePath,[JSON.Key])]) x
-        getExt r = Const $ Endo ((case Map.lookup r gr of
-                                    Nothing -> error "INTERNAL ERROR: missing external meta"
-                                    Just Fun{output=RunDataflow _ p} -> p
-                                 , metaLocation @x):)
+      ext_meta_json = extractMetaPaths fgr fun.metadata
   -- Request resources & run action
   withResources ctx.res fun.resources $ do
     () <- case fun.workflow of
@@ -310,3 +303,18 @@ prepareExtMetaCache ctx gr targets = do
         Right js -> case decodeMetadataPrimEither js of
           Left  e -> throw e
           Right a -> pure a
+
+extractMetaPaths
+  :: FlowGraph OutputRun
+  -> MetadataF AResult
+  -> [(StorePath,[JSON.Key])]
+extractMetaPaths gr meta
+  = flip appEndo []
+  $ getConst
+  $ traverseMetadata getExt meta
+  where
+     getExt :: forall x. IsMetaPrim x => AResult -> Const (Endo [(StorePath,[JSON.Key])]) x
+     getExt r = Const $ Endo ((case Map.lookup r gr.graph of
+                                 Nothing -> error "INTERNAL ERROR: missing external meta"
+                                 Just Fun{output=RunDataflow _ p} -> p
+                              , metaLocation @x):)
