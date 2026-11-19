@@ -9,6 +9,7 @@ module OKA.Flow.Internal.Util
   , Barrier
   , newBarrier
   , newOpenBarrier
+  , newBarrickadedBarrier
   , checkBarrier
   , clearBarrier
   ) where
@@ -33,18 +34,31 @@ once action = do
                     return (Just a, a)
 
 
+
 -- | Barrier which blocks thread until it's cleared
-newtype Barrier = Barrier (MVar ())
+newtype Barrier = Barrier (MVar BarrierState)
+
+data BarrierState
+  = BarrierOpen   -- ^ Dependency evaluated OK
+  | BarrierFailed -- ^ Dependency failed
+  | Barrickaded   -- ^ Dependency shouldn't be evaluated at all
 
 newBarrier :: IO Barrier
 newBarrier = Barrier <$> newEmptyMVar
 
 newOpenBarrier :: IO Barrier
-newOpenBarrier = Barrier <$> newMVar ()
-  
+newOpenBarrier = Barrier <$> newMVar BarrierOpen
+
+newBarrickadedBarrier :: IO Barrier
+newBarrickadedBarrier = Barrier <$> newMVar Barrickaded
+
+
 checkBarrier :: Barrier -> IO ()
-checkBarrier (Barrier mv) = readMVar mv
+checkBarrier (Barrier mv) = readMVar mv >>= \case
+  BarrierOpen   -> pure ()
+  BarrierFailed -> error "Dependency failed"
+  Barrickaded   -> error "INTERNAL error: bad dependency"
 
 clearBarrier :: Barrier -> IO ()
-clearBarrier (Barrier mv) = () <$ tryPutMVar mv ()
+clearBarrier (Barrier mv) = () <$ tryPutMVar mv BarrierOpen
 

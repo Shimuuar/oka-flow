@@ -141,7 +141,7 @@ addMVars FIDSet{exists,wanted} gr = do
     (\fid fun -> do
         v <- if | fid `Set.member` exists -> newOpenBarrier
                 | fid `Set.member` wanted -> newBarrier
-                | otherwise               -> newBarrier -- FIXME: I want barrier which marks flow which will not execute
+                | otherwise               -> newBarrickadedBarrier
         pure $ (\(PathDataflow p) -> RunDataflow v p) <$> fun
     ) gr.graph
   pure gr{ graph = graph
