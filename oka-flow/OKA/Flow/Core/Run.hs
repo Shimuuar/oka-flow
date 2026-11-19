@@ -31,7 +31,7 @@ import Effectful.State.Static.Local qualified as Eff
 
 import System.FilePath              ((</>))
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
-                                     doesDirectoryExist)
+                                     doesDirectoryExist,removePathForcibly)
 import GHC.Stack
 import GHC.Generics                (Generic,Generically(..))
 
@@ -86,6 +86,8 @@ data FlowOpts = FlowOpts
   { keepGoing :: !(Last Bool)
     -- ^ If @True@ will try to evaluate all workflows instead of
     -- failed with error.
+  , keepDirAfterFailure :: !(Last Bool)
+    -- ^ If true do not remove directories after failure
   }
   deriving stock (Show,Eq,Generic)
   deriving (Semigroup,Monoid) via Generically FlowOpts
@@ -192,7 +194,7 @@ prepareFun ctx fgr@FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun
         let path = case fun.output of RunDataflow _ p -> p
         ctx.logger.start path
         t1 <- getCurrentTime
-        () <- withBuildDirectory ctx.root path $ \build -> do
+        () <- withBuildDirectory ctx.opts ctx.root path $ \build -> do
           BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
           BL.writeFile (build </> "deps.json") $ JSON.encode paramP
           case ext_meta_json of
@@ -240,11 +242,16 @@ crashReport logger fun = handle $ \e0@(SomeException e) -> do
   throwIO e
 
 -- Create directory with -build prefix and rename it to final name
-withBuildDirectory :: FilePath -> StorePath -> (FilePath -> IO a) -> IO a
-withBuildDirectory root path action = do
+withBuildDirectory :: FlowOpts -> FilePath -> StorePath -> (FilePath -> IO a) -> IO a
+withBuildDirectory opts root path action = do
   createDirectoryIfMissing False group
-  createDirectory build
-  a <- action build `onException` removeDirectoryRecursive build
+  removePathForcibly build
+  createDirectory    build
+  a <- action build `onException`
+    (case opts.keepDirAfterFailure of
+       Last (Just True) -> pure ()
+       _                -> removeDirectoryRecursive build
+    )
   a <$ renameDirectory build out
   where
     group = root </> path.name
