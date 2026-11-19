@@ -116,7 +116,7 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
                      (getStorePath targets.wanted)
   -- Prepare dictionary of external metadata which is loaded from
   -- store path
-  ext_meta <- prepareExtMetaCache ctx gr_exe targets
+  ext_meta <- prepareExtMetaCache ctx gr_exe
   -- Evaluator
   mapConcurrently_ id
     $ [ prepareFun ctx gr_exe ext_meta f
@@ -159,6 +159,8 @@ prepareFun
 prepareFun ctx fgr@FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> case outputOf fid of
+    RunDataflow b _ -> checkBarrier b
+  for_ fun.metadata $ \fid -> case outputOf fid of
     RunDataflow b _ -> checkBarrier b
   -- Compute metadata which should be passed to the workflow by
   -- applying data loaded from
@@ -266,9 +268,8 @@ prepareExtMetaCache
   :: (HasCallStack)
   => FlowCtx eff
   -> FlowGraph OutputRun
-  -> FIDSet
   -> IO ExtMetaCache
-prepareExtMetaCache ctx gr targets = do
+prepareExtMetaCache ctx gr = do
   cache <- traverse (\(SomeExtMeta io) -> SomeExtMeta <$> once io)
          $ Map.fromList
          $ flip appEndo []
@@ -283,13 +284,7 @@ prepareExtMetaCache ctx gr targets = do
       = Const
       $ Endo
       ( ( (typeRep (Proxy @a), fid)
-        , SomeExtMeta $ if
-            | fid `Set.member` targets.wanted ->
-                case (gr.graph ! fid).output of
-                  RunDataflow b _ -> do checkBarrier b
-                                        readMeta @a path
-            | otherwise ->
-                do readMeta @a path
+        , SomeExtMeta $ readMeta @a path
         )
       :)
       where
