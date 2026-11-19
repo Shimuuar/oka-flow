@@ -10,9 +10,11 @@ module OKA.Flow.Core.Run
   ) where
 
 import Control.Applicative
+import Control.Concurrent
 import Control.Concurrent.Async
 import Control.Exception
 import Control.Lens
+import Control.Monad.Trans.Cont
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
@@ -74,6 +76,7 @@ data FlowCtx eff = FlowCtx
     -- ^ Resources which are available for evaluator.
   , logger    :: FlowLogger
     -- ^ Logger for evaluator
+  , keepGoing :: !Bool
   }
 
 
@@ -118,13 +121,16 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
   -- store path
   ext_meta <- prepareExtMetaCache ctx gr_exe
   -- Evaluator
-  mapConcurrently_ id
-    $ [ prepareFun ctx gr_exe ext_meta f
-      | f <- toList gr_exe.phony
-      ]
-   ++ [ prepareFun ctx gr_exe ext_meta (gr_exe.graph ! i)
-      | i <- Set.toList targets.wanted
-      ]
+  let actions
+        = [ prepareFun ctx gr_exe ext_meta f
+          | f <- toList gr_exe.phony
+          ]
+       ++ [ prepareFun ctx gr_exe ext_meta (gr_exe.graph ! i)
+          | i <- Set.toList targets.wanted
+          ]
+  case ctx.keepGoing of
+    False -> evalFailFast  actions
+    True  -> evalKeepGoing actions
   where
     addTargets r = flowTgtL %~ mappend ((Set.fromList . toList . toS) r)
     targetExists path = doesDirectoryExist (ctx.root </> storePath path)
@@ -243,6 +249,38 @@ withBarrier out action = case out of
     a <- restore action `onException` failBarrier b
     a <$ clearBarrier b
 
+-- Filter away exception internal for async
+filterException :: SomeException -> Maybe SomeException
+filterException e0@(SomeException e)
+ | Just AsyncCancelled       <- cast e = Nothing
+ | Just SomeAsyncException{} <- cast e = Nothing
+ | otherwise                           = Just e0
+
+-- Simple evaluator which fails fast
+evalFailFast :: [IO ()] -> IO ()
+evalFailFast actions = evalContT $ do
+  tid <- liftIO myThreadId
+  as  <- traverse (ContT . withAsync)
+    [ io `catch` (\e -> case filterException e of
+                     Nothing -> pure ()
+                     Just e' -> throwTo tid e')
+    | io <- actions
+    ]
+  liftIO $ traverse_ wait as
+
+-- Evaluator which tries too evaluate all possible jobs
+evalKeepGoing :: [IO ()] -> IO ()
+evalKeepGoing actions = evalContT $ do
+  as  <- traverse (ContT . withAsync) actions
+  liftIO $ do
+    rs <- traverse waitCatch as
+    let errs = [ e1
+               | Left e0 <- rs
+               , Just e1 <- [filterException e0]
+               ]
+    case errs of
+      [] -> pure ()
+      _  -> error $ unlines $ show <$> errs
 
 
 ----------------------------------------------------------------

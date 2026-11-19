@@ -17,6 +17,8 @@ module OKA.Flow.Internal.Util
 
 import Control.Concurrent.MVar
 import Data.Typeable
+import OKA.Flow.Core.Types (DependencyFailed)
+
 
 typeName :: forall a. Typeable a => String
 typeName = show (typeOf (undefined :: a))

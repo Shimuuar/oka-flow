@@ -18,8 +18,11 @@ module OKA.Flow.Core.Types
   , IsDataflow(..)
   , IsPhony(..)
   , BasicFlow(..)
+    -- * Exceptions
+  , DependencyFailed(..)
   ) where
 
+import Control.Exception
 import Data.Aeson             qualified as JSON
 import Data.ByteString        (ByteString)
 import Data.ByteString.Char8  qualified as BC8
@@ -131,3 +134,10 @@ instance (IsDataflow a, IsDataflow b) => IsDataflow (a,b) where
   runDataflow (a,b) p = do
     runDataflow a p
     runDataflow b p
+
+----------------------------------------------------------------
+
+data DependencyFailed = DependencyFailed
+  deriving stock Show
+
+instance Exception DependencyFailed

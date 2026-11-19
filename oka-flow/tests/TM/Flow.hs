@@ -6,6 +6,7 @@
 -- |
 module TM.Flow (tests) where
 
+import Control.Exception
 import Control.Lens
 import Control.Monad
 import Data.IORef
@@ -27,6 +28,7 @@ import OKA.Flow.Std
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Types
+import OKA.Flow.Core.Flow
 import OKA.Flow.Eff.Cache
 import OKA.Flow.Tools
 import OKA.Flow
@@ -230,6 +232,17 @@ tests = testGroup "Run flow"
         assertFlowEq "N eval 1" 2 =<< liftEff (liftIO (readIORef cnt))
         -- Metadata changes in cached function are discarded
         assertFlowEq "metadata" (CounterMeta 200) =<< use (metadata @(CounterMeta "A"))
+  , testCase "keep-going" $ withSimpleFlowKG True $ \ctx -> do
+      (obsA, flowA) <- flowProduceInt @"nA"
+      (obsS, flowS) <- flowSquare
+      let meta = toMetadata (CounterMeta 100 :: CounterMeta "nA")
+          flow = do a <- flowA ()
+                    want =<< liftWorkflow () "failure"
+                      (HaskFlow $ \() () -> Number 0 <$ error "FAIL") ()
+                    flowS a
+      _ <- try @SomeException $ runFlow ctx meta flow
+      observe "flow A" obsA [100]
+      observe "flow S" obsS [100_00]
   , testCase "memoize" $ withSimpleFlow $ \ctx -> do
       cnt <- newIORef (0::Int)
       runFlow ctx mempty $ do
@@ -249,12 +262,16 @@ tests = testGroup "Run flow"
   ]
 
 withSimpleFlow :: (FlowCtx '[CacheE,IOE] -> IO a) -> IO a
-withSimpleFlow action = withSystemTempDirectory "oka-flow" $ \dir -> do
+withSimpleFlow = withSimpleFlowKG False
+
+withSimpleFlowKG :: Bool -> (FlowCtx '[CacheE,IOE] -> IO a) -> IO a
+withSimpleFlowKG kg action = withSystemTempDirectory "oka-flow" $ \dir -> do
   res <- createResource (LockCoreCPU 4)
   action FlowCtx { root      = dir
                  , runEffect = runCacheE
                  , res       = res
                  , logger    = mempty
+                 , keepGoing = kg
                  }
 
 
