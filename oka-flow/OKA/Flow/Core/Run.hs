@@ -5,6 +5,7 @@
 -- Evaluator of dataflow graph.
 module OKA.Flow.Core.Run
   ( FlowCtx(..)
+  , FlowOpts(..)
   , FlowLogger(..)
   , runFlow
   ) where
@@ -20,7 +21,7 @@ import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
 import Data.Map.Strict              (Map,(!))
 import Data.Map.Strict              qualified as Map
-import Data.Monoid                  (Endo(..))
+import Data.Monoid                  (Endo(..),Last(..))
 import Data.Set                     qualified as Set
 import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import Data.Typeable
@@ -76,9 +77,18 @@ data FlowCtx eff = FlowCtx
     -- ^ Resources which are available for evaluator.
   , logger    :: FlowLogger
     -- ^ Logger for evaluator
-  , keepGoing :: !Bool
+  , opts      :: FlowOpts
+    -- ^ Evaluation options
   }
 
+-- | Evaluation options
+data FlowOpts = FlowOpts
+  { keepGoing :: !(Last Bool)
+    -- ^ If @True@ will try to evaluate all workflows instead of
+    -- failed with error.
+  }
+  deriving stock (Show,Eq,Generic)
+  deriving (Semigroup,Monoid) via Generically FlowOpts
 
 data OutputRun f where
   RunDataflow :: Barrier -> StorePath -> OutputRun Result
@@ -128,9 +138,9 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
        ++ [ prepareFun ctx gr_exe ext_meta (gr_exe.graph ! i)
           | i <- Set.toList targets.wanted
           ]
-  case ctx.keepGoing of
-    False -> evalFailFast  actions
-    True  -> evalKeepGoing actions
+  case ctx.opts.keepGoing of
+    Last (Just True) -> evalKeepGoing actions
+    _                -> evalFailFast  actions
   where
     addTargets r = flowTgtL %~ mappend ((Set.fromList . toList . toS) r)
     targetExists path = doesDirectoryExist (ctx.root </> storePath path)

@@ -15,6 +15,7 @@ import Data.Foldable
 import Data.List        (sort)
 import Data.Map.Strict  qualified as Map
 import Data.Map.Strict  (Map)
+import Data.Monoid      (Last(..))
 import Effectful
 import System.IO.Temp   (withSystemTempDirectory)
 import System.FilePath  (splitPath)
@@ -29,6 +30,7 @@ import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Types
 import OKA.Flow.Core.Flow
+import OKA.Flow.Core.Run
 import OKA.Flow.Eff.Cache
 import OKA.Flow.Tools
 import OKA.Flow
@@ -271,7 +273,7 @@ withSimpleFlowKG kg action = withSystemTempDirectory "oka-flow" $ \dir -> do
                  , runEffect = runCacheE
                  , res       = res
                  , logger    = mempty
-                 , keepGoing = kg
+                 , opts      = mempty { keepGoing = Last (Just kg) }
                  }
 
 
