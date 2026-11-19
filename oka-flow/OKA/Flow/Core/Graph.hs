@@ -138,22 +138,23 @@ deduplicateGraph gr
     replaceKey f = f { param    = replace <$> f.param
                      , metadata = replace <$> f.metadata
                      }
+      where replace fid = replacement ^. at fid . non fid
     -- FIDs of duplicate
-    dupes       = Set.fromList [ fid | _ :| fids <- toList fid_mapping
-                                     , fid       <- fids
-                                     ]
+    dupes = Set.fromList [ fid | _ :| fids <- toList fid_mapping
+                               , fid       <- fids
+                               ]
     -- Mapping for replacing FID
-    replace fid = replacement ^. at fid . non fid
+    replacement :: Map AResult AResult
     replacement = Map.fromList [ (dup,fid) | fid :| fids <- toList fid_mapping
                                            , dup <- fids
                                            ]
     -- Workflows that has more than one FID
-    fid_mapping
-      = Map.mapMaybe NE.nonEmpty
-      $ Map.fromListWith (<>) [(hash, [fid])
-                              | (fid,f)          <- Map.toList gr.graph
-                              , let PathDataflow (StorePath _ hash) = f.output
-                              ]
+    fid_mapping :: Map Hash (NonEmpty AResult)
+    fid_mapping = Map.fromListWith (<>)
+      [(hash, NE.singleton fid)
+      | (fid,f)          <- Map.toList gr.graph
+      , let PathDataflow (StorePath _ hash) = f.output
+      ]
 
 -- | Remove all workflows that already completed execution.
 shakeFlowGraph
@@ -182,9 +183,8 @@ shakeFlowGraph tgtExists gr
       | fid `Set.member` fids.wanted = pure fids
       -- Check if result has been computed already
       | otherwise = do
-          exists <- case f.workflow of
-            WorkflowNormal _ -> case f.output of
-              PathDataflow p -> tgtExists p
+          exists <- case f.output of
+            PathDataflow p -> tgtExists p
           case exists of
             True  -> pure $ fids & fidExistsL %~ Set.insert fid
             False -> foldAddFID f.param
@@ -266,10 +266,8 @@ fidWantedL = lens (.wanted) (\f x -> f {wanted = x})
 flowTgtL :: Lens' (FlowGraph f) (Set AResult)
 flowTgtL = lens (.targets) (\x s -> x {targets = s})
 
--- flowGraphL :: Lens (FlowGraph ph gr) (FlowGraph ph x) (Map AResult (Fun Result gr)) (Map AResult (Fun Result x))
 flowGraphL :: Lens' (FlowGraph f) (Map AResult (Fun Result (f Result)))
 flowGraphL = lens (.graph) (\FlowGraph{..} s -> FlowGraph{graph = s, ..})
 
--- flowPhonyL :: Lens (FlowGraph ph gr) (FlowGraph x gr) (Map APhony (Fun Phony ph)) (Map APhony (Fun Phony x))
 flowPhonyL :: Lens' (FlowGraph f) (Map APhony (Fun Phony (f Phony)))
 flowPhonyL = lens (.phony) (\FlowGraph{..} s -> FlowGraph{phony = s, ..})
