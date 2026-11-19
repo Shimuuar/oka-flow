@@ -12,6 +12,7 @@ module OKA.Flow.Internal.Util
   , newBarrickadedBarrier
   , checkBarrier
   , clearBarrier
+  , failBarrier
   ) where
 
 import Control.Concurrent.MVar
@@ -62,3 +63,5 @@ checkBarrier (Barrier mv) = readMVar mv >>= \case
 clearBarrier :: Barrier -> IO ()
 clearBarrier (Barrier mv) = () <$ tryPutMVar mv BarrierOpen
 
+failBarrier :: Barrier -> IO ()
+failBarrier (Barrier mv) = () <$ tryPutMVar mv BarrierFailed

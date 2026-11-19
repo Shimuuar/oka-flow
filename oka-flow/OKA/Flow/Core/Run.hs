@@ -169,8 +169,8 @@ prepareFun ctx fgr@FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun
   let ext_meta_json :: [(StorePath,[JSON.Key])]
       ext_meta_json = extractMetaPaths fgr fun.metadata
   -- Request resources & run action
-  withResources ctx.res fun.resources $ do
-    () <- case fun.workflow of
+  withResources ctx.res fun.resources $ withBarrier fun.output $ do
+    case fun.workflow of
       -- Execution of normal workflow
       WorkflowNormal dataflow -> do
         let path = case fun.output of RunDataflow _ p -> p
@@ -198,10 +198,6 @@ prepareFun ctx fgr@FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun
                              }
         case phony of
           ActionPhony io -> runPhony io param
-    -- Signal that we successfully completed execution
-    case fun.output of
-      RunDataflow b _ -> clearBarrier b
-      RunPhony        -> pure ()
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output
@@ -239,12 +235,19 @@ withBuildDirectory root path action = do
     out   = root </> storePath path
     build = out <> "-build"
 
+-- Correctly mark barrier
+withBarrier :: OutputRun f -> IO a -> IO a
+withBarrier out action = case out of
+  RunPhony        -> action
+  RunDataflow b _ -> mask $ \restore -> do
+    a <- restore action `onException` failBarrier b
+    a <$ clearBarrier b
+
 
 
 ----------------------------------------------------------------
 -- Cache for external metadata. We only want to load data once
 ----------------------------------------------------------------
-
 
 newtype ExtMetaCache = ExtMetaCache (Map (TypeRep, AResult) SomeExtMeta)
 
