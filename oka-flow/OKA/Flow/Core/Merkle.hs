@@ -3,8 +3,6 @@
 module OKA.Flow.Core.Merkle
   ( Merkle(..)
   , hashMerkle
-  , hashMeta
-  , hashS
   ) where
 
 import Crypto.Hash.SHA1             qualified as SHA1

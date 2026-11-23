@@ -18,61 +18,29 @@ module OKA.Flow.Tools
     -- ** Deriving via
   , AsMetaEncoded(..)
   , AsFlowInput(..)
-    -- * Class for polymorphic parameters
-  , SequenceOf(..)
     -- * Lifting of haskell function
   , liftHaskellFun
-  , liftHaskellFunMeta
   , liftHaskellFun_
-  , liftHaskellFunMeta_
   , liftHaskellPhonyFun
-  , liftHaskellPhonyFunMeta
     -- * Calling of external executables
   , liftExecutable
   , liftPhonyExecutable
-    -- ** Calling conventions
-  , callStandardExe
-  , callInEnvironment
-  , callInEnvironmentF
-  , callViaArgList
-  , ccModifyArgs
-  , ccSetArgs
-  , ccAddEnv
-  , ccStdin
-  , ccStdout
-  , ccStdinBS
-  , ccStdinBL
-  , ccStdinText
-  , ccStdinString
     -- * Primitives for creating flows
   , basicLiftWorkflow
   , basicLiftPhony
-    -- * Encoding\/decoding of S-expressions
-  , sexpToArgs
-  , sexpFromArgs
     -- * Creating executables
   , metaFromStdin
   , loadParametersFromCLI
   ) where
 
-import Control.Applicative
 import Control.Exception
 import Control.Lens                 ((<&>),(^?))
-import Data.Coerce
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
-import Data.ByteString              qualified as BS
 import Data.ByteString.Lazy         qualified as BL
-import Data.Monoid                  (Endo(..))
-import Data.Text                    (Text)
-import Data.Text                    qualified as T
-import Data.Text.Encoding           qualified as T
 import System.FilePath              ((</>))
-import System.IO.Temp
-import System.IO                    (hClose,hPutStr)
 import System.Environment           (getArgs)
 
-import GHC.Generics hiding (S)
 import GHC.Stack
 
 import OKA.Metadata
@@ -81,7 +49,6 @@ import OKA.Flow.Core.Types
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.S
 import OKA.Flow.Core.Flow
-import OKA.Flow.Internal.Parser
 
 
 ----------------------------------------------------------------
@@ -126,63 +93,6 @@ class (ToS (AsRes a)) => FlowArgument a where
   -- |
   parameterShape :: (forall x. Result x) -> a -> AsRes a
 
-
-
-----------------------------------------------------------------
--- SequenceOf
-----------------------------------------------------------------
-
--- | Convenience type class for collecting list of results for passing
---   for flow which simply accept uniform lists of parameters
-class SequenceOf x a where
-  sequenceOf :: a -> [Result x]
-
-instance SequenceOf x (Result x) where
-  sequenceOf p = [p]
-deriving via Generically (a,b)
-    instance (SequenceOf x a, SequenceOf x b) => SequenceOf x (a,b)
-deriving via Generically (a,b,c)
-    instance (SequenceOf x a, SequenceOf x b, SequenceOf x c) => SequenceOf x (a,b,c)
-deriving via Generically (a,b,c,d)
-    instance (SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
-             ) => SequenceOf x (a,b,c,d)
-deriving via Generically (a,b,c,d,e)
-    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
-             , SequenceOf x e
-             ) => SequenceOf x (a,b,c,d,e)
-deriving via Generically (a,b,c,d,e,f)
-    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
-             , SequenceOf x e, SequenceOf x f
-             ) => SequenceOf x (a,b,c,d,e,f)
-deriving via Generically (a,b,c,d,e,f,g)
-    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
-             , SequenceOf x e, SequenceOf x f, SequenceOf x g
-             ) => SequenceOf x (a,b,c,d,e,f,g)
-deriving via Generically (a,b,c,d,e,f,g,h)
-    instance ( SequenceOf x a, SequenceOf x b, SequenceOf x c, SequenceOf x d
-             , SequenceOf x e, SequenceOf x f, SequenceOf x g, SequenceOf x h
-             ) => SequenceOf x (a,b,c,d,e,f,g,h)
-
-
-instance (SequenceOf x a) => SequenceOf x [a] where
-  sequenceOf = concatMap sequenceOf
-
--- | This instance could be used to derive SequenceOf instance
---   with @DerivingVia@
-instance (Generic a, GSequenceOf x (Rep a)) => SequenceOf x (Generically a) where
-  sequenceOf (Generically a) = gsequenceOf (from a)
-
-
-class GSequenceOf x f where
-  gsequenceOf :: f p -> [Result x]
-
-deriving newtype instance GSequenceOf x f => GSequenceOf x (M1 c i f)
-
-instance (GSequenceOf x f, GSequenceOf x g) => GSequenceOf x (f :*: g) where
-  gsequenceOf (f :*: g) = gsequenceOf f <> gsequenceOf g
-
-instance (SequenceOf x a) => GSequenceOf x (K1 i a) where
-  gsequenceOf = coerce (sequenceOf @x @a)
 
 
 ----------------------------------------------------------------
@@ -313,7 +223,7 @@ liftHaskellFun
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , flow = ActionIO $ \_ p -> do
+  , flow = ActionIO $ \p -> do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
@@ -321,25 +231,6 @@ liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
         Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
         Right ioa -> ioa
       b <- action meta a
-      case p.out of
-        Just out -> writeOutput out b
-        Nothing  -> error "liftHaskellFun: output is required"
-  }
-
--- | Same as 'liftHaskellFun' but passes noninterpreted metadata.
-liftHaskellFunMeta
-  :: (FlowArgument a, FlowOutput b, ResourceClaim res, HasCallStack)
-  => String                  -- ^ Name of flow
-  -> res                     -- ^ Resources required by workflow
-  -> (Metadata -> a -> IO b) -- ^ IO action
-  -> (AsRes a -> Flow eff (Result b))
-liftHaskellFunMeta name res action = basicLiftWorkflow res $ Dataflow
-  { name = name
-  , flow = ActionIO $ \_ p -> do
-      a <- case parseFlowArguments p.args of
-        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-        Right ioa -> ioa
-      b <- action p.meta a
       case p.out of
         Just out -> writeOutput out b
         Nothing  -> error "liftHaskellFun: output is required"
@@ -358,7 +249,7 @@ liftHaskellFun_
   -> (AsRes a -> Flow eff (Result b))
 liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
   { name = name
-  , flow = ActionIO $ \_ p -> do
+  , flow = ActionIO $ \p -> do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
@@ -370,23 +261,6 @@ liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
         Nothing  -> error "liftHaskellFun: output is required"
   }
 
--- | Same as 'liftHaskellFun_' but passes noninterpreted metadata.
-liftHaskellFunMeta_
-  :: (FlowArgument a, ResourceClaim res, HasCallStack)
-  => String                               -- ^ Name of flow
-  -> res                                  -- ^ Resources required by workflow
-  -> (FilePath -> Metadata -> a -> IO ()) -- ^ IO action
-  -> (AsRes a -> Flow eff (Result b))
-liftHaskellFunMeta_ name res action = basicLiftWorkflow res $ Dataflow
-  { name = name
-  , flow = ActionIO $ \_ p -> do
-      a <- case parseFlowArguments p.args of
-        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-        Right ioa -> ioa
-      case p.out of
-        Just out -> action out p.meta a
-        Nothing  -> error "liftHaskellFun: output is required"
-  }
 
 
 ----------------------------------------------------------------
@@ -421,7 +295,7 @@ liftHaskellPhonyFun
   => res                  -- ^ Resources required by workflow
   -> (meta -> a -> IO ()) -- ^ IO action
   -> (AsRes a -> Flow eff ())
-liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \_ p -> do
+liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \p -> do
   meta <- case p.meta ^? metadata of
     Just m  -> pure m
     Nothing -> error $ "loadFlowArguments: Cannot get metadata"
@@ -430,184 +304,6 @@ liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \_ p -> do
     Right ioa -> ioa
   action meta a
 
-
--- | Same as 'liftHaskellFun' but passes noninterpreted metadata.
-liftHaskellPhonyFunMeta
-  :: (FlowArgument a, ResourceClaim res, HasCallStack)
-  => res                      -- ^ Resources required by workflow
-  -> (Metadata -> a -> IO ()) -- ^ IO action
-  -> (AsRes a -> Flow eff ())
-liftHaskellPhonyFunMeta res action = basicLiftPhony res $ ActionIO $ \_ p -> do
-  a <- case parseFlowArguments p.args of
-    Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-    Right ioa -> ioa
-  action p.meta a
-
-
--- | Standard calling conventions for external process.
---
---  * JSON-encoded metadata is passed to process via stdin.
---
---  * Arguments are passed via command line serialized as S-expression
---
---  * Working directory is set to output directory
-callStandardExe
-  :: (HasCallStack)
-  => FilePath
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callStandardExe exe p action = action ProcessData
-  { executable = exe
-  , stdin      = StdinBS $ JSON.encode $ encodeMetadata p.meta
-  , stdout     = Inherit
-  , env        = []
-  , args       = CmdArg <$> sexpToArgs p.args
-  , workdir    = p.out
-  }
-
--- | Pass arguments in the environment.
---
--- * Metadata is written in temporary file. It's stored in
---   @OKA_META@ environment variable.
---
--- * Arguments are passed in the same way as in 'callStandardExe' but
---   in environment variables @OKA_ARG_1@, @OKA_ARG_2@, etc.
---
--- * Working directory is set to output directory. Additionally it's
---   stored in @OKA_OUT@ environment variable.
-callInEnvironment
-  :: (HasCallStack)
-  => FilePath
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callInEnvironment exe p action =
-  withSystemTempFile "oka-flow-metadata-" $ \file_meta h -> do
-    -- Write metadata to temporary file
-    BL.hPutStr h $ JSON.encode $ encodeMetadata p.meta
-    hClose h
-    -- Populate environment
-    let env = case p.out of
-                Nothing -> id
-                Just d  -> (("OKA_OUT", d):)
-            $ ("OKA_META", file_meta)
-            : [ ("OKA_ARG_" ++ show i, arg)
-              | (i,arg) <- [1::Int ..] `zip` sexpToArgs p.args
-              ]
-    action ProcessData
-      { executable = exe
-      , stdin      = DevNullIn
-      , stdout     = Inherit
-      , env        = env
-      , args       = []
-      , workdir    = p.out
-      }
-
--- | Pass arguments in the environment.
---
--- * Metadata is written in temporary file. It's stored in
---   @OKA_META@ environment variable.
---
--- * Arguments are written into temporary file one value on each line.
---   File name is stored in @OKA_ARGS@ environment variable.
---
--- * Working directory is set to output directory. Additionally it's
---   stored in @OKA_OUT@ environment variable.
-callInEnvironmentF
-  :: (HasCallStack)
-  => FilePath
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callInEnvironmentF exe p action =
-  withSystemTempFile "oka-flow-metadata-" $ \file_meta h_meta ->
-  withSystemTempFile "oka-flow-metadata-" $ \file_args h_args -> do
-    -- Write metadata to temporary file
-    BL.hPutStr h_meta $ JSON.encode $ encodeMetadata p.meta
-    hClose h_meta
-    -- Write arguments to temporary file
-    hPutStr h_args $ unlines $ sexpToArgs p.args
-    hClose h_args
-    -- Populate environment
-    let env = case p.out of
-                Nothing -> id
-                Just d  -> (("OKA_OUT", d):)
-            $ ("OKA_META", file_meta)
-            : ("OKA_ARGS", file_args)
-            : []
-    action ProcessData
-      { executable = exe
-      , stdin      = DevNullIn
-      , stdout     = Inherit
-      , env        = env
-      , args       = []
-      , workdir    = p.out
-      }
-
-
--- | Call executable where all parameters are passing via command line
---   parameters.
---
---  * Metadata is discarded
---
---  * Working dir is set to output directory
-callViaArgList
-  :: (HasCallStack)
-  => FilePath                 -- ^ Executable
-  -> (S FilePath -> [CmdArg]) -- ^ How to transform list of store pathes
-  -> ParamFlow FilePath
-  -> (ProcessData -> IO a)
-  -> IO a
-callViaArgList exe fun p action = action $ ProcessData
-  { executable = exe
-  , stdin      = DevNullIn
-  , stdout     = Inherit
-  , env        = []
-  , args       = fun p.args
-  , workdir    = p.out
-  }
-
-
--- | Modify argument list of a program
-ccModifyArgs :: ([CmdArg] -> [CmdArg]) -> CallExe -> CallExe
-ccModifyArgs fun call p action = call p $ \ProcessData{..} -> do
-  action ProcessData{args = fun args, ..}
-
--- | Prepend arguments to list being passed to flow. They are not
---   modified.
-ccSetArgs :: [CmdArg] -> CallExe -> CallExe
-ccSetArgs xs call p action = call p $ \ProcessData{..} -> do
-  action ProcessData{args = xs, ..}
-
--- | Add values to environment variables
-ccAddEnv :: [(String,String)] -> CallExe -> CallExe
-ccAddEnv xs cc p action =
-  cc p (\ProcessData{..} -> action ProcessData{env = xs ++ env, ..})
-
-ccStdin :: Stdin -> CallExe -> CallExe
-ccStdin dat call p action
-  = call p $ \ProcessData{..} -> action ProcessData{stdin = dat, ..}
-
-ccStdout :: Stdout -> CallExe -> CallExe
-ccStdout dat call p action
-  = call p $ \ProcessData{..} -> action ProcessData{stdout = dat, ..}
-
--- | Pass strict bytestring to process's stdin.
-ccStdinBL :: BL.ByteString -> CallExe -> CallExe
-ccStdinBL dat = ccStdin (StdinBS dat)
-
--- | Pass lazy bytestring to process's stdin.
-ccStdinBS :: BS.ByteString -> CallExe -> CallExe
-ccStdinBS dat = ccStdinBL (BL.fromStrict dat)
-
--- | Pass strict text to process's stdin. It will be UTF8 encoded.
-ccStdinText :: Text -> CallExe -> CallExe
-ccStdinText dat = ccStdinBS (T.encodeUtf8 dat)
-
--- | Pass string to process's stdin. It will be UTF8 encoded.
-ccStdinString :: String -> CallExe -> CallExe
-ccStdinString dat = ccStdinText (T.pack dat)
 
 
 ----------------------------------------------------------------
@@ -631,33 +327,3 @@ loadParametersFromCLI = do
   case parseFlowArguments s of
     Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
     Right ioa -> ioa
-
-
-----------------------------------------------------------------
--- Conversion
-----------------------------------------------------------------
-
-sexpToArgs :: S FilePath -> [FilePath]
-sexpToArgs Nil = []
-sexpToArgs s0  = ($ []) $ appEndo $ go s0 where
-  go = \case
-    Nil     -> cons "-"
-    Atom  a -> cons ('!':a)
-    Param p -> cons p
-    S xs    -> cons "(" <> foldMap go xs <> cons ")"
-  cons s = Endo (s:)
-
-sexpFromArgs :: [FilePath] -> Either String (S FilePath)
-sexpFromArgs [] = pure Nil
-sexpFromArgs xs = runListParser parserS xs where
-  parserS = consume >>= \case
-    ""    -> fail "Empty parameter encountered"
-    "("   -> S <$> parserL
-    "-"   -> pure Nil
-    '!':a -> pure $ Atom  a
-    p     -> pure $ Param p
-  parserL =  eol
-         <|> liftA2 (:) parserS parserL
-  eol     = consume >>= \case
-    ")" -> pure []
-    _   -> fail "Expecting )"

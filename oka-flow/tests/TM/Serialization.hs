@@ -14,7 +14,7 @@ import Test.Tasty.QuickCheck
 
 import OKA.Flow.Core.S
 import OKA.Flow.Core.Types
-import OKA.Flow.Tools
+
 
 tests :: TestTree
 tests = testGroup "Serialization"

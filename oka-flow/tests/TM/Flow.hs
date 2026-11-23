@@ -354,7 +354,7 @@ flowPhony :: IO (ObsPhony Number, Result Number -> Flow eff ())
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
-       , basicLiftPhony (LockCoreCPU 1) $ ActionIO $ \_ p -> do
+       , basicLiftPhony (LockCoreCPU 1) $ ActionIO $ \p -> do
            let Param arg = p.args
            n <- readOutput arg
            let n' = n * n
@@ -362,7 +362,7 @@ flowPhony = do
        )
 
 observeOutput :: IORef [String] -> FilePath -> Result a -> Flow eff ()
-observeOutput out expected = basicLiftPhony () $ ActionIO $ \_ p -> do
+observeOutput out expected = basicLiftPhony () $ ActionIO $ \p -> do
   let Param arg = p.args
   let hash = last (splitPath arg)
   when (hash /= expected) $

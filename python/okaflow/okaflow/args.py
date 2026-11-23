@@ -82,16 +82,6 @@ class Args:
         return Args(out=os.getcwd(), args=S)
 
     @staticmethod
-    def argListFromEnv() -> Iterator[str]:
-        for i in itertools.count(1):
-            match os.environ.get(f'OKA_ARG_{i}'):
-                case None:
-                    return
-                case str() as arg:
-                    yield arg
-
-
-    @staticmethod
     def fromEnv() -> "Args":
         "Create argument list from environment"
         out = os.environ.get('OKA_OUT')

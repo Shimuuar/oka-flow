@@ -30,6 +30,7 @@ import System.FilePath              ((</>))
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
                                      doesDirectoryExist)
 import GHC.Stack
+import GHC.Generics                (Generic,Generically(..))
 
 import OKA.Metadata
 import OKA.Metadata.Meta
@@ -38,6 +39,7 @@ import OKA.Flow.Core.Flow
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.S
 import OKA.Flow.Core.Types
+import OKA.Flow.Core.CallExe
 import OKA.Flow.Internal.Util
 
 ----------------------------------------------------------------
@@ -59,20 +61,9 @@ data FlowLogger = FlowLogger
   , crash :: Maybe StorePath -> SomeException -> IO ()
     -- | Called when job crashes
   }
+  deriving stock Generic
+  deriving (Semigroup,Monoid) via Generically FlowLogger
 
-instance Semigroup FlowLogger where
-  a <> b = FlowLogger { init  = a.init  <> b.init
-                      , start = a.start <> b.start
-                      , done  = a.done  <> b.done
-                      , crash = a.crash <> b.crash
-                      }
-
-instance Monoid FlowLogger where
-  mempty = FlowLogger { init  = mempty
-                      , start = mempty
-                      , done  = mempty
-                      , crash = mempty
-                      }
 
 -- | Evaluation context for dataflow program
 data FlowCtx eff = FlowCtx
@@ -202,7 +193,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
                                 , out  = Just build
                                 }
           case dataflow.flow of
-            ActionIO  io               -> io ctx.res param
+            ActionIO  io               -> io param
             ActionExe Executable{call} -> startSubprocessAndWait call param
         t2 <- getCurrentTime
         ctx.logger.done path (diffUTCTime t2 t1)
@@ -213,7 +204,7 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
                              , out  = Nothing
                              }
         case phony of
-          ActionIO  io               -> io ctx.res param
+          ActionIO  io               -> io param
           ActionExe Executable{call} -> startSubprocessAndWait call param
     -- Signal that we successfully completed execution
     case fun.output of

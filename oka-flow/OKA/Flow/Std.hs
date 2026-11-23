@@ -8,7 +8,6 @@ module OKA.Flow.Std
   ( -- * Saved metadata
     SavedMeta(..)
   , stdSaveMeta
-  , stdSaveSomeMeta
   , narrowSavedMeta
     -- * Reports
   , ReportPDF
@@ -28,10 +27,9 @@ import Data.Maybe
 import Data.List                  (stripPrefix,isPrefixOf,isSuffixOf)
 import Data.Set                   qualified as Set
 import Data.ByteString.Lazy       qualified as BL
-import Data.Void
 import Effectful                  ((:>))
 import System.FilePath            ((</>), splitFileName,splitPath,joinPath)
-import System.Directory           (createFileLink,createDirectory,canonicalizePath,listDirectory)
+import System.Directory           (createDirectory,canonicalizePath,listDirectory)
 import System.Process.Typed
 import System.IO.Temp
 import GHC.Generics
@@ -43,7 +41,8 @@ import OKA.Flow.Core.Graph
 import OKA.Flow.Core.Flow
 import OKA.Flow.Core.S
 import OKA.Flow.Core.Types
-import OKA.Flow.Eff
+import OKA.Flow.Core.CallExe
+import OKA.Flow.Eff.ProgConfig
 import OKA.Metadata
 import OKA.Metadata.Meta
 import OKA.Flow.Internal.Util
@@ -77,14 +76,6 @@ stdSaveMeta meta = scopeMeta $ do
     (\(a::a) () -> pure $ SavedMeta a)
     ()
 
--- | Save metadata value so it could be passed as parameter.
-stdSaveSomeMeta :: (HasCallStack) => Metadata -> Flow eff (Result (SavedMeta Metadata))
-stdSaveSomeMeta meta = scopeMeta $ do
-  put $ absurd <$> meta
-  liftHaskellFunMeta_ "std.SavedMeta" ()
-    (\out _ () -> createFileLink "meta.json" (out </> "saved.json"))
-    ()
-
 -- | Convert one saved metadata to another which possibly uses less
 --   data.
 narrowSavedMeta
@@ -108,18 +99,17 @@ data ReportPDF
 
 -- | Run PDF viewer as phony workflow. Reader is picked from runtime
 --   configuration.
-runPdfReader :: (SequenceOf ReportPDF a, ProgConfigE :> eff, HasCallStack) => a -> Flow eff ()
-runPdfReader a = do 
+runPdfReader :: (ProgConfigE :> eff, HasCallStack) => [Result ReportPDF] -> Flow eff ()
+runPdfReader pdfs = do 
   pdf <- fromMaybe "xdg-open" . (.pdf) <$> askProgConfig
   liftPhonyExecutable ()
-    -- FIXME: We need way to generalize SequenceOf!
     (callViaArgList pdf $ \s -> [CmdArg $ p </> "report.pdf" | Just args <- [sequenceS s]
                                                              , p         <- args
                                                              ])
-    (sequenceOf @ReportPDF a)
+    pdfs
 
 -- | Concatenate PDFs using @pdftk@ program
-stdConcatPDF :: (SequenceOf ReportPDF a, HasCallStack) => a -> Flow eff (Result ReportPDF)
+stdConcatPDF :: (HasCallStack) => [Result ReportPDF] -> Flow eff (Result ReportPDF)
 stdConcatPDF reports = restrictMeta @() $ do
   liftExecutable "std.pdftk.concat" ()
     (callViaArgList "pdftk" $ \s ->
@@ -128,7 +118,7 @@ stdConcatPDF reports = restrictMeta @() $ do
                                    ] ++
         ["cat", "output", "report.pdf"]
     )
-    (sequenceOf @ReportPDF reports)
+    (reports)
 
 
 
@@ -160,7 +150,7 @@ stdJupyter notebooks params = do
         Nothing -> "chromium"
         Just b  -> b
   basicLiftPhony ()
-    (ActionIO $ \_ param -> do
+    (ActionIO $ \param -> do
       -- Figure out notebook directory. We use common prefix as
       -- heuristic.
       --
