@@ -24,6 +24,7 @@ module OKA.Flow.Tools
   , HaskFlow(..)
   , HaskFlowIO(..)
   , HaskFlowPhony(..)
+  , HaskFlowPhonyMeta(..)
     -- * Creating executables
   , metaFromStdin
   , loadParametersFromCLI
@@ -249,6 +250,16 @@ instance (IsMeta meta, FlowArgument a) => IsPhony (HaskFlowPhony meta a) where
       Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
       Right ioa -> ioa
     action meta a
+
+
+newtype HaskFlowPhonyMeta a = HaskFlowPhonyMeta (Metadata -> a -> IO ())
+
+instance (FlowArgument a) => IsPhony (HaskFlowPhonyMeta a) where
+  runPhony (HaskFlowPhonyMeta action) p = do
+    a <- case parseFlowArguments p.args of
+      Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+      Right ioa -> ioa
+    action p.meta a
 
 
 
