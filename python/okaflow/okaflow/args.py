@@ -187,6 +187,22 @@ class Some(Parser):
                 return [parseArgsS(self.parser, s) for s in s0]
         raise ParseError("Expecting list parameter")
 
+class AtomP(Parser):
+    "Parser for atoms"
+    def parse(self, s0: S) -> str:
+        match s0:
+            case Atom(s):
+                return s
+        raise ParseError("Expecting atom")
+
+class BoolP(Parser):
+    "Parser for bool"
+    def parse(self, s0: S) -> bool:
+        match AtomP().parse(s0):
+            case "True":  return True
+            case "False": return False
+        raise ParseError("Expecting atom")
+
 
 def parseArgsS(p: Parser|tuple|None, s: S) -> Any:
     match p:
