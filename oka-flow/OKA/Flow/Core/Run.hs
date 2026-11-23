@@ -39,7 +39,6 @@ import OKA.Flow.Core.Flow
 import OKA.Flow.Core.Resources
 import OKA.Flow.Core.S
 import OKA.Flow.Core.Types
-import OKA.Flow.Core.CallExe
 import OKA.Flow.Internal.Util
 
 ----------------------------------------------------------------
@@ -190,22 +189,20 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
             _  -> BL.writeFile (build </> "ext_meta.json") $ JSON.encode ext_meta_json
           let param = ParamFlow { meta = meta
                                 , args = params
-                                , out  = Just build
+                                , out  = OutputRes build
                                 }
           case dataflow.flow of
-            ActionIO  io               -> io param
-            ActionExe Executable{call} -> startSubprocessAndWait call param
+            Action io -> runDataflow io param
         t2 <- getCurrentTime
         ctx.logger.done path (diffUTCTime t2 t1)
       ----------------
       WorkflowPhony phony -> do
         let param = ParamFlow{ meta = meta
                              , args = params
-                             , out  = Nothing
+                             , out  = OutputPhony
                              }
         case phony of
-          ActionIO  io               -> io param
-          ActionExe Executable{call} -> startSubprocessAndWait call param
+          ActionPhony io -> runPhony io param
     -- Signal that we successfully completed execution
     case fun.output of
       RunDataflow b _ -> clearBarrier b

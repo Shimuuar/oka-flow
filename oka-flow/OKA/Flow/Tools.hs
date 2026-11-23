@@ -18,16 +18,13 @@ module OKA.Flow.Tools
     -- ** Deriving via
   , AsMetaEncoded(..)
   , AsFlowInput(..)
-    -- * Lifting of haskell function
-  , liftHaskellFun
-  , liftHaskellFun_
-  , liftHaskellPhonyFun
-    -- * Calling of external executables
-  , liftExecutable
-  , liftPhonyExecutable
     -- * Primitives for creating flows
-  , basicLiftWorkflow
-  , basicLiftPhony
+  , liftWorkflow
+  , liftPhony
+  , HaskFlow(..)
+  , HaskFlowIO(..)
+  , HaskFlowPhony(..)
+  , HaskFlowPhonyMeta(..)
     -- * Creating executables
   , metaFromStdin
   , loadParametersFromCLI
@@ -213,17 +210,11 @@ instance (FlowArgument a, FlowArgument b, FlowArgument c, FlowArgument d
 -- FIXME: How to properly encode result of b? Is Result OK?
 ----------------------------------------------------------------
 
--- | Convert haskell function into dataflow. Arguments are loaded and
---   stored using type classes methods.
-liftHaskellFun
-  :: (FlowArgument a, FlowOutput b, IsMeta meta, ResourceClaim res, HasCallStack)
-  => String              -- ^ Name of flow
-  -> res                 -- ^ Resources required by workflow
-  -> (meta -> a -> IO b) -- ^ IO action
-  -> (AsRes a -> Flow eff (Result b))
-liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
-  { name = name
-  , flow = ActionIO $ \p -> do
+newtype HaskFlow meta a b = HaskFlow (meta -> a -> IO b)
+
+instance (IsMeta meta, FlowArgument a, FlowOutput b
+         ) => IsDataflow (HaskFlow meta a b) where
+  runDataflow (HaskFlow action) p = do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
@@ -232,77 +223,43 @@ liftHaskellFun name res action = basicLiftWorkflow res $ Dataflow
         Right ioa -> ioa
       b <- action meta a
       case p.out of
-        Just out -> writeOutput out b
-        Nothing  -> error "liftHaskellFun: output is required"
-  }
+        OutputRes out -> writeOutput out b
 
 
--- | Convert haskell function into dataflow. Arguments are loaded
---   using type 'FlowArgument' type class and provided action takes
---   output directory as first argument and is responsible for writing
---   outputs.
-liftHaskellFun_
-  :: (FlowArgument a, IsMeta meta, ResourceClaim res, HasCallStack)
-  => String                           -- ^ Name of flow
-  -> res                              -- ^ Resources required by workflow
-  -> (FilePath -> meta -> a -> IO ()) -- ^ IO action
-  -> (AsRes a -> Flow eff (Result b))
-liftHaskellFun_ name res action = basicLiftWorkflow res $ Dataflow
-  { name = name
-  , flow = ActionIO $ \p -> do
-      meta <- case p.meta ^? metadata of
-        Just m  -> pure m
-        Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-      a    <- case parseFlowArguments p.args of
-        Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-        Right ioa -> ioa
-      case p.out of
-        Just out -> action out meta a
-        Nothing  -> error "liftHaskellFun: output is required"
-  }
+newtype HaskFlowIO meta a = HaskFlowIO (FilePath -> meta -> a -> IO ())
+
+instance (IsMeta meta, FlowArgument a) => IsDataflow (HaskFlowIO meta a) where
+  runDataflow (HaskFlowIO action) p = do
+    meta <- case p.meta ^? metadata of
+      Just m  -> pure m
+      Nothing -> error $ "loadFlowArguments: Cannot get metadata"
+    a    <- case parseFlowArguments p.args of
+      Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+      Right ioa -> ioa
+    case p.out of
+      OutputRes out -> action out meta a
+
+newtype HaskFlowPhony meta a = HaskFlowPhony (meta -> a -> IO ())
+
+instance (IsMeta meta, FlowArgument a) => IsPhony (HaskFlowPhony meta a) where
+  runPhony (HaskFlowPhony action) p = do
+    meta <- case p.meta ^? metadata of
+      Just m  -> pure m
+      Nothing -> error $ "loadFlowArguments: Cannot get metadata"
+    a    <- case parseFlowArguments p.args of
+      Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+      Right ioa -> ioa
+    action meta a
 
 
+newtype HaskFlowPhonyMeta a = HaskFlowPhonyMeta (Metadata -> a -> IO ())
 
-----------------------------------------------------------------
--- Calling conventions
-----------------------------------------------------------------
-
-liftExecutable
-  :: (ToS args, ResourceClaim res, HasCallStack)
-  => String  -- ^ Name of flow
-  -> res     -- ^ Resources required by workflow
-  -> CallExe -- ^ Calling convention
-  -> (args -> Flow eff (Result b))
-liftExecutable name res call =
-  basicLiftWorkflow res $ Dataflow
-    { name = name
-    , flow = ActionExe $ Executable call
-    }
-
-liftPhonyExecutable
-  :: (ToS args, ResourceClaim res, HasCallStack)
-  => res     -- ^ Resources required by workflow
-  -> CallExe -- ^ Calling convention
-  -> (args -> Flow eff ())
-liftPhonyExecutable res call =
-  basicLiftPhony res $ ActionExe $ Executable call
-
-
--- | Convert haskell function into dataflow. Arguments are loaded and
---   stored using type classes methods.
-liftHaskellPhonyFun
-  :: (FlowArgument a, IsMeta meta, ResourceClaim res, HasCallStack)
-  => res                  -- ^ Resources required by workflow
-  -> (meta -> a -> IO ()) -- ^ IO action
-  -> (AsRes a -> Flow eff ())
-liftHaskellPhonyFun res action = basicLiftPhony res $ ActionIO $ \p -> do
-  meta <- case p.meta ^? metadata of
-    Just m  -> pure m
-    Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-  a    <- case parseFlowArguments p.args of
-    Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-    Right ioa -> ioa
-  action meta a
+instance (FlowArgument a) => IsPhony (HaskFlowPhonyMeta a) where
+  runPhony (HaskFlowPhonyMeta action) p = do
+    a <- case parseFlowArguments p.args of
+      Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
+      Right ioa -> ioa
+    action p.meta a
 
 
 

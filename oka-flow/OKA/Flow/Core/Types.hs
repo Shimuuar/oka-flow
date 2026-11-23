@@ -13,7 +13,11 @@ module OKA.Flow.Core.Types
   , StorePath(..)
   , storePath
     -- * Flow parameters
+  , Output(..)
   , ParamFlow(..)
+  , IsDataflow(..)
+  , IsPhony(..)
+  , BasicFlow(..)
   ) where
 
 import Data.Aeson             qualified as JSON
@@ -22,6 +26,7 @@ import Data.ByteString.Char8  qualified as BC8
 import Data.ByteString.Base16 qualified as Base16
 import Data.Text              qualified as T
 import Data.Text.Encoding     qualified as T
+import Data.Foldable
 import System.FilePath        ((</>))
 
 import OKA.Metadata
@@ -87,10 +92,42 @@ storePath (StorePath nm (Hash hash)) = nm </> BC8.unpack (Base16.encode hash)
 -- Calling Flows
 ----------------------------------------------------------------
 
+data Output r a where
+  OutputRes   :: a -> Output Result a
+  OutputPhony ::      Output Phony  a
+  
+deriving stock instance Functor     (Output r)
+deriving stock instance Foldable    (Output r)
+deriving stock instance Traversable (Output r)
+
 -- | Parameters for a standard flow
-data ParamFlow a = ParamFlow
+data ParamFlow r a = ParamFlow
   { meta :: Metadata
   , args :: S a
-  , out  :: Maybe a
+  , out  :: Output r a
   }
   deriving stock (Functor,Foldable,Traversable)
+
+class IsDataflow a where
+  runDataflow :: a -> ParamFlow Result FilePath -> IO ()
+
+class IsPhony a where
+  runPhony :: a -> ParamFlow Phony FilePath -> IO ()
+
+newtype BasicFlow r = BasicFlow (ParamFlow r FilePath -> IO ())
+
+instance (r ~ Result) => IsDataflow (BasicFlow r) where
+  runDataflow (BasicFlow f) = f
+instance (r ~ Phony) => IsPhony (BasicFlow r) where
+  runPhony (BasicFlow f) = f
+
+instance IsDataflow a => IsDataflow [a] where
+  runDataflow xs p = traverse_ (flip runDataflow p) xs
+
+instance IsDataflow a => IsDataflow (Maybe a) where
+  runDataflow xs p = traverse_ (flip runDataflow p) xs
+
+instance (IsDataflow a, IsDataflow b) => IsDataflow (a,b) where
+  runDataflow (a,b) p = do
+    runDataflow a p
+    runDataflow b p

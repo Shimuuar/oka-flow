@@ -14,8 +14,8 @@ module OKA.Flow.Core.Flow
   , restrictMeta
     -- * Defining workflows
   , want
-  , basicLiftWorkflow
-  , basicLiftPhony
+  , liftWorkflow
+  , liftPhony
     -- * Lens
   , stMetaL
   , stGraphL
@@ -101,17 +101,18 @@ want a = Flow $ Eff.modify $ stGraphL . flowTgtL %~ (<> (Set.fromList . toList .
 
 -- | Basic primitive for creating workflows. It doesn't offer any type
 --   safety so it's better to use other tools
-basicLiftWorkflow
-  :: (ToS params, ResourceClaim res)
-  => res      -- ^ Resource required by workflow
-  -> Dataflow -- ^ Workflow to be executed
-  -> params   -- ^ Parameters of workflow
+liftWorkflow
+  :: (ToS params, ResourceClaim res, IsDataflow flow)
+  => res    -- ^ Resource required by workflow
+  -> String -- ^ Name of workflow
+  -> flow   -- ^ Workflow to be executed
+  -> params -- ^ Parameters of workflow
   -> Flow eff (Result a)
-basicLiftWorkflow resource exe p = Flow $ do
+liftWorkflow resource name exe p = Flow $ do
   st <- Eff.get @FlowSt
   let fid = AResult $ freshFunID st.graph
   Eff.modify $ stGraphL . flowGraphL . at fid .~ Just Fun
-    { workflow  = WorkflowNormal exe
+    { workflow  = WorkflowNormal $ Dataflow name $ Action exe
     , metadata  = st.meta
     , output    = Proxy
     , resources = claimResource resource
@@ -120,20 +121,17 @@ basicLiftWorkflow resource exe p = Flow $ do
   return $ Result fid
 
 -- | Lift phony workflow (not checked)
-basicLiftPhony
-  :: (ToS params, ResourceClaim res)
-  => res
-     -- ^ Resources required by workflow
-  -> Action
-     -- ^ Action to execute
-  -> params
-     -- ^ Parameters to pass to workflow
+liftPhony
+  :: (ToS params, ResourceClaim res, IsPhony phony)
+  => res    -- ^ Resources required by workflow
+  -> phony  -- ^ Action to execute
+  -> params -- ^ Parameters to pass to workflow
   -> Flow eff ()
-basicLiftPhony resource exe p = Flow $ do
+liftPhony resource exe p = Flow $ do
   st <- Eff.get @FlowSt
   let fid = APhony $ freshFunID st.graph
   Eff.modify $ stGraphL . flowPhonyL . at fid .~ Just Fun
-    { workflow  = WorkflowPhony exe
+    { workflow  = WorkflowPhony $ ActionPhony exe
     , metadata  = st.meta
     , output    = Proxy
     , resources = claimResource resource

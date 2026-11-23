@@ -13,8 +13,10 @@ module OKA.Flow.Core.Graph
   , Phony
   , CallExe
     -- ** Single dataflow description 
-  , Executable(..)
+  , IsDataflow(..)
+  , IsPhony(..)
   , Action(..)
+  , ActionPhony(..)
   , Dataflow(..)
   , Workflow(..)
   , Fun(..)
@@ -63,19 +65,13 @@ import OKA.Flow.Core.CallExe
 -- Dataflow graph definition
 ----------------------------------------------------------------
 
--- | Action which runs executable. It should be used if one want to
---   call external executable. This way executor can correctly pass
---   metadata to it.
-newtype Executable = Executable
-  { call :: CallExe -- ^ IO action which could be executed to prepare program.
-  }
-
 -- | Action to be execute by dataflow either normal or phony.
-data Action
-  = ActionIO  (ParamFlow FilePath -> IO ())
-    -- ^ Some haskell function 
-  | ActionExe Executable
-    -- ^ Run executable
+data Action where
+  Action :: IsDataflow a => a -> Action
+
+data ActionPhony where
+  ActionPhony :: IsPhony a => a -> ActionPhony
+
 
 -- | Dataflow which produces output in the store.
 data Dataflow = Dataflow
@@ -85,8 +81,8 @@ data Dataflow = Dataflow
 
 -- | Workflow which could either be 
 data Workflow r where
-  WorkflowNormal :: Dataflow -> Workflow Result
-  WorkflowPhony  :: Action   -> Workflow Phony
+  WorkflowNormal :: Dataflow    -> Workflow Result
+  WorkflowPhony  :: ActionPhony -> Workflow Phony
 
 -- | Metadata which is used in @Flow@. It contains both immediate
 --   values and promises which are loaded from outputs at execution

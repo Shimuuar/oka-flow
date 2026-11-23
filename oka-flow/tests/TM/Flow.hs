@@ -25,6 +25,8 @@ import GHC.TypeLits
 import OKA.Metadata
 import OKA.Flow.Std
 import OKA.Flow.Core.Resources
+import OKA.Flow.Core.Graph
+import OKA.Flow.Core.Types
 import OKA.Flow.Eff.Cache
 import OKA.Flow.Tools
 import OKA.Flow
@@ -200,9 +202,9 @@ tests = testGroup "Run flow"
   , testCase "externalMeta-phony" $ withSimpleFlow $ \ctx -> do
       ref <- newIORef (0 :: Int)
       let flow = do addExtMeta =<< stdSaveMeta (CounterMeta 100 :: CounterMeta "nA")
-                    liftHaskellPhonyFun () (\(CounterMeta n :: CounterMeta "nA") () -> do
-                                               writeIORef ref n
-                                           ) ()
+                    liftPhony () (HaskFlowPhony $ \(CounterMeta n :: CounterMeta "nA") () -> do
+                                     writeIORef ref n
+                                 ) ()
       runFlow ctx mempty flow
       assertEqual "" 100 =<< readIORef ref
     -- CacheE tests
@@ -329,10 +331,10 @@ flowProduceInt
 flowProduceInt = do
   obs <- newObserve
   pure ( obs
-       , liftHaskellFun_
-           ("produce-" ++ (symbolVal (Proxy @name)))
+       , liftWorkflow
            (LockCoreCPU 1)
-           (\out (meta :: CounterMeta name) () -> do
+           ("produce-" ++ (symbolVal (Proxy @name)))
+           (HaskFlowIO $ \out (meta :: CounterMeta name) () -> do
                saveObservation obs out (Number meta.count)
                writeOutput out $ Number meta.count
            )
@@ -342,8 +344,8 @@ flowSquare :: IO (Observe Number, Result Number -> Flow eff (Result Number))
 flowSquare = do
   obs <- newObserve
   pure ( obs
-       , liftHaskellFun_ "square" ()
-           (\out () (n :: Number) -> do
+       , liftWorkflow () "square"
+           (HaskFlowIO $ \out () (n :: Number) -> do
              let n' = n*n
              saveObservation obs out n'
              writeOutput out n'
@@ -354,15 +356,13 @@ flowPhony :: IO (ObsPhony Number, Result Number -> Flow eff ())
 flowPhony = do
   obs <- newObsPhony
   pure ( obs
-       , basicLiftPhony (LockCoreCPU 1) $ ActionIO $ \p -> do
-           let Param arg = p.args
-           n <- readOutput arg
+       , liftPhony (LockCoreCPU 1) $ HaskFlowPhony $ \() (n::Number) -> do
            let n' = n * n
            saveObsPhony obs n'
        )
 
 observeOutput :: IORef [String] -> FilePath -> Result a -> Flow eff ()
-observeOutput out expected = basicLiftPhony () $ ActionIO $ \p -> do
+observeOutput out expected = liftPhony () $ BasicFlow $ \p -> do
   let Param arg = p.args
   let hash = last (splitPath arg)
   when (hash /= expected) $
