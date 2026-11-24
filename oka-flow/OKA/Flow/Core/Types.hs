@@ -1,3 +1,4 @@
+{-# LANGUAGE MonoLocalBinds #-}
 -- |
 -- Basic data types sued for definition of dataflow graph.
 module OKA.Flow.Core.Types

@@ -15,9 +15,10 @@ module OKA.Flow.Internal.Util
   , failBarrier
   ) where
 
+import Control.Exception
 import Control.Concurrent.MVar
 import Data.Typeable
-import OKA.Flow.Core.Types (DependencyFailed)
+import OKA.Flow.Core.Types (DependencyFailed(..))
 
 
 typeName :: forall a. Typeable a => String
@@ -59,7 +60,7 @@ newBarrickadedBarrier = Barrier <$> newMVar Barrickaded
 checkBarrier :: Barrier -> IO ()
 checkBarrier (Barrier mv) = readMVar mv >>= \case
   BarrierOpen   -> pure ()
-  BarrierFailed -> error "Dependency failed"
+  BarrierFailed -> throwIO DependencyFailed
   Barrickaded   -> error "INTERNAL error: bad dependency"
 
 clearBarrier :: Barrier -> IO ()

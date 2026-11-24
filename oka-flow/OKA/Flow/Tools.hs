@@ -41,7 +41,6 @@ import System.Environment           (getArgs)
 import GHC.Stack
 
 import OKA.Metadata
-import OKA.Flow.Core.Resources
 import OKA.Flow.Core.Types
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.S
