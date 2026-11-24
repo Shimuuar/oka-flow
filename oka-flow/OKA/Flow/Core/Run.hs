@@ -1,24 +1,28 @@
 {-# LANGUAGE DataKinds       #-}
+{-# LANGUAGE DeriveAnyClass  #-}
 {-# LANGUAGE MonoLocalBinds  #-}
 {-# LANGUAGE RecordWildCards #-}
 -- |
 -- Evaluator of dataflow graph.
 module OKA.Flow.Core.Run
   ( FlowCtx(..)
+  , FlowOpts(..)
   , FlowLogger(..)
   , runFlow
   ) where
 
 import Control.Applicative
+import Control.Concurrent
 import Control.Concurrent.Async
 import Control.Exception
 import Control.Lens
+import Control.Monad.Trans.Cont
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
 import Data.Foldable
 import Data.Map.Strict              (Map,(!))
 import Data.Map.Strict              qualified as Map
-import Data.Monoid                  (Endo(..))
+import Data.Monoid                  (Endo(..),Last(..))
 import Data.Set                     qualified as Set
 import Data.Time                    (NominalDiffTime,getCurrentTime,diffUTCTime)
 import Data.Typeable
@@ -28,7 +32,7 @@ import Effectful.State.Static.Local qualified as Eff
 
 import System.FilePath              ((</>))
 import System.Directory             (createDirectory,createDirectoryIfMissing,renameDirectory,removeDirectoryRecursive,
-                                     doesDirectoryExist)
+                                     doesDirectoryExist,removePathForcibly)
 import GHC.Stack
 import GHC.Generics                (Generic,Generically(..))
 
@@ -74,8 +78,21 @@ data FlowCtx eff = FlowCtx
     -- ^ Resources which are available for evaluator.
   , logger    :: FlowLogger
     -- ^ Logger for evaluator
+  , opts      :: FlowOpts
+    -- ^ Evaluation options
   }
 
+-- | Evaluation options
+data FlowOpts = FlowOpts
+  { keepGoing :: !(Last Bool)
+    -- ^ If @True@ will try to evaluate all workflows instead of
+    -- failed with error.
+  , keepDirAfterFailure :: !(Last Bool)
+    -- ^ If true do not remove directories after failure
+  }
+  deriving stock (Show,Eq,Generic)
+  deriving (Semigroup,Monoid) via Generically FlowOpts
+  deriving anyclass (JSON.FromJSON, JSON.ToJSON)
 
 data OutputRun f where
   RunDataflow :: Barrier -> StorePath -> OutputRun Result
@@ -116,15 +133,18 @@ runFlow ctx@FlowCtx{runEffect} meta (Flow m) = do
                      (getStorePath targets.wanted)
   -- Prepare dictionary of external metadata which is loaded from
   -- store path
-  ext_meta <- prepareExtMetaCache ctx gr_exe targets
+  ext_meta <- prepareExtMetaCache ctx gr_exe
   -- Evaluator
-  mapConcurrently_ id
-    $ [ prepareFun ctx gr_exe ext_meta f
-      | f <- toList gr_exe.phony
-      ]
-   ++ [ prepareFun ctx gr_exe ext_meta (gr_exe.graph ! i)
-      | i <- Set.toList targets.wanted
-      ]
+  let actions
+        = [ prepareFun ctx gr_exe ext_meta f
+          | f <- toList gr_exe.phony
+          ]
+       ++ [ prepareFun ctx gr_exe ext_meta (gr_exe.graph ! i)
+          | i <- Set.toList targets.wanted
+          ]
+  case ctx.opts.keepGoing of
+    Last (Just True) -> evalKeepGoing actions
+    _                -> evalFailFast  actions
   where
     addTargets r = flowTgtL %~ mappend ((Set.fromList . toList . toS) r)
     targetExists path = doesDirectoryExist (ctx.root </> storePath path)
@@ -141,7 +161,7 @@ addMVars FIDSet{exists,wanted} gr = do
     (\fid fun -> do
         v <- if | fid `Set.member` exists -> newOpenBarrier
                 | fid `Set.member` wanted -> newBarrier
-                | otherwise               -> newBarrier -- FIXME: I want barrier which marks flow which will not execute
+                | otherwise               -> newBarrickadedBarrier
         pure $ (\(PathDataflow p) -> RunDataflow v p) <$> fun
     ) gr.graph
   pure gr{ graph = graph
@@ -156,32 +176,27 @@ prepareFun
   -> ExtMetaCache                       -- External metadata
   -> Fun r (OutputRun r)                -- Function to evaluate
   -> IO ()
-prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ do
+prepareFun ctx fgr@FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ do
   -- Check that all function parameters are already evaluated:
   for_ fun.param $ \fid -> case outputOf fid of
+    RunDataflow b _ -> checkBarrier b
+  for_ fun.metadata $ \fid -> case outputOf fid of
     RunDataflow b _ -> checkBarrier b
   -- Compute metadata which should be passed to the workflow by
   -- applying data loaded from
   meta <- traverseMetadata (lookupExtCache ext_meta) fun.metadata
   -- Collect list of external metadata
   let ext_meta_json :: [(StorePath,[JSON.Key])]
-      ext_meta_json = flip appEndo []
-               $ getConst
-               $ traverseMetadata getExt fun.metadata where
-        getExt :: forall x. IsMetaPrim x => AResult -> Const (Endo [(StorePath,[JSON.Key])]) x
-        getExt r = Const $ Endo ((case Map.lookup r gr of
-                                    Nothing -> error "INTERNAL ERROR: missing external meta"
-                                    Just Fun{output=RunDataflow _ p} -> p
-                                 , metaLocation @x):)
+      ext_meta_json = extractMetaPaths fgr fun.metadata
   -- Request resources & run action
-  withResources ctx.res fun.resources $ do
-    () <- case fun.workflow of
+  withResources ctx.res fun.resources $ withBarrier fun.output $ do
+    case fun.workflow of
       -- Execution of normal workflow
       WorkflowNormal dataflow -> do
         let path = case fun.output of RunDataflow _ p -> p
         ctx.logger.start path
         t1 <- getCurrentTime
-        () <- withBuildDirectory ctx.root path $ \build -> do
+        () <- withBuildDirectory ctx.opts ctx.root path $ \build -> do
           BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
           BL.writeFile (build </> "deps.json") $ JSON.encode paramP
           case ext_meta_json of
@@ -203,10 +218,6 @@ prepareFun ctx FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun $ d
                              }
         case phony of
           ActionPhony io -> runPhony io param
-    -- Signal that we successfully completed execution
-    case fun.output of
-      RunDataflow b _ -> clearBarrier b
-      RunPhony        -> pure ()
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output
@@ -233,23 +244,67 @@ crashReport logger fun = handle $ \e0@(SomeException e) -> do
   throwIO e
 
 -- Create directory with -build prefix and rename it to final name
-withBuildDirectory :: FilePath -> StorePath -> (FilePath -> IO a) -> IO a
-withBuildDirectory root path action = do
+withBuildDirectory :: FlowOpts -> FilePath -> StorePath -> (FilePath -> IO a) -> IO a
+withBuildDirectory opts root path action = do
   createDirectoryIfMissing False group
-  createDirectory build
-  a <- action build `onException` removeDirectoryRecursive build
+  removePathForcibly build
+  createDirectory    build
+  a <- action build `onException`
+    (case opts.keepDirAfterFailure of
+       Last (Just True) -> pure ()
+       _                -> removeDirectoryRecursive build
+    )
   a <$ renameDirectory build out
   where
     group = root </> path.name
     out   = root </> storePath path
     build = out <> "-build"
 
+-- Correctly mark barrier
+withBarrier :: OutputRun f -> IO a -> IO a
+withBarrier out action = case out of
+  RunPhony        -> action
+  RunDataflow b _ -> mask $ \restore -> do
+    a <- restore action `onException` failBarrier b
+    a <$ clearBarrier b
+
+-- Filter away exception internal for async
+filterException :: SomeException -> Maybe SomeException
+filterException e0@(SomeException e)
+ | Just AsyncCancelled       <- cast e = Nothing
+ | Just SomeAsyncException{} <- cast e = Nothing
+ | otherwise                           = Just e0
+
+-- Simple evaluator which fails fast
+evalFailFast :: [IO ()] -> IO ()
+evalFailFast actions = evalContT $ do
+  tid <- liftIO myThreadId
+  as  <- traverse (ContT . withAsync)
+    [ io `catch` (\e -> case filterException e of
+                     Nothing -> pure ()
+                     Just e' -> throwTo tid e')
+    | io <- actions
+    ]
+  liftIO $ traverse_ wait as
+
+-- Evaluator which tries too evaluate all possible jobs
+evalKeepGoing :: [IO ()] -> IO ()
+evalKeepGoing actions = evalContT $ do
+  as  <- traverse (ContT . withAsync) actions
+  liftIO $ do
+    rs <- traverse waitCatch as
+    let errs = [ e1
+               | Left e0 <- rs
+               , Just e1 <- [filterException e0]
+               ]
+    case errs of
+      [] -> pure ()
+      _  -> error $ unlines $ show <$> errs
 
 
 ----------------------------------------------------------------
 -- Cache for external metadata. We only want to load data once
 ----------------------------------------------------------------
-
 
 newtype ExtMetaCache = ExtMetaCache (Map (TypeRep, AResult) SomeExtMeta)
 
@@ -273,9 +328,8 @@ prepareExtMetaCache
   :: (HasCallStack)
   => FlowCtx eff
   -> FlowGraph OutputRun
-  -> FIDSet
   -> IO ExtMetaCache
-prepareExtMetaCache ctx gr targets = do
+prepareExtMetaCache ctx gr = do
   cache <- traverse (\(SomeExtMeta io) -> SomeExtMeta <$> once io)
          $ Map.fromList
          $ flip appEndo []
@@ -290,13 +344,7 @@ prepareExtMetaCache ctx gr targets = do
       = Const
       $ Endo
       ( ( (typeRep (Proxy @a), fid)
-        , SomeExtMeta $ if
-            | fid `Set.member` targets.wanted ->
-                case (gr.graph ! fid).output of
-                  RunDataflow b _ -> do checkBarrier b
-                                        readMeta @a path
-            | otherwise ->
-                do readMeta @a path
+        , SomeExtMeta $ readMeta @a path
         )
       :)
       where
@@ -310,3 +358,18 @@ prepareExtMetaCache ctx gr targets = do
         Right js -> case decodeMetadataPrimEither js of
           Left  e -> throw e
           Right a -> pure a
+
+extractMetaPaths
+  :: FlowGraph OutputRun
+  -> MetadataF AResult
+  -> [(StorePath,[JSON.Key])]
+extractMetaPaths gr meta
+  = flip appEndo []
+  $ getConst
+  $ traverseMetadata getExt meta
+  where
+     getExt :: forall x. IsMetaPrim x => AResult -> Const (Endo [(StorePath,[JSON.Key])]) x
+     getExt r = Const $ Endo ((case Map.lookup r gr.graph of
+                                 Nothing -> error "INTERNAL ERROR: missing external meta"
+                                 Just Fun{output=RunDataflow _ p} -> p
+                              , metaLocation @x):)

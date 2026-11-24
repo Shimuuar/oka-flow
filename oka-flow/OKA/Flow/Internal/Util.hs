@@ -9,12 +9,17 @@ module OKA.Flow.Internal.Util
   , Barrier
   , newBarrier
   , newOpenBarrier
+  , newBarrickadedBarrier
   , checkBarrier
   , clearBarrier
+  , failBarrier
   ) where
 
+import Control.Exception
 import Control.Concurrent.MVar
 import Data.Typeable
+import OKA.Flow.Core.Types (DependencyFailed(..))
+
 
 typeName :: forall a. Typeable a => String
 typeName = show (typeOf (undefined :: a))
@@ -33,18 +38,33 @@ once action = do
                     return (Just a, a)
 
 
+
 -- | Barrier which blocks thread until it's cleared
-newtype Barrier = Barrier (MVar ())
+newtype Barrier = Barrier (MVar BarrierState)
+
+data BarrierState
+  = BarrierOpen   -- ^ Dependency evaluated OK
+  | BarrierFailed -- ^ Dependency failed
+  | Barrickaded   -- ^ Dependency shouldn't be evaluated at all
 
 newBarrier :: IO Barrier
 newBarrier = Barrier <$> newEmptyMVar
 
 newOpenBarrier :: IO Barrier
-newOpenBarrier = Barrier <$> newMVar ()
-  
+newOpenBarrier = Barrier <$> newMVar BarrierOpen
+
+newBarrickadedBarrier :: IO Barrier
+newBarrickadedBarrier = Barrier <$> newMVar Barrickaded
+
+
 checkBarrier :: Barrier -> IO ()
-checkBarrier (Barrier mv) = readMVar mv
+checkBarrier (Barrier mv) = readMVar mv >>= \case
+  BarrierOpen   -> pure ()
+  BarrierFailed -> throwIO DependencyFailed
+  Barrickaded   -> error "INTERNAL error: bad dependency"
 
 clearBarrier :: Barrier -> IO ()
-clearBarrier (Barrier mv) = () <$ tryPutMVar mv ()
+clearBarrier (Barrier mv) = () <$ tryPutMVar mv BarrierOpen
 
+failBarrier :: Barrier -> IO ()
+failBarrier (Barrier mv) = () <$ tryPutMVar mv BarrierFailed
