@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds       #-}
+{-# LANGUAGE DeriveAnyClass  #-}
 {-# LANGUAGE MonoLocalBinds  #-}
 {-# LANGUAGE RecordWildCards #-}
 -- |
@@ -91,6 +92,7 @@ data FlowOpts = FlowOpts
   }
   deriving stock (Show,Eq,Generic)
   deriving (Semigroup,Monoid) via Generically FlowOpts
+  deriving anyclass (JSON.FromJSON, JSON.ToJSON)
 
 data OutputRun f where
   RunDataflow :: Barrier -> StorePath -> OutputRun Result
