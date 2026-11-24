@@ -108,33 +108,41 @@ deriving stock instance Traversable (Output r)
 data ParamFlow r a = ParamFlow
   { meta :: Metadata
   , args :: S a
-  , out  :: Output r a
+  , out  :: Output r FilePath
   }
   deriving stock (Functor,Foldable,Traversable)
 
 class IsDataflow a where
-  runDataflow :: a -> ParamFlow Result FilePath -> IO ()
+  runDataflow
+    :: (AResult -> FilePath)
+    -> a
+    -> ParamFlow Result AResult
+    -> IO ()
 
 class IsPhony a where
-  runPhony :: a -> ParamFlow Phony FilePath -> IO ()
+  runPhony
+    :: (AResult -> FilePath)
+    -> a
+    -> ParamFlow Phony AResult
+    -> IO ()
 
 newtype BasicFlow r = BasicFlow (ParamFlow r FilePath -> IO ())
 
 instance (r ~ Result) => IsDataflow (BasicFlow r) where
-  runDataflow (BasicFlow f) = f
+  runDataflow oracle (BasicFlow f) = f . fmap oracle
 instance (r ~ Phony) => IsPhony (BasicFlow r) where
-  runPhony (BasicFlow f) = f
+  runPhony oracle (BasicFlow f) = f . fmap oracle
 
 instance IsDataflow a => IsDataflow [a] where
-  runDataflow xs p = traverse_ (flip runDataflow p) xs
+  runDataflow oracle xs p = traverse_ (\x -> runDataflow oracle x p) xs
 
 instance IsDataflow a => IsDataflow (Maybe a) where
-  runDataflow xs p = traverse_ (flip runDataflow p) xs
+  runDataflow oracle xs p = traverse_ (\x -> runDataflow oracle x p) xs
 
 instance (IsDataflow a, IsDataflow b) => IsDataflow (a,b) where
-  runDataflow (a,b) p = do
-    runDataflow a p
-    runDataflow b p
+  runDataflow oracle (a,b) p = do
+    runDataflow oracle a p
+    runDataflow oracle b p
 
 ----------------------------------------------------------------
 

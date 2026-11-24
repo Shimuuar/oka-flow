@@ -198,33 +198,35 @@ prepareFun ctx fgr@FlowGraph{graph=gr} ext_meta fun = crashReport ctx.logger fun
         t1 <- getCurrentTime
         () <- withBuildDirectory ctx.opts ctx.root path $ \build -> do
           BL.writeFile (build </> "meta.json") $ JSON.encode $ encodeMetadata meta
-          BL.writeFile (build </> "deps.json") $ JSON.encode paramP
+          BL.writeFile (build </> "deps.json") $ JSON.encode $ oracleStorePath <$> fun.param
           case ext_meta_json of
             [] -> pure ()
             _  -> BL.writeFile (build </> "ext_meta.json") $ JSON.encode ext_meta_json
           let param = ParamFlow { meta = meta
-                                , args = params
+                                , args = fun.param
                                 , out  = OutputRes build
                                 }
           case dataflow.flow of
-            Action io -> runDataflow io param
+            Action io -> runDataflow oracleAbsPath io param
         t2 <- getCurrentTime
         ctx.logger.done path (diffUTCTime t2 t1)
       ----------------
       WorkflowPhony phony -> do
         let param = ParamFlow{ meta = meta
-                             , args = params
+                             , args = fun.param
                              , out  = OutputPhony
                              }
         case phony of
-          ActionPhony io -> runPhony io param
+          ActionPhony io -> runPhony oracleAbsPath io param
   where
     outputOf k = case gr ^. at k of
       Just f  -> f.output
       Nothing -> error "INTERNAL ERROR: inconsistent flow graph"
     --
-    paramP = toPath . outputOf      <$> fun.param  -- Parameters relative to store
-    params = (\p -> ctx.root </> p) <$> paramP     -- Parameters as real path
+    -- paramP = toPath . outputOf      <$> fun.param  -- Parameters relative to store
+    -- params = (\p -> ctx.root </> p) <$> paramP     -- Parameters as real path
+    oracleStorePath = toPath . outputOf
+    oracleAbsPath   = (\p -> ctx.root </> p) . oracleStorePath
     toPath :: OutputRun Result -> FilePath
     toPath (RunDataflow _ p) = storePath p
 

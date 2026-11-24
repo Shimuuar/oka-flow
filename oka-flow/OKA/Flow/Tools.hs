@@ -213,11 +213,11 @@ newtype HaskFlow meta a b = HaskFlow (meta -> a -> IO b)
 
 instance (IsMeta meta, FlowArgument a, FlowOutput b
          ) => IsDataflow (HaskFlow meta a b) where
-  runDataflow (HaskFlow action) p = do
+  runDataflow oracle (HaskFlow action) p = do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-      a    <- case parseFlowArguments p.args of
+      a    <- case parseFlowArguments $ oracle <$> p.args of
         Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
         Right ioa -> ioa
       b <- action meta a
@@ -228,11 +228,11 @@ instance (IsMeta meta, FlowArgument a, FlowOutput b
 newtype HaskFlowIO meta a = HaskFlowIO (FilePath -> meta -> a -> IO ())
 
 instance (IsMeta meta, FlowArgument a) => IsDataflow (HaskFlowIO meta a) where
-  runDataflow (HaskFlowIO action) p = do
+  runDataflow oracle (HaskFlowIO action) p = do
     meta <- case p.meta ^? metadata of
       Just m  -> pure m
       Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-    a    <- case parseFlowArguments p.args of
+    a    <- case parseFlowArguments $ oracle <$> p.args of
       Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
       Right ioa -> ioa
     case p.out of
@@ -241,11 +241,11 @@ instance (IsMeta meta, FlowArgument a) => IsDataflow (HaskFlowIO meta a) where
 newtype HaskFlowPhony meta a = HaskFlowPhony (meta -> a -> IO ())
 
 instance (IsMeta meta, FlowArgument a) => IsPhony (HaskFlowPhony meta a) where
-  runPhony (HaskFlowPhony action) p = do
+  runPhony oracle (HaskFlowPhony action) p = do
     meta <- case p.meta ^? metadata of
       Just m  -> pure m
       Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-    a    <- case parseFlowArguments p.args of
+    a    <- case parseFlowArguments $ oracle <$> p.args of
       Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
       Right ioa -> ioa
     action meta a
@@ -254,8 +254,8 @@ instance (IsMeta meta, FlowArgument a) => IsPhony (HaskFlowPhony meta a) where
 newtype HaskFlowPhonyMeta a = HaskFlowPhonyMeta (Metadata -> a -> IO ())
 
 instance (FlowArgument a) => IsPhony (HaskFlowPhonyMeta a) where
-  runPhony (HaskFlowPhonyMeta action) p = do
-    a <- case parseFlowArguments p.args of
+  runPhony oracle (HaskFlowPhonyMeta action) p = do
+    a <- case parseFlowArguments $ oracle <$> p.args of
       Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
       Right ioa -> ioa
     action p.meta a
