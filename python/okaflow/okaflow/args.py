@@ -84,13 +84,10 @@ class Args:
     @staticmethod
     def fromEnv() -> "Args":
         "Create argument list from environment"
-        out = os.environ.get('OKA_OUT')
-        match os.environ.get(f'OKA_ARGS'):
-            case None:
-                args = parseS(list(Args.argListFromEnv()))
-            case str() as path:
-                with open(path) as f:
-                    args = parseS(f.readlines())
+        out  = os.environ.get('OKA_OUT')
+        path = os.environ.get(f'OKA_ARGS')
+        with open(path) as f:
+            args = parseS([for s.strip('\n') for s in f.readlines()])
         return Args(out=out, args=args)
 
     def setCWD(self) -> None:
