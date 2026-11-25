@@ -27,7 +27,6 @@ module OKA.Flow.Core.Resources
   , ResAsMutex(..)
   , ResAsCounter(..)
     -- * Standard resources
-  , LockGHC(..)
   , LockCoreCPU(..)
   , LockMemGB(..)
   ) where
@@ -305,12 +304,6 @@ instance (Typeable a) => ResourceClaim (ResAsCounter a) where
 ----------------------------------------------------------------
 -- Standard resources
 ----------------------------------------------------------------
-
-
--- | We want to have one concurrent build. This data type provides mutex
-data LockGHC = LockGHC
-  deriving stock (Show,Eq)
-  deriving (ResourceDef,ResourceClaim) via ResAsMutex LockGHC
 
 -- | Number of CPU cores that flow is allowed to utilize.
 newtype LockCoreCPU = LockCoreCPU Int
