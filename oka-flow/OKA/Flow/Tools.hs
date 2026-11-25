@@ -35,12 +35,17 @@ import Control.Lens                 ((<&>),(^?))
 import Data.Aeson                   qualified as JSON
 import Data.Aeson.Types             qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
+import Data.Map.Strict              qualified as Map
+import Data.Coerce
+import Data.Foldable                (toList)
+import Data.Traversable             (mapAccumL)
 import System.FilePath              ((</>))
 import System.Environment           (getArgs)
 
 import GHC.Stack
 
 import OKA.Metadata
+import OKA.Flow.Core.Result
 import OKA.Flow.Core.Types
 import OKA.Flow.Core.Graph
 import OKA.Flow.Core.S
@@ -85,9 +90,10 @@ class (ToS (AsRes a)) => FlowArgument a where
   type AsRes a
   -- | How data types should be parsed from list of absolute path to
   --   directories.
-  parseFlowArguments :: S FilePath -> Either String (IO a)
-  -- |
-  parameterShape :: (forall x. Result x) -> a -> AsRes a
+  parseFlowArguments
+    :: (AResult -> FilePath) -- ^ Oracle for converting handles to absolute store path
+    -> AsRes a               -- ^ Representation used in dataflow definition
+    -> IO a
 
 
 
@@ -120,10 +126,8 @@ newtype AsFlowInput a = AsFlowInput a
 
 instance (FlowInput a) => FlowArgument (AsFlowInput a) where
   type AsRes (AsFlowInput a) = Result a
-  parseFlowArguments = \case
-    Param p -> Right $ AsFlowInput <$> readOutput p
-    _       -> Left "Expecting single parameter"
-  parameterShape x _ = x
+  parseFlowArguments oracle (Result i)
+    = AsFlowInput <$> readOutput (oracle i)
 
 
 ----------------------------------------------------------------
@@ -132,74 +136,44 @@ instance (FlowInput a) => FlowArgument (AsFlowInput a) where
 
 instance FlowArgument () where
   type AsRes () = ()
-  parseFlowArguments = \case
-    Nil -> pure (pure ())
-    _   -> Left "Expecting nil"
-  parameterShape _   ()  = ()
+  parseFlowArguments _ = pure
 
 instance FlowArgument Bool where
   type AsRes Bool = Bool
-  parseFlowArguments = \case
-    Atom "True"  -> pure $ pure True
-    Atom "False" -> pure $ pure False
-    _            -> Left "Cannot parse boolean"
-  parameterShape _ = id
+  parseFlowArguments _ = pure
 
 instance FlowArgument a => FlowArgument [a] where
   type AsRes [a] = [AsRes a]
-  parseFlowArguments = \case
-    S xs -> do
-      as <- traverse parseFlowArguments xs
-      pure $ sequence as
-    _ -> Left "Expecting list"
-  parameterShape p   xs = parameterShape p <$> xs
+  parseFlowArguments oracle = traverse (parseFlowArguments oracle)
 
 instance FlowArgument a => FlowArgument (Maybe a) where
   type AsRes (Maybe a) = Maybe (AsRes a)
-  parseFlowArguments = \case
-    Nil -> pure (pure Nothing)
-    s   -> do a <- parseFlowArguments s
-              pure $ Just <$> a
-  parameterShape p xs = parameterShape p <$> xs
+  parseFlowArguments oracle = traverse (parseFlowArguments oracle)
 
 instance (FlowArgument a, FlowArgument b) => FlowArgument (a,b) where
   type AsRes (a,b) = (AsRes a, AsRes b)
-  parseFlowArguments = \case
-    S [sa,sb] -> do
-      ioa <- parseFlowArguments sa
-      iob <- parseFlowArguments sb
-      pure $ (,) <$> ioa <*> iob
-    _ -> Left "Expecting 2-element list"
-  parameterShape p (a,b) = (parameterShape p a, parameterShape p b)
+  parseFlowArguments oracle (ra,rb) = do
+    a <- parseFlowArguments oracle ra
+    b <- parseFlowArguments oracle rb
+    pure (a,b)
 
 instance (FlowArgument a, FlowArgument b, FlowArgument c) => FlowArgument (a,b,c) where
   type AsRes (a,b,c) = (AsRes a, AsRes b, AsRes c)
-  parseFlowArguments = \case
-    S [sa,sb,sc] -> do
-      ioa <- parseFlowArguments sa
-      iob <- parseFlowArguments sb
-      ioc <- parseFlowArguments sc
-      pure $ (,,) <$> ioa <*> iob <*> ioc
-    _ -> Left "Expecting 3-element list"
-  parameterShape p (a,b,c) = ( parameterShape p a
-                             , parameterShape p b
-                             , parameterShape p c)
+  parseFlowArguments oracle (ra,rb,rc) = do
+    a <- parseFlowArguments oracle ra
+    b <- parseFlowArguments oracle rb
+    c <- parseFlowArguments oracle rc
+    pure (a,b,c)
 
 instance (FlowArgument a, FlowArgument b, FlowArgument c, FlowArgument d
          ) => FlowArgument (a,b,c,d) where
   type AsRes (a,b,c,d) = (AsRes a, AsRes b, AsRes c, AsRes d)
-  parseFlowArguments = \case
-    S [sa,sb,sc,sd] -> do
-      ioa <- parseFlowArguments sa
-      iob <- parseFlowArguments sb
-      ioc <- parseFlowArguments sc
-      iod <- parseFlowArguments sd
-      pure $ (,,,) <$> ioa <*> iob <*> ioc <*> iod
-    _ -> Left "Expecting 3-element list"
-  parameterShape p (a,b,c,d) = ( parameterShape p a
-                               , parameterShape p b
-                               , parameterShape p c
-                               , parameterShape p d)
+  parseFlowArguments oracle (ra,rb,rc,rd) = do
+    a <- parseFlowArguments oracle ra
+    b <- parseFlowArguments oracle rb
+    c <- parseFlowArguments oracle rc
+    d <- parseFlowArguments oracle rd
+    pure (a,b,c,d)
 
 
 
@@ -213,13 +187,13 @@ newtype HaskFlow meta a b = HaskFlow (meta -> a -> IO b)
 
 instance (IsMeta meta, FlowArgument a, FlowOutput b
          ) => IsDataflow (HaskFlow meta a b) where
-  runDataflow (HaskFlow action) p = do
+  runDataflow oracle (HaskFlow action) p = do
       meta <- case p.meta ^? metadata of
         Just m  -> pure m
         Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-      a    <- case parseFlowArguments p.args of
+      a <- case fromS p.args of
         Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-        Right ioa -> ioa
+        Right asr -> parseFlowArguments oracle asr
       b <- action meta a
       case p.out of
         OutputRes out -> writeOutput out b
@@ -228,36 +202,36 @@ instance (IsMeta meta, FlowArgument a, FlowOutput b
 newtype HaskFlowIO meta a = HaskFlowIO (FilePath -> meta -> a -> IO ())
 
 instance (IsMeta meta, FlowArgument a) => IsDataflow (HaskFlowIO meta a) where
-  runDataflow (HaskFlowIO action) p = do
+  runDataflow oracle (HaskFlowIO action) p = do
     meta <- case p.meta ^? metadata of
       Just m  -> pure m
       Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-    a    <- case parseFlowArguments p.args of
+    a <- case fromS p.args of
       Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-      Right ioa -> ioa
+      Right asr -> parseFlowArguments oracle asr
     case p.out of
       OutputRes out -> action out meta a
 
 newtype HaskFlowPhony meta a = HaskFlowPhony (meta -> a -> IO ())
 
 instance (IsMeta meta, FlowArgument a) => IsPhony (HaskFlowPhony meta a) where
-  runPhony (HaskFlowPhony action) p = do
+  runPhony oracle (HaskFlowPhony action) p = do
     meta <- case p.meta ^? metadata of
       Just m  -> pure m
       Nothing -> error $ "loadFlowArguments: Cannot get metadata"
-    a    <- case parseFlowArguments p.args of
+    a <- case fromS p.args of
       Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-      Right ioa -> ioa
+      Right asr -> parseFlowArguments oracle asr
     action meta a
 
 
 newtype HaskFlowPhonyMeta a = HaskFlowPhonyMeta (Metadata -> a -> IO ())
 
 instance (FlowArgument a) => IsPhony (HaskFlowPhonyMeta a) where
-  runPhony (HaskFlowPhonyMeta action) p = do
-    a <- case parseFlowArguments p.args of
+  runPhony oracle (HaskFlowPhonyMeta action) p = do
+    a <- case fromS p.args of
       Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-      Right ioa -> ioa
+      Right asr -> parseFlowArguments oracle asr
     action p.meta a
 
 
@@ -280,6 +254,20 @@ loadParametersFromCLI = do
   s    <- case sexpFromArgs args of
     Left  err -> error $ "loadFlowArguments: Cannot parse S-expression: " ++ err
     Right s   -> pure s
-  case parseFlowArguments s of
+  let (sa, oracle) = fakeOracle s
+  case fromS sa of
     Left  err -> error $ "loadFlowArguments: Malformed S-expresion: " ++ err
-    Right ioa -> ioa
+    Right asr -> parseFlowArguments oracle asr
+
+-- Hack where we artificially convert S FilePath to pair of S AResult
+-- and oracle function
+fakeOracle :: S FilePath -> (S AResult, AResult -> FilePath)
+fakeOracle s = (s_ares, oracle)
+  where
+    ares0       = AResult (FunID 0)
+    (_, s_ares) = mapAccumL (\r _ -> (succAResult r, r)) ares0 s
+    path_map    = Map.fromList $ zip (iterate succAResult ares0) (toList s)
+    oracle r    = path_map Map.! r
+    --
+    succAResult :: AResult -> AResult
+    succAResult = coerce (+ (1::Int))

@@ -8,9 +8,10 @@ module TM.Serialization
 import Crypto.Hash.SHA1             qualified as SHA1
 import Data.Aeson                   qualified as JSON
 import Data.ByteString.Lazy         qualified as BL
-import Data.Typeable
 import Test.Tasty
 import Test.Tasty.QuickCheck
+import Data.Typeable
+import Unsafe.Coerce
 
 import OKA.Flow.Core.S
 import OKA.Flow.Core.Types
@@ -18,10 +19,30 @@ import OKA.Flow.Core.Types
 
 tests :: TestTree
 tests = testGroup "Serialization"
-  [ testProperty "roundtrip S args" args_roundtrip
-  , testJsonRoundtrip @(S Int)
-  , testJsonRoundtrip @StorePath
-  , testJsonRoundtrip @Hash
+  [ testGroup "S-roundtrip"
+    [ testProperty "roundtrip S args" args_roundtrip
+    ]
+  , testGroup "JSON"
+    [ testJsonRoundtrip @(S Int)
+    , testJsonRoundtrip @StorePath
+    , testJsonRoundtrip @Hash
+    ]
+  , testGroup "ToS"
+    [ testRoundtripToS @(Result Int)
+      -- 
+    , testRoundtripToS @()
+    , testRoundtripToS @[Result Int]
+    , testRoundtripToS @(Maybe (Result Int))
+    , testRoundtripToS @(Either (Result Int) (Result Int))
+      -- Tuples
+    , testRoundtripToS @(Result Int, Result Int)
+    , testRoundtripToS @(Result Int, Result Int, Result Int)
+    , testRoundtripToS @(Result Int, Result Int, Result Int, Result Int)
+    , testRoundtripToS @(Result Int, Result Int, Result Int, Result Int, Result Int)
+    , testRoundtripToS @(Result Int, Result Int, Result Int, Result Int, Result Int, Result Int)
+    , testRoundtripToS @(Result Int, Result Int, Result Int, Result Int, Result Int, Result Int, Result Int)
+    , testRoundtripToS @(Result Int, Result Int, Result Int, Result Int, Result Int, Result Int, Result Int, Result Int)
+    ]
   ]
 
 
@@ -33,6 +54,11 @@ testJsonRoundtrip :: forall a. (JSON.ToJSON a, JSON.FromJSON a, Arbitrary a, Eq 
 testJsonRoundtrip
   = testProperty ("JSON: " ++ show (typeOf (undefined :: a)))
   $ \(s::a) -> Right s == (JSON.eitherDecode . JSON.encode) s
+
+testRoundtripToS :: forall a. (ToS a, Arbitrary a, Eq a, Show a, Typeable a) => TestTree
+testRoundtripToS = testProperty (show (typeOf (undefined :: a)))
+  $ \(x :: a) -> fromS (toS x) == Right x
+
 
 ----------------------------------------------------------------
 -- Orphans
@@ -63,3 +89,14 @@ instance Arbitrary Hash where
 
 atom :: Gen FilePath
 atom = vectorOf 8 (choose ('a', 'z'))
+
+-- Dangerous but will work
+instance Arbitrary AResult where
+  arbitrary = unsafeCoerce (arbitrary @Int)
+instance Arbitrary APhony where
+  arbitrary = unsafeCoerce (arbitrary @Int)
+instance Arbitrary (Result a) where
+  arbitrary = unsafeCoerce (arbitrary @Int)
+instance Arbitrary (Phony a) where
+  arbitrary = unsafeCoerce (arbitrary @Int)
+

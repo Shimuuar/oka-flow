@@ -67,10 +67,10 @@ newtype CallExe r = CallExe
   (forall a. (ProcessData r -> IO a) -> (ParamFlow r FilePath -> IO a))
 
 instance r ~ Result => IsDataflow (CallExe r) where
-  runDataflow = startSubprocessAndWait
+  runDataflow oracle x = startSubprocessAndWait x . fmap oracle
 
 instance r ~ Phony => IsPhony (CallExe r) where
-  runPhony = startSubprocessAndWait
+  runPhony oracle x = startSubprocessAndWait x . fmap oracle
 
 
 mapCallExe :: (ProcessData r -> ProcessData r) -> CallExe r -> CallExe r

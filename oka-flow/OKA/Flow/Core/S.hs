@@ -45,8 +45,10 @@ data S a
 
 -- | Some collection of 'Result's
 class ToS a where
-  -- | Convert value to a S-expression for passing to S.
-  toS :: a -> S AResult
+  -- | Convert value to a S-expression for passing to evaluator.
+  toS   :: a -> S AResult
+  -- | Parse value from a S-expression.
+  fromS :: S AResult -> Either String a
 
 
 -- | Convert S-expression that doesn't contain 'Atom's into list.
@@ -58,51 +60,96 @@ sequenceS = sequence . ($ []) . appEndo . go where
     Nil      -> mempty
     S     xs -> foldMap go xs
 
-
+parseError :: Show a => String -> S a -> Either String b
+parseError expected s
+  = Left $ "Expected " ++ expected ++ ", but got: " ++ show s
 
 instance ToS (Result a) where
-  toS (Result i) = Param i
+  toS   (Result i) = Param i
+  fromS (Param  r) = Right $! Result r
+  fromS s          = parseError "Param" s
 
 instance ToS () where
   toS () = Nil
+  fromS Nil = Right ()
+  fromS s   = parseError "Nil" s
 
 instance (ToS a, ToS b) => ToS (a,b) where
   toS (a,b) = S [toS a, toS b]
+  fromS (S [a,b]) = (,) <$> fromS a <*> fromS b
+  fromS s = parseError "list of 2 elements" s
 
 instance (ToS a1, ToS a2, ToS a3) => ToS (a1, a2, a3) where
   toS (a1, a2, a3) = S [toS a1, toS a2, toS a3]
+  fromS (S [a1,a2,a3])
+    = (,,) <$> fromS a1 <*> fromS a2 <*> fromS a3
+  fromS s = parseError "list of 3 elements" s
 
 instance (ToS a1, ToS a2, ToS a3, ToS a4) => ToS (a1, a2, a3, a4) where
   toS (a1, a2, a3, a4) = S [toS a1, toS a2, toS a3, toS a4]
+  fromS (S [a1,a2,a3,a4])
+    = (,,,) <$> fromS a1 <*> fromS a2 <*> fromS a3 <*> fromS a4
+  fromS s = parseError "list of 4 elements" s
 
 instance (ToS a1, ToS a2, ToS a3, ToS a4, ToS a5) => ToS (a1, a2, a3, a4, a5) where
   toS (a1, a2, a3, a4, a5) = S [toS a1, toS a2, toS a3, toS a4, toS a5]
+  fromS (S [a1,a2,a3,a4,a5])
+     =  (,,,,)
+    <$> fromS a1 <*> fromS a2 <*> fromS a3 <*> fromS a4
+    <*> fromS a5
+  fromS s = parseError "list of 5 elements" s
 
 instance (ToS a1, ToS a2, ToS a3, ToS a4, ToS a5, ToS a6) => ToS (a1, a2, a3, a4, a5, a6) where
   toS (a1, a2, a3, a4, a5, a6) = S [toS a1, toS a2, toS a3, toS a4, toS a5, toS a6]
+  fromS (S [a1,a2,a3,a4,a5,a6])
+     = (,,,,,)
+    <$> fromS a1 <*> fromS a2 <*> fromS a3 <*> fromS a4
+    <*> fromS a5 <*> fromS a6
+  fromS s = parseError "list of 6 elements" s
 
 instance (ToS a1, ToS a2, ToS a3, ToS a4, ToS a5, ToS a6, ToS a7) => ToS (a1, a2, a3, a4, a5, a6, a7) where
   toS (a1, a2, a3, a4, a5, a6, a7) = S [toS a1, toS a2, toS a3, toS a4, toS a5, toS a6, toS a7]
+  fromS (S [a1,a2,a3,a4,a5,a6,a7])
+     = (,,,,,,)
+    <$> fromS a1 <*> fromS a2 <*> fromS a3 <*> fromS a4
+    <*> fromS a5 <*> fromS a6 <*> fromS a7
+  fromS s = parseError "list of 7 elements" s
 
 instance (ToS a1, ToS a2, ToS a3, ToS a4, ToS a5, ToS a6, ToS a7, ToS a8) => ToS (a1, a2, a3, a4, a5, a6, a7, a8) where
   toS (a1, a2, a3, a4, a5, a6, a7, a8) = S [toS a1, toS a2, toS a3, toS a4, toS a5, toS a6, toS a7, toS a8]
+  fromS (S [a1,a2,a3,a4,a5,a6,a7,a8])
+     = (,,,,,,,)
+    <$> fromS a1 <*> fromS a2 <*> fromS a3 <*> fromS a4
+    <*> fromS a5 <*> fromS a6 <*> fromS a7 <*> fromS a8
+  fromS s = parseError "list of 8 elements" s
 
 instance ToS a => ToS [a] where
   toS = S . fmap toS
+  fromS (S xs) = traverse fromS xs
+  fromS s      = parseError "list" s
+
 instance (ToS a) => ToS (Maybe a) where
   toS Nothing  = Nil
   toS (Just a) = toS a
+  fromS Nil = Right Nothing
+  fromS s   = Just <$> fromS s
 
 instance (ToS a, ToS b) => ToS (Either a b) where
   toS (Left  a) = S [Atom "Left",  toS a]
   toS (Right b) = S [Atom "Right", toS b]
+  fromS (S [Atom "Left",  s]) = Left  <$> fromS s
+  fromS (S [Atom "Right", s]) = Right <$> fromS s
+  fromS x                     = parseError "Left- or Right- tagged list" x
 
 
 instance ToS Bool where
   toS = \case
     True  -> Atom "True"
     False -> Atom "False"
-
+  fromS = \case
+    Atom "True"  -> Right True
+    Atom "False" -> Right False
+    x -> parseError "Expecting True/False atom" x
 
 ----------------------------------------------------------------
 -- JSON serialization
